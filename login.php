@@ -40,8 +40,8 @@ require 'PHPMailer-master/src/SMTP.php';
             <h3 class="mt-2">System Login</h3>
         </div>
 
-        <!-- Social Sign-In -->
         <div class="wizard-content">
+            <!-- Social Sign-In -->
             <div class="mb-3">
                 <!-- Google Sign-In -->
                 <button
@@ -88,42 +88,54 @@ require 'PHPMailer-master/src/SMTP.php';
 
                     if ($user = mysqli_fetch_assoc($result)) {
                         if (password_verify($password, $user["password"])) {
-                            $now          = new DateTime();
+
+                            $now = new DateTime();
+
+                            // 2FA: require every 48 hours
                             $twofaExpired = empty($user["twofa_expires"]) || new DateTime($user["twofa_expires"]) < $now;
 
                             if ($twofaExpired) {
                                 // Generate 2FA code
                                 $twofa_code = rand(100000, 999999);
-                                $expires    = $now->modify('+48 hours')->format('Y-m-d H:i:s');
+                                $expiresObj = clone $now;
+                                $expires    = $expiresObj->modify('+48 hours')->format('Y-m-d H:i:s');
 
-                                $updateSql   = "UPDATE users SET twofa_code = ?, twofa_expires = ? WHERE email = ?";
-                                $stmtUpdate  = mysqli_stmt_init($conn);
-                                mysqli_stmt_prepare($stmtUpdate, $updateSql);
-                                mysqli_stmt_bind_param($stmtUpdate, "sss", $twofa_code, $expires, $user['email']);
-                                mysqli_stmt_execute($stmtUpdate);
+                                $updateSql  = "UPDATE users SET twofa_code = ?, twofa_expires = ? WHERE id = ?";
+                                $stmtUpdate = mysqli_stmt_init($conn);
+                                if (mysqli_stmt_prepare($stmtUpdate, $updateSql)) {
+                                    mysqli_stmt_bind_param($stmtUpdate, "ssi", $twofa_code, $expires, $user['id']);
+                                    mysqli_stmt_execute($stmtUpdate);
+                                }
 
                                 // Send 2FA via email
-                                $mail = new PHPMailer(true);
-                                $mail->isSMTP();
-                                $mail->Host       = 'premium245.web-hosting.com';
-                                $mail->SMTPAuth   = true;
-                                $mail->Username   = 'admin@festival-web.com';
-                                $mail->Password   = '!g3$~8tYju*D';
-                                $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-                                $mail->Port       = 587;
+                                try {
+                                    $mail = new PHPMailer(true);
+                                    $mail->isSMTP();
+                                    $mail->Host       = 'premium245.web-hosting.com';
+                                    $mail->SMTPAuth   = true;
+                                    $mail->Username   = 'admin@festival-web.com';
+                                    $mail->Password   = '!g3$~8tYju*D';
+                                    $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+                                    $mail->Port       = 587;
 
-                                $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
-                                $mail->addAddress($user['email'], $user['full_name']);
-                                $mail->isHTML(true);
-                                $mail->Subject = "Your 2FA Login Code";
-                                $mail->Body    = "<p>Your 2FA code is: <b>$twofa_code</b></p>";
+                                    $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
+                                    $mail->addAddress($user['email'], $user['full_name']);
+                                    $mail->isHTML(true);
+                                    $mail->Subject = "Your 2FA Login Code";
+                                    $mail->Body    = "<p>Your 2FA code is: <b>$twofa_code</b></p>";
 
-                                $mail->send();
+                                    $mail->send();
+                                } catch (Exception $e) {
+                                    echo "<div class='alert alert-danger'>We couldn't send the 2FA email. Please try again later.</div>";
+                                }
 
+                                // Store temp user id for 2FA verification
                                 $_SESSION['temp_user_id'] = $user['id'];
                                 header("Location: twofa_verify.php");
                                 exit();
+
                             } else {
+                                // 2FA still valid → direct login
                                 // Get previous last_login
                                 $prevLogin = null;
                                 $getLogin  = $conn->prepare("SELECT last_login FROM users WHERE id = ?");

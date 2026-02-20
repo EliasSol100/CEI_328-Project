@@ -3,25 +3,38 @@ session_start();
 require_once "database.php";
 require_once "get_config.php";
 
-$system_title = getSystemConfig("site_title");
-$logo_path = getSystemConfig("logo_path");
-$moodle_url = getSystemConfig("moodle_url");
+$system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
+$logo_path    = getSystemConfig("logo_path") ?: "assets/images/athina-eshop-logo.png";
 
-$role = "Null";
+// --------- User / Profile handling ----------
+$role     = "guest";
 $fullName = "Guest";
 
 if (isset($_SESSION["user"])) {
-    $userId = $_SESSION["user"]["id"];
+    $userId   = $_SESSION["user"]["id"];
     $fullName = $_SESSION["user"]["full_name"] ?? 'User';
-    $role = $_SESSION["user"]["role"] ?? 'user';
+    $role     = $_SESSION["user"]["role"] ?? 'user';
 
-    $stmt = $conn->prepare("SELECT country, city, address, postcode, dob, phone FROM users WHERE id = ?");
+    // Check if profile is complete; if not, force completion
+    $stmt = $conn->prepare("
+        SELECT country, city, address, postcode, dob, phone 
+        FROM users 
+        WHERE id = ?
+    ");
     $stmt->bind_param("i", $userId);
     $stmt->execute();
     $result = $stmt->get_result();
-    $user = $result->fetch_assoc();
+    $user   = $result->fetch_assoc();
 
-    $fieldsComplete = $user && $user["country"] && $user["city"] && $user["address"] && $user["postcode"] && $user["dob"] && $user["phone"];
+    $fieldsComplete =
+        $user &&
+        $user["country"]  &&
+        $user["city"]     &&
+        $user["address"]  &&
+        $user["postcode"] &&
+        $user["dob"]      &&
+        $user["phone"];
+
     $_SESSION["user"]["profile_complete"] = $fieldsComplete;
 
     if (!$fieldsComplete) {
@@ -30,686 +43,445 @@ if (isset($_SESSION["user"])) {
     }
 
     $_SESSION['user_id'] = $userId;
-    $_SESSION['role'] = $role;
-}
-
-$hasApplications = false;
-
-if (isset($_SESSION["user"])) {
-    $userId = $_SESSION["user"]["id"];
-    $fullName = $_SESSION["user"]["full_name"] ?? 'User';
-    $role = $_SESSION["user"]["role"] ?? 'user';
-
-    $stmt = $conn->prepare("SELECT country, city, address, postcode, dob, phone FROM users WHERE id = ?");
-    $stmt->bind_param("i", $userId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $user = $result->fetch_assoc();
-
-    $fieldsComplete = $user && $user["country"] && $user["city"] && $user["address"] && $user["postcode"] && $user["dob"] && $user["phone"];
-    $_SESSION["user"]["profile_complete"] = $fieldsComplete;
-
-    if (!$fieldsComplete) {
-        header("Location: complete_profile.php");
-        exit();
-    }
-
-    $_SESSION['user_id'] = $userId;
-    $_SESSION['role'] = $role;
-
-    //Moved inside to get access to $userId
-    if ($role === 'user') {
-        $appQuery = $conn->prepare("SELECT COUNT(*) FROM applications WHERE user_id = ?");
-        $appQuery->bind_param("i", $userId);
-        $appQuery->execute();
-        $appQuery->bind_result($appCount);
-        $appQuery->fetch();
-        $hasApplications = $appCount > 0;
-        $appQuery->close();
-    }
-}
-
-$totalUsers = $totalApps = $activePeriods = 0;
-
-try {
-    $res1 = $conn->query("SELECT COUNT(*) AS total FROM users");
-    $totalUsers = $res1 ? $res1->fetch_assoc()['total'] : 0;
-
-    $res2 = $conn->query("SELECT COUNT(*) AS total FROM applications");
-    $totalApps = $res2 ? $res2->fetch_assoc()['total'] : 0;
-
-    $res3 = $conn->query("SELECT COUNT(*) AS total FROM application_periods WHERE start_date <= CURDATE() AND end_date >= CURDATE()");
-    $activePeriods = $res3 ? $res3->fetch_assoc()['total'] : 0;
-} catch (Exception $e) {
-    $totalUsers = $totalApps = $activePeriods = 0;
-}
-
-$totalApps = $pendingApps = $reviewedApps = $thisMonthApps = 0;
-
-if (in_array($role, ['hr', 'admin', 'owner'])) {
-    try {
-        $res1 = $conn->query("SELECT COUNT(*) AS total FROM applications");
-        $totalApps = $res1 ? $res1->fetch_assoc()['total'] : 0;
-
-        $res2 = $conn->query("SELECT COUNT(*) AS total FROM applications WHERE status = 'pending'");
-        $pendingApps = $res2 ? $res2->fetch_assoc()['total'] : 0;
-
-        $res3 = $conn->query("SELECT COUNT(*) AS total FROM applications WHERE status != 'pending'");
-        $reviewedApps = $res3 ? $res3->fetch_assoc()['total'] : 0;
-
-        $res4 = $conn->query("SELECT COUNT(*) AS total FROM applications WHERE MONTH(created_at) = MONTH(CURDATE()) AND YEAR(created_at) = YEAR(CURDATE())");
-        $thisMonthApps = $res4 ? $res4->fetch_assoc()['total'] : 0;
-    } catch (Exception $e) {
-        $totalApps = $pendingApps = $reviewedApps = $thisMonthApps = 0;
-    }
+    $_SESSION['role']    = $role;
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title><?= htmlspecialchars($system_title) ?></title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css">
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Code&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="indexstyle.css">
-  <link rel="stylesheet" href="darkmode.css">
-  <!-- AOS Animate on Scroll CSS -->
-  <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
+    <meta charset="UTF-8">
+    <title>Athina E-Shop</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
 
+    <!-- Bootstrap + Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
+
+    <!-- Existing styles (if you want to keep dark mode / navbar styling) -->
+    <link rel="stylesheet" href="indexstyle.css">
+    <link rel="stylesheet" href="darkmode.css">
+
+    <!-- Cute home-page specific styles -->
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background-color: #fdf7ff;
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        /* Crochet hero background using the GIF */
+        .hero-crochet-bg {
+            position: relative;
+            background: url("assets/images/crochet-bg.gif") center/cover no-repeat fixed;
+            padding: 80px 16px 100px;
+        }
+        .hero-crochet-bg::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at top left, rgba(255,255,255,0.9), rgba(255,255,255,0.75));
+            backdrop-filter: blur(3px);
+        }
+
+        .hero-inner {
+            position: relative;
+            z-index: 1;
+            max-width: 1100px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: minmax(0, 3fr) minmax(0, 2.5fr);
+            gap: 32px;
+            align-items: center;
+        }
+
+        @media (max-width: 992px) {
+            .hero-inner {
+                grid-template-columns: 1fr;
+                text-align: center;
+            }
+        }
+
+        .hero-card {
+            background: rgba(255, 255, 255, 0.96);
+            border-radius: 24px;
+            padding: 32px 28px;
+            box-shadow: 0 18px 40px rgba(0,0,0,0.12);
+        }
+
+        .hero-logo img {
+            max-height: 110px;
+            display: block;
+            margin: 0 auto 10px;
+        }
+
+        .hero-title {
+            font-size: clamp(2.2rem, 4vw, 2.8rem);
+            font-weight: 800;
+            color: #3b2a4a;
+            letter-spacing: 0.02em;
+        }
+
+        .hero-subtitle {
+            font-size: 1rem;
+            color: #6a6480;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 999px;
+            background: #ffeef8;
+            color: #b44f84;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .hero-actions .btn {
+            border-radius: 999px;
+            padding: 10px 22px;
+            font-weight: 600;
+            font-size: 0.97rem;
+        }
+
+        .btn-main {
+            background: linear-gradient(135deg, #ff7bb0, #ffb968);
+            border: none;
+            color: #fff;
+            box-shadow: 0 6px 16px rgba(255, 123, 176, 0.35);
+        }
+        .btn-main:hover {
+            filter: brightness(0.95);
+        }
+
+        .btn-outline-soft {
+            border-radius: 999px;
+            border: 1px solid #e3d9ff;
+            color: #5d4c92;
+            background: #fff;
+        }
+        .btn-outline-soft:hover {
+            background: #f7f3ff;
+            color: #43346b;
+        }
+
+        .hero-note {
+            font-size: 0.85rem;
+            color: #8a819e;
+        }
+
+        /* Right column "featured" panel */
+        .hero-feature-panel {
+            background: rgba(255, 255, 255, 0.96);
+            border-radius: 24px;
+            padding: 22px 22px 20px;
+            box-shadow: 0 14px 32px rgba(0,0,0,0.10);
+        }
+        .feature-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #584671;
+            margin-bottom: 10px;
+        }
+        .badge-soft {
+            background: #fff3f9;
+            color: #c05b8f;
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .plush-list {
+            list-style: none;
+            padding-left: 0;
+            margin-bottom: 8px;
+        }
+        .plush-list li {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+            font-size: 0.9rem;
+            color: #5d556d;
+            border-bottom: 1px dashed #f0e8ff;
+        }
+        .plush-list li:last-child {
+            border-bottom: none;
+        }
+
+        .pill-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 9px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            background: #f2f9ff;
+            color: #4373a8;
+            margin-right: 4px;
+        }
+
+        /* Sections below hero */
+        .section-soft {
+            padding: 56px 16px 40px;
+            background: #fffdfc;
+        }
+
+        .section-soft:nth-of-type(even) {
+            background: #fff8ff;
+        }
+
+        .section-title {
+            font-size: 1.6rem;
+            font-weight: 800;
+            color: #3b2a4a;
+        }
+
+        .feature-card {
+            border-radius: 18px;
+            border: 1px solid #f2e9ff;
+            background: #ffffff;
+            padding: 18px 18px 16px;
+            height: 100%;
+            box-shadow: 0 10px 24px rgba(0,0,0,0.04);
+        }
+        .feature-icon {
+            font-size: 1.5rem;
+            margin-bottom: 8px;
+        }
+        .feature-card h5 {
+            font-weight: 700;
+            font-size: 1rem;
+            color: #4a3a65;
+        }
+        .feature-card p {
+            font-size: 0.9rem;
+            color: #7b738f;
+        }
+
+        .category-pill {
+            border-radius: 999px;
+            padding: 8px 14px;
+            background: #fff;
+            border: 1px dashed #f1d6ff;
+            font-size: 0.88rem;
+            color: #6a5684;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin: 4px;
+        }
+
+        .footer-mini {
+            padding: 20px 0 26px;
+            font-size: 0.82rem;
+            color: #8f879e;
+        }
+    </style>
 </head>
-
 <body>
-<div id="scrollProgress" style="height: 4px; background: #4da3ff; width: 0%; position: fixed; top: 0; left: 0; z-index: 9999;"></div>
 
-<!-- Navbar -->
-<?php include "navbar.php"; ?>
-
-
-<!-- Hero Section -->
-<div class="hero-section">
-
-  <div class="container">
-    
-    <h1>Welcome to the Special Scientists System</h1>
-    <p class="lead mb-2">A centralized portal for:</p>
-    <p id="typedText" class="fs-4 typed-cursor"></p>
-
-
-
-    <?php if ($role === 'user'): ?>
-      <div class="mt-4 text-center">
-        <p class="fs-5">Start or manage your application process for Special Scientist positions:</p>
-        <div class="d-flex justify-content-center gap-3 flex-wrap">
-          <a href="application_form.php" class="btn btn-success btn-shiny px-4 py-2 fs-5">New Application</a>
-          <a href="my_applications.php" class="btn btn-primary btn-shiny px-4 py-2 fs-5">View My Applications</a>
-        </div>
-      </div>
-    <?php elseif (!isset($_SESSION['user'])): ?>
-      <div class="d-flex justify-content-center mt-4">
-      <div class="alert alert-info text-center" role="alert" style="max-width: 500px;">
-        Please <a href="login.php" class="btn btn-info px-4 py-2 fw-bold">Login</a> to apply for a Special Scientist position.
-      </div>
-      </div>
-    <?php endif; ?>
-  </div>
-</div>
-
-<div style="overflow:hidden;line-height:0;">
-  <svg viewBox="0 0 500 150" preserveAspectRatio="none" style="height: 60px; width: 100%;">
-    <path d="M-0.27,104.71 C149.99,150.00 349.99,54.28 500.84,104.71 L500.00,0.00 L0.00,0.00 Z" style="stroke: none; fill: #ffffff;"></path>
-  </svg>
-</div>
-
-
-<!-- Main Content -->
-<div class="container content-section py-5 border-bottom">
-  <div class="row">
-    
-    <div class="col-md-4" data-aos="fade-up" data-aos-delay="100">
-      <h3>Candidate Services</h3>
-      <p>Support for Prospective Special Scientists - Explore open calls for special scientist positions, submit your applications, and monitor your application progress with full transparency and accountability.</p>
-    </div>
-    <div class="col-md-4" data-aos="fade-up" data-aos-delay="200">
-      <h3>Active Engagement</h3>
-      <p>Tools for Enrolled Special Scientists - Access your academic responsibilities, connect with course environments via Moodle, and maintain your profile as part of the university's extended academic team.</p>
-    </div>
-    <div class="col-md-4" data-aos="fade-up" data-aos-delay="300">
-      <h3>Administrative Management</h3>
-      <p>Efficient Oversight for HR and Academic Coordinators - Streamline the recruitment, enrollment, and reporting processes for special scientists — with data-driven tools and real-time access to all institutional workflows.</p>
-    </div>
-  </div>
-</div>
-
-
-<!-- FAQ Section -->
-<div class="container text-center py-5 border-bottom" data-aos="fade-up">
-<h2 class="section-heading">Frequently Asked Questions</h2>
-  <div class="accordion" id="faqAccordion">
-    <div class="accordion-item">
-      <h2 class="accordion-header"><button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#q1">Who can apply?</button></h2>
-      <div id="q1" class="accordion-collapse collapse show"><div class="accordion-body">Anyone with academic or research qualifications relevant to the posted positions.</div></div>
-    </div>
-    <div class="accordion-item">
-      <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#q2">What documents are required?</button></h2>
-      <div id="q2" class="accordion-collapse collapse"><div class="accordion-body">A CV, degree certificates, ID, and declaration of consent.</div></div>
-    </div>
-  </div>
-</div>
-
-
-
-<!-- Application Period Timeline with Filters -->
-<div class="container py-5 border-bottom" data-aos="fade-up">
-  <h2 class="section-heading text-center mb-4">Application Periods Timeline</h2>
-
-  <!-- Filter Buttons -->
-  <div class="d-flex justify-content-center gap-3 mb-4">
-    <button class="btn btn-outline-success active" data-filter="open">
-      🟢 Open
-    </button>
-    <button class="btn btn-outline-info" data-filter="upcoming">
-      🔵 Upcoming
-    </button>
-    <button class="btn btn-outline-secondary" data-filter="closed">
-      ⚫ Closed
-    </button>
-    <button class="btn btn-outline-dark" data-filter="all">
-      🔄 All
-    </button>
-  </div>
-
-  <!-- Timeline Cards -->
-  <div id="periodTimeline" class="d-flex overflow-auto gap-3 px-2 flex-wrap justify-content-center">
-    <?php
-      $now = date("Y-m-d");
-      $periods = $conn->query("SELECT name, start_date, end_date FROM application_periods");
-      $all = [];
-
-      while ($row = $periods->fetch_assoc()) {
-          $start = $row['start_date'];
-          $end = $row['end_date'];
-          $status = "closed";
-
-          if ($start <= $now && $end >= $now) $status = "open";
-          elseif ($start > $now) $status = "upcoming";
-
-          $all[] = array_merge($row, ["status" => $status]);
-      }
-
-      // Sort each group by start_date
-      $open = array_filter($all, fn($p) => $p['status'] === 'open');
-      $upcoming = array_filter($all, fn($p) => $p['status'] === 'upcoming');
-      $closed = array_filter($all, fn($p) => $p['status'] === 'closed');
-
-      usort($open, fn($a, $b) => strtotime($a['start_date']) - strtotime($b['start_date']));
-      usort($upcoming, fn($a, $b) => strtotime($a['start_date']) - strtotime($b['start_date']));
-      usort($closed, fn($a, $b) => strtotime($b['start_date']) - strtotime($a['start_date'])); // most recent closed first
-
-      $sorted = array_merge($open, $upcoming, $closed);
-
-
-      foreach ($sorted as $row):
-        $start = date("M j, Y", strtotime($row['start_date']));
-        $end = date("M j, Y", strtotime($row['end_date']));
-        $status = $row['status'];
-        $badgeClass = $status === "open" ? "success" : ($status === "upcoming" ? "info" : "secondary");
-    ?>
-    <div class="card shadow-sm flex-shrink-0 timeline-card" data-status="<?= $status ?>" style="min-width: 220px;">
-      <div class="card-body">
-        <h5 class="card-title"><?= htmlspecialchars($row['name']) ?></h5>
-        <p class="card-text small"><?= $start ?> – <?= $end ?></p>
-        <span class="badge bg-<?= $badgeClass ?> text-capitalize"><?= $status ?></span>
-      </div>
-    </div>
-    <?php endforeach; ?>
-  </div>
-
-  <p class="text-muted mt-3 text-center small">Use the buttons to filter the periods you're interested in.</p>
-</div>
-
-<script>
-  document.addEventListener("DOMContentLoaded", () => {
-    const buttons = document.querySelectorAll("[data-filter]");
-    const cards = document.querySelectorAll(".timeline-card");
-
-    buttons.forEach(btn => {
-      btn.addEventListener("click", () => {
-        const filter = btn.getAttribute("data-filter");
-
-        // Update button styling
-        buttons.forEach(b => b.classList.remove("active"));
-        btn.classList.add("active");
-
-        // Filter cards
-        cards.forEach(card => {
-          const status = card.getAttribute("data-status");
-          if (filter === "all" || status === filter) {
-            card.style.display = "block";
-          } else {
-            card.style.display = "none";
-          }
-        });
-      });
-    });
-  });
-</script>
-
-
-
-
-<!-- Stats For Staff Section -->
-<?php if (in_array($role, ['hr', 'admin', 'owner'])): ?>
-<div class="container text-center py-5" data-aos="fade-up">
-  <h2 class="section-heading">Recruitment Overview</h2>
-  <div class="row justify-content-center g-4">
-    <div class="col-md-3">
-      <div class="dashboard-box">
-        <h2 class="fw-bold text-primary"><?= $totalApps ?></h2>
-        <p>Total Applications</p>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="dashboard-box">
-        <h2 class="fw-bold text-warning"><?= $pendingApps ?></h2>
-        <p>Pending Review</p>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="dashboard-box">
-        <h2 class="fw-bold text-success"><?= $reviewedApps ?></h2>
-        <p>Reviewed Applications</p>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="dashboard-box">
-        <h2 class="fw-bold text-info"><?= $thisMonthApps ?></h2>
-        <p>This Month</p>
-      </div>
-    </div>
-  </div>
-</div>
-<?php endif; ?>
-
-<!-- Mail Help -->
-<a href="mailto:administration@cut.ac.cy" class="position-fixed bottom-0 end-0 m-4 btn btn-info shadow-lg rounded-pill">
-  <i class="bi bi-envelope-fill me-1"></i> Ask a Question
-</a>
-
-<!-- Feedback Floating Bubble -->
-<div id="feedbackBubble" class="feedback-bubble" title="Send Feedback">
-  <i class="bi bi-chat-dots-fill fs-4"></i>
-</div>
-
-<?php if (in_array($_SESSION['user']['role'] ?? '', ['admin', 'owner'])): ?>
-<div id="adminFeedbackPanel" class="feedback-panel shadow" style="max-height: 400px; overflow-y: auto; display: none;">
-  <div class="d-flex justify-content-between align-items-center mb-2">
-    <span class="fw-bold"><i class="bi bi-list-check me-1"></i>All Feedback</span>
-    <button class="btn-close btn-sm" onclick="toggleFeedbackPanel()"></button>
-  </div>
-  <div id="feedbackList">Loading...</div>
-</div>
-<?php endif; ?>
-
-
-<!-- Feedback Slide-in Box -->
-<div id="feedbackPanel" class="feedback-panel shadow">
-  <div class="d-flex justify-content-between align-items-center mb-2">
-    <button class="btn-close btn-sm" onclick="toggleFeedbackPanel()"></button>
-  </div>
-  <form id="feedbackForm" action="send_feedback.php" method="post" onsubmit="return confirmSendFeedback();">
-    <div class="form-group mb-2">
-      <textarea id="feedbackInput" class="form-control feedback-textarea" name="feedback" rows="2" required placeholder="Type your message..."></textarea>
-    </div>
-    <button id="sendFeedbackBtn" type="button" class="btn btn-primary">Send Feedback</button>
-
-  </form>
-</div>
-
-<!-- Guest Feedback Notice -->
-<div id="guestFeedbackPanel" class="feedback-panel shadow" style="display: none;">
-  <div class="d-flex justify-content-between align-items-center mb-2">
-    <span class="fw-bold"><i class="bi bi-person-lock me-1"></i>Login Required</span>
-    <button class="btn-close btn-sm" onclick="toggleFeedbackPanel()"></button>
-  </div>
-  <p>You need to log in to send feedback.</p>
-  <a href="login.php" class="btn btn-primary w-100 mt-2">Login Now</a>
-</div>
-
-<!-- Next Session Open -->
 <?php
-$nextPeriod = $conn->query("SELECT name, start_date FROM application_periods WHERE start_date > CURDATE() ORDER BY start_date ASC LIMIT 1");
-$periodInfo = $nextPeriod->fetch_assoc();
+// If you still have a navbar you want to keep, leave this include.
+// Otherwise you can remove it later when you redesign the navigation.
+if (file_exists("navbar.php")) {
+    include "navbar.php";
+}
 ?>
-<?php if ($periodInfo): ?>
-<div class="alert alert-info text-center mt-4 w-75 mx-auto shadow-sm">
-  🎯 Next Call: <strong><?= htmlspecialchars($periodInfo['name']) ?></strong> opens on <strong><?= date("F j, Y", strtotime($periodInfo['start_date'])) ?></strong>
-</div>
-<?php endif; ?>
 
+<!-- HERO / WELCOME -->
+<section class="hero-crochet-bg">
+    <div class="hero-inner">
 
-<!-- Footer -->
-<footer class="footer mt-auto py-4 bg-dark text-white">
-  <div class="container text-center">
-    <div class="row mb-4">
-      <div class="col-md-3 mb-3">
-        <img src="Tepak-logo-white.png" alt="University Logo" class="footer-logo">
-      </div>
-      
-      <div class="col-md-3 mb-3 text-start">
-        <h5>Quick Links</h5>
-        <ul class="list-unstyled">
-          <li><a href="https://www.cut.ac.cy" class="text-white text-decoration-none" target="_blank">University Website</a></li>
-          <li>
-  <a href="https://www.cut.ac.cy/university/about/" class="text-white text-decoration-none" target="_blank">
-    <?= $_SESSION['lang'] === 'el' ? 'Σχετικά' : 'About' ?>
-  </a>
-</li>
-          <li><a href="https://www.cut.ac.cy/students/practical-information/enrolment/academic-calendar/?languageId=1" class="text-white text-decoration-none" target="_blank">Academic Calendar</a></li>
-        </ul>
-      </div>
-      <div class="col-md-3 mb-3 text-start">
-        <h5>Resources</h5>
-        <ul class="list-unstyled">
-          <li><a href="<?= htmlspecialchars($moodle_url) ?>" class="text-white text-decoration-none" target="_blank">Moodle</a></li>
-          <li>
-  <a href="https://www.cut.ac.cy/university/administration/administrative-services/ist/support/" class="text-white text-decoration-none" target="_blank">
-    <?= $_SESSION['lang'] === 'el' ? 'Υποστήριξη IT' : 'IT Support' ?>
-  </a>
-</li>
-        </ul>
-      </div>
-      <div class="col-md-3 mb-3 text-start">
-  <h5>Contact Info</h5>
-  <p class="mb-2">
-    <i class="bi bi-geo-alt-fill me-1"></i>
-    <a href="https://www.google.com/maps/place/Cyprus+University+of+Technology/@34.6757317,33.0436313,17z" target="_blank" class="text-white text-decoration-none">
-      Cyprus University of Technology, Limassol
-    </a>
-  </p>
-  <p class="mb-2"><i class="bi bi-telephone-fill me-1"></i> +357 25 002500</p>
-  <p><i class="bi bi-envelope-fill me-1"></i> info@cut.ac.cy</p>
-</div>
+        <!-- LEFT: greeting + actions -->
+        <div class="hero-card">
+            <div class="hero-logo mb-2 text-center">
+                <img src="<?= htmlspecialchars($logo_path) ?>" alt="Athina E-Shop Logo">
+            </div>
 
-    <div class="text-center small text-white-50">
-      &copy; 2025 Cyprus University of Technology. All rights reserved.
+            <div class="text-center mb-3">
+                <div class="hero-badge">
+                    🧶 Handmade crochet plushies · Made with love
+                </div>
+            </div>
+
+            <h1 class="hero-title text-center mb-2">
+                Welcome<?= $role !== 'guest' ? ', ' . htmlspecialchars($fullName) : '' ?>!
+            </h1>
+            <p class="hero-subtitle text-center mb-4">
+                Discover uniquely handmade crochet plushies, amigurumi friends and cozy gifts —
+                all crafted by Athina with lots of care and a little bit of magic. ✨
+            </p>
+
+            <div class="hero-actions d-flex flex-wrap justify-content-center gap-2 mb-3">
+                <?php if ($role === 'guest'): ?>
+                    <a href="products.php" class="btn btn-main">
+                        Browse Plushies
+                    </a>
+                    <a href="login.php" class="btn btn-outline-soft">
+                        Login / Register
+                    </a>
+                <?php elseif (in_array($role, ['admin', 'owner'])): ?>
+                    <a href="products.php" class="btn btn-main">
+                        Shop New Arrivals
+                    </a>
+                    <a href="orders.php" class="btn btn-outline-soft">
+                        View Orders
+                    </a>
+                    <a href="admin_dashboard.php" class="btn btn-outline-soft">
+                        Admin Dashboard
+                    </a>
+                <?php else: ?>
+                    <a href="products.php" class="btn btn-main">
+                        Shop New Arrivals
+                    </a>
+                    <a href="orders.php" class="btn btn-outline-soft">
+                        My Orders
+                    </a>
+                    <a href="wishlist.php" class="btn btn-outline-soft">
+                        My Wishlist
+                    </a>
+                <?php endif; ?>
+            </div>
+
+            <p class="hero-note text-center">
+                Secure checkout · Made in Cyprus · Worldwide-ready pieces 🐢🐰🐸
+            </p>
+        </div>
+
+        <!-- RIGHT: cute "featured" info panel -->
+        <aside class="hero-feature-panel">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <span class="feature-title">Featured plushie families</span>
+                <span class="badge-soft">
+                    New drops weekly
+                </span>
+            </div>
+
+            <ul class="plush-list mb-2">
+                <li>
+                    <span>🐰</span>
+                    <div>
+                        <strong>Bunny Hugs Collection</strong><br>
+                        Soft pastel rabbits with tiny hearts in their paws.
+                    </div>
+                </li>
+                <li>
+                    <span>🐢</span>
+                    <div>
+                        <strong>Ocean Friends</strong><br>
+                        Turtles, whales &amp; starfish inspired by Mediterranean seas.
+                    </div>
+                </li>
+                <li>
+                    <span>🐸</span>
+                    <div>
+                        <strong>Froggy Cozy Crew</strong><br>
+                        Frogs wrapped in yarn &amp; cute little scarves.
+                    </div>
+                </li>
+            </ul>
+
+            <div class="mt-2 mb-1">
+                <span class="pill-tag">
+                    <i class="bi bi-shield-check"></i> Safe yarns
+                </span>
+                <span class="pill-tag">
+                    <i class="bi bi-box-seam"></i> Gift-ready wrapping
+                </span>
+                <span class="pill-tag">
+                    <i class="bi bi-heart-fill"></i> Handmade with love
+                </span>
+            </div>
+
+            <?php if ($role === 'guest'): ?>
+                <p class="mt-3 mb-0" style="font-size: 0.8rem; color:#8a819e;">
+                    Create a free account to track your orders, save your favourite plushies,
+                    and get early access to limited drops. 💌
+                </p>
+            <?php else: ?>
+                <p class="mt-3 mb-0" style="font-size: 0.8rem; color:#8a819e;">
+                    Thanks for supporting small handmade creations. You can view your saved
+                    favourites and orders anytime from your profile.
+                </p>
+            <?php endif; ?>
+        </aside>
+
     </div>
-  </div>
+</section>
+
+<!-- WHY SECTION -->
+<section class="section-soft">
+    <div class="container">
+        <div class="text-center mb-4">
+            <h2 class="section-title">Why you’ll love Creations by Athina</h2>
+            <p style="color:#7b738f; max-width:600px; margin:6px auto 0;">
+                Every plushie is designed, crocheted and finished by hand — no mass-production,
+                just cozy little friends that feel special when you hold them.
+            </p>
+        </div>
+
+        <div class="row g-4">
+            <div class="col-md-4">
+                <div class="feature-card text-center h-100">
+                    <div class="feature-icon">🧵</div>
+                    <h5>Handmade from start to finish</h5>
+                    <p>Each plushie is crocheted stitch by stitch, checked for quality and finished
+                       with tiny details that make it unique.</p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="feature-card text-center h-100">
+                    <div class="feature-icon">🎁</div>
+                    <h5>Perfect for gifts</h5>
+                    <p>Lovely as baby shower presents, birthday surprises or “just because”
+                       treats for someone special (including yourself).</p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="feature-card text-center h-100">
+                    <div class="feature-icon">🌈</div>
+                    <h5>Custom colours &amp; themes</h5>
+                    <p>Message Athina for custom colours, characters or sets inspired by
+                       your favourite aesthetics and fandoms.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- CATEGORIES PREVIEW -->
+<section class="section-soft">
+    <div class="container text-center">
+        <h2 class="section-title mb-3">Browse by vibe</h2>
+        <p style="color:#7b738f; max-width:520px; margin:0 auto 18px;">
+            Start exploring the shop by category. You can always refine things later when we add filters and search.
+        </p>
+
+        <div class="mb-2">
+            <span class="category-pill">🍼 Baby-friendly plushies</span>
+            <span class="category-pill">💖 Hearts &amp; Valentines</span>
+            <span class="category-pill">🌊 Sea creatures</span>
+            <span class="category-pill">🌙 Cozy bedtime buddies</span>
+            <span class="category-pill">🎄 Seasonal &amp; holidays</span>
+        </div>
+
+        <div class="mt-3">
+            <a href="products.php" class="btn btn-main">
+                View All Products
+            </a>
+        </div>
+    </div>
+</section>
+
+<footer class="footer-mini text-center">
+    &copy; <?= date('Y') ?> Athina E-Shop &middot; Handmade crochet plushies from Cyprus with love.
 </footer>
 
-<!-- Shared Confirmation Modal -->
-<div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content border-0 rounded-3">
-      <div class="modal-header">
-        <h5 class="modal-title">Please Confirm</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body" id="confirmModalBody">Are you sure?</div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-danger" id="confirmModalYes">Yes, Confirm</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Scripts -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script>
-  const toggle = document.getElementById('darkModeToggle');
-  const body = document.body;
-
-  const savedMode = localStorage.getItem('dark-mode');
-  if (savedMode === 'true') {
-    body.classList.add('dark-mode');
-    toggle.checked = true;
-  }
-
-  toggle.addEventListener('change', () => {
-    body.classList.toggle('dark-mode');
-    localStorage.setItem('dark-mode', body.classList.contains('dark-mode'));
-  });
-
-  window.addEventListener("pageshow", function (event) {
-    if (event.persisted || (window.performance && window.performance.getEntriesByType("navigation")[0].type === "back_forward")) {
-      window.location.reload();
-    }
-  });
-</script>
-<!-- AOS Animate on Scroll JS -->
-<script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
-<script>AOS.init();</script>
-
-<script>
-  window.onscroll = function () {
-    const scrollTop = window.scrollY || document.documentElement.scrollTop;
-    const docHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight;
-    const scrollPercent = (scrollTop / docHeight) * 100;
-    document.getElementById("scrollProgress").style.width = scrollPercent + "%";
-  };
-</script>
-<script>
-    document.addEventListener("DOMContentLoaded", () => {
-    const phrases = <?= json_encode(
-    $_SESSION['lang'] === 'el'
-      ? [
-          "Αίτηση για θέσεις έρευνας.",
-          "Διαχείριση του ακαδημαϊκού σας προφίλ.",
-          "Παρακολούθηση της προόδου της αίτησής σας."
-        ]
-      : [
-          "Applying to research positions.",
-          "Managing your academic profile.",
-          "Tracking your application progress."
-        ]
-  ); ?>;
-
-    const el = document.getElementById("typedText");
-    let i = 0;
-
-    const typePhrase = async (text) => {
-      for (let j = 0; j <= text.length; j++) {
-        el.textContent = text.substring(0, j);
-        await new Promise(res => setTimeout(res, 60));
-      }
-    };
-
-    const erasePhrase = async (text) => {
-      for (let j = text.length; j >= 0; j--) {
-        el.textContent = text.substring(0, j);
-        await new Promise(res => setTimeout(res, 30));
-      }
-    };
-
-    const loop = async () => {
-      while (true) {
-        const phrase = phrases[i];
-        el.style.opacity = 1;
-        await typePhrase(phrase);
-        await new Promise(res => setTimeout(res, 1500));
-        await erasePhrase(phrase);
-        el.style.opacity = 0.4;
-        await new Promise(res => setTimeout(res, 300));
-        i = (i + 1) % phrases.length;
-      }
-    };
-
-    loop();
-  });
-</script>
-<script>
-document.addEventListener("DOMContentLoaded", () => {
-
-  // Load feedback list
-  function loadFeedbacks() {
-    fetch("get_feedback_list.php")
-      .then(res => res.text())
-      .then(html => {
-        document.getElementById("feedbackList").innerHTML = html;
-      });
-  }
-
-  // Delete feedback using event delegation
-  document.body.addEventListener("click", (e) => {
-    if (e.target.classList.contains("delete-feedback-btn")) {
-      e.preventDefault();
-      const id = e.target.getAttribute("data-id");
-      
-      // Check if ID is present
-      if (!id) {
-        alert("Feedback ID missing!");
-        return;
-      }
-
-      // Show confirmation modal
-      showConfirmModal("Delete this feedback?", () => {
-        fetch("delete_feedback.php", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded"
-          },
-          body: "id=" + encodeURIComponent(id)
-        })
-        .then(res => {
-          if (res.ok){
-            loadFeedbacks();
-            showNotification("Feedback deleted!");
-          } 
-          else alert("Failed to delete feedback. Status: " + res.status);
-        })
-        .catch(err => {
-          console.error("Fetch error:", err);
-          alert("An error occurred: " + err.message);
-        });
-      });
-    }
-
-    // Clear all feedback button
-    if (e.target.id === "clearAllBtn") {
-      showConfirmModal("Delete ALL feedback?", () => {
-        fetch("clear_feedback.php", { method: "POST" })
-          .then(res => {
-            if (res.ok){
-              loadFeedbacks();
-              showNotification("All feedback cleared!");
-            }
-            else alert("Failed to clear feedback.");
-          });
-      });
-      
-    }
-  });
-
-  // Feedback panel toggle
-  document.getElementById('feedbackBubble')?.addEventListener('click', () => {
-    const role = "<?= $_SESSION['user']['role'] ?? '' ?>";
-    const guest = "<?= isset($_SESSION['user']) ? '0' : '1' ?>";
-
-    const adminPanel = document.getElementById("adminFeedbackPanel");
-    const userPanel = document.getElementById("feedbackPanel");
-    const guestPanel = document.getElementById("guestFeedbackPanel");
-
-    // Hide all first
-    [adminPanel, userPanel, guestPanel].forEach(p => {
-      if (p) p.style.display = 'none';
-    });
-
-    // Show the correct one
-    if (guest === '1') {
-      guestPanel.style.display = 'block';
-    } else if (role === 'admin' || role === 'owner') {
-      adminPanel.style.display = 'block';
-      loadFeedbacks();
-    } else {
-      userPanel.style.display = 'block';
-    }
-  });
-
-  // Submit feedback (already working, unchanged)
-  document.getElementById("sendFeedbackBtn")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    const text = document.getElementById("feedbackInput")?.value.trim();
-    if (!text) return;
-
-    showConfirmModal("Submit this feedback?", () => {
-      fetch("send_feedback.php", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "feedback=" + encodeURIComponent(text)
-      }).then(() => {
-        document.getElementById("feedbackInput").value = "";
-        showNotification("Feedback sent!");
-      });
-    });
-
-
-  });
-
-  // Confirmation modal logic (already working)
-  let confirmCallback = null;
-  document.getElementById('confirmModalYes').addEventListener('click', () => {
-    if (typeof confirmCallback === 'function') {
-      confirmCallback();
-      confirmCallback = null;
-    }
-    bootstrap.Modal.getInstance(document.getElementById('confirmModal')).hide();
-  });
-
-  function showConfirmModal(message, onConfirm) {
-    document.getElementById('confirmModalBody').textContent = message;
-    const modal = new bootstrap.Modal(document.getElementById('confirmModal'));
-    modal.show();
-    confirmCallback = onConfirm;
-  }
-
-});
-</script>
-<script>
-document.addEventListener("DOMContentLoaded", () => {
-  const notif = document.getElementById("feedbackNotification");
-  const role = "<?= $_SESSION['user']['role'] ?? '' ?>";
-  const bubble = document.getElementById("feedbackBubble");
-  const adminPanel = document.getElementById("adminFeedbackPanel");
-  const userPanel = document.getElementById("feedbackPanel");
-  const modal = document.getElementById("confirmModal");
-
-  const panel = (role === "admin" || role === "owner") ? adminPanel : userPanel;
-
-  // Show toast
-  window.showNotification = (msg) => {
-    notif.textContent = msg;
-    notif.classList.add("show");
-    setTimeout(() => notif.classList.remove("show"), 3000);
-  };
-
-
-  // "X" close button
-  document.querySelectorAll(".feedback-panel .btn-close").forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      e.target.closest(".feedback-panel").style.display = "none";
-    });
-  });
-
-  // Close if clicked outside
-  document.addEventListener("click", (e) => {
-    if (modal.classList.contains("show") || modal.contains(e.target)) return;
-    if (!bubble.contains(e.target) && !panel.contains(e.target)) {
-      panel.style.display = "none";
-    }
-  });
-
-
-});
-</script>
-<div id="feedbackNotification" class="feedback-notification"></div>
-<style>
-  button img {
-    cursor: pointer;
-  }
-</style>
 </body>
 </html>
