@@ -70,18 +70,14 @@ if (isset($_SESSION["user"])) {
             margin: 0;
         }
 
-        /* Crochet hero background using the GIF */
+        /* Hero background using the crochet market illustration instead of the GIF */
         .hero-crochet-bg {
             position: relative;
-            background: url("assets/images/crochet-bg.gif") center/cover no-repeat fixed;
+            background: url("assets/images/athina-hero-illustration.jpg") center/cover no-repeat fixed;
             padding: 80px 16px 100px;
         }
         .hero-crochet-bg::before {
-            content: "";
-            position: absolute;
-            inset: 0;
-            background: radial-gradient(circle at top left, rgba(255,255,255,0.9), rgba(255,255,255,0.75));
-            backdrop-filter: blur(3px);
+            content: none;
         }
 
         .hero-inner {
@@ -286,8 +282,6 @@ if (isset($_SESSION["user"])) {
 <body>
 
 <?php
-// If you still have a navbar you want to keep, leave this include.
-// Otherwise you can remove it later when you redesign the navigation.
 if (file_exists("navbar.php")) {
     include "navbar.php";
 }
@@ -313,7 +307,7 @@ if (file_exists("navbar.php")) {
                 Welcome<?= $role !== 'guest' ? ', ' . htmlspecialchars($fullName) : '' ?>!
             </h1>
             <p class="hero-subtitle text-center mb-4">
-                Discover uniquely handmade crochet plushies, amigurumi friends and cozy gifts —
+                Discover uniquely handmade crochet plushies, amigurumi friends and cozy gifts -
                 all crafted by Athina with lots of care and a little bit of magic. ✨
             </p>
 
