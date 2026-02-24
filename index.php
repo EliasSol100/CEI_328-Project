@@ -26,6 +26,8 @@ if (isset($_SESSION["user"])) {
         SELECT country, city, address, postcode, dob, phone 
         FROM users 
         WHERE id = ?
+
+        // tapakis
     ");
     $stmt->bind_param("i", $userId);
     $stmt->execute();
