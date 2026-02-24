@@ -16,7 +16,7 @@ session_start();
         <h3 class="mb-3">Page under setup</h3>
         <p class="text-muted mb-4">This page is not in the moved project structure yet.</p>
         <a class="btn btn-primary" href="index.php">Back to Home</a>
-        <a class="btn btn-outline-secondary" href="authentication/login.php">Login</a>
+        <a class="btn btn-outline-secondary" href="../authentication/login.php">Login</a>
       </div>
     </div>
   </div>
