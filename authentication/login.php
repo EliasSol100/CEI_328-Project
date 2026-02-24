@@ -1,7 +1,7 @@
-<?php
+﻿<?php
 session_start();
 if (isset($_SESSION["user"])) {
-    header("Location: index.php");
+    header("Location: ../index.php");
     exit();
 }
 
@@ -10,9 +10,9 @@ require_once "database.php";
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
-require 'PHPMailer-master/src/Exception.php';
-require 'PHPMailer-master/src/PHPMailer.php';
-require 'PHPMailer-master/src/SMTP.php';
+require '../PHPMailer-master/src/Exception.php';
+require '../PHPMailer-master/src/PHPMailer.php';
+require '../PHPMailer-master/src/SMTP.php';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -22,7 +22,7 @@ require 'PHPMailer-master/src/SMTP.php';
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="assets/styling/style.css">
 </head>
 
 <body class="registration_page">
@@ -135,7 +135,7 @@ require 'PHPMailer-master/src/SMTP.php';
                                 exit();
 
                             } else {
-                                // 2FA still valid → direct login
+                                // 2FA still valid â†’ direct login
                                 // Get previous last_login
                                 $prevLogin = null;
                                 $getLogin  = $conn->prepare("SELECT last_login FROM users WHERE id = ?");
@@ -162,7 +162,7 @@ require 'PHPMailer-master/src/SMTP.php';
                                 $_SESSION['user_id'] = $user['id'];
                                 $_SESSION['role']    = $user['role'];
 
-                                header("Location: index.php");
+                                header("Location: ../index.php");
                                 exit();
                             }
                         } else {
@@ -220,7 +220,7 @@ require 'PHPMailer-master/src/SMTP.php';
         document.getElementById('google-signin-btn').addEventListener('click', function () {
             const params = new URLSearchParams({
                 client_id: '901502356414-324b839ks2vas27hoq8hq0448qa6a0oj.apps.googleusercontent.com',
-                redirect_uri: 'http://localhost/athina-eshop/google_callback.php',
+                redirect_uri: 'http://localhost/ATHINA-ESHOP/authentication/google_callback.php',
                 response_type: 'code',
                 scope: 'email profile',
                 access_type: 'online',
@@ -236,7 +236,7 @@ require 'PHPMailer-master/src/SMTP.php';
         document.getElementById('facebook-signin-btn').addEventListener('click', function () {
             const params = new URLSearchParams({
                 client_id: '924345056652857',
-                redirect_uri: 'http://localhost/athina-eshop/facebook_callback.php',
+                redirect_uri: 'http://localhost/ATHINA-ESHOP/authentication/facebook_callback.php',
                 response_type: 'code',
                 // scope can be added when fully configured
                 // scope: 'email,public_profile',

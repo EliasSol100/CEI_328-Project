@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 session_start();
 require_once "database.php";
 
@@ -67,7 +67,7 @@ if (isset($_POST["verify"])) {
             // Clean up temp session flags
             unset($_SESSION['temp_user_id']);
 
-            header("Location: index.php");
+            header("Location: ../index.php");
             exit();
         } else {
             $error = "Invalid or expired code.";
@@ -89,7 +89,7 @@ if (isset($_POST["verify"])) {
         href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css"
         rel="stylesheet"
     >
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="assets/styling/style.css">
 </head>
 <body class="registration_page">
 

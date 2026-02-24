@@ -1,10 +1,16 @@
 <?php
 session_start();
-require_once "database.php";
-require_once "get_config.php";
+require_once "authentication/database.php";
+require_once "authentication/get_config.php";
 
 $system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
-$logo_path    = getSystemConfig("logo_path") ?: "assets/images/athina-eshop-logo.png";
+$logo_path    = getSystemConfig("logo_path") ?: "authentication/assets/images/athina-eshop-logo.png";
+if (!file_exists($logo_path) && file_exists("authentication/" . $logo_path)) {
+    $logo_path = "authentication/" . $logo_path;
+}
+if (!file_exists($logo_path)) {
+    $logo_path = "authentication/assets/images/athina-eshop-logo.png";
+}
 
 // --------- User / Profile handling ----------
 $role     = "guest";
@@ -38,7 +44,7 @@ if (isset($_SESSION["user"])) {
     $_SESSION["user"]["profile_complete"] = $fieldsComplete;
 
     if (!$fieldsComplete) {
-        header("Location: complete_profile.php");
+        header("Location: authentication/complete_profile.php");
         exit();
     }
 
@@ -58,8 +64,7 @@ if (isset($_SESSION["user"])) {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
 
     <!-- Existing styles (if you want to keep dark mode / navbar styling) -->
-    <link rel="stylesheet" href="indexstyle.css">
-    <link rel="stylesheet" href="darkmode.css">
+    <link rel="stylesheet" href="authentication/assets/styling/style.css">
 
     <!-- Cute home-page specific styles -->
     <style>
@@ -73,7 +78,7 @@ if (isset($_SESSION["user"])) {
         /* Hero background using the crochet market illustration instead of the GIF */
         .hero-crochet-bg {
             position: relative;
-            background: url("assets/images/athina-hero-illustration.jpg") center/cover no-repeat fixed;
+            background: url("authentication/assets/images/crochet-bg.gif") center/cover no-repeat fixed;
             padding: 80px 16px 100px;
         }
         .hero-crochet-bg::before {
@@ -283,7 +288,7 @@ if (isset($_SESSION["user"])) {
 
 <?php
 if (file_exists("navbar.php")) {
-    include "navbar.php";
+    if (file_exists("authentication/navbar.php")) { include "authentication/navbar.php"; }
 }
 ?>
 
@@ -316,7 +321,7 @@ if (file_exists("navbar.php")) {
                     <a href="products.php" class="btn btn-main">
                         Browse Plushies
                     </a>
-                    <a href="login.php" class="btn btn-outline-soft">
+                    <a href="authentication/login.php" class="btn btn-outline-soft">
                         Login / Register
                     </a>
                 <?php elseif (in_array($role, ['admin', 'owner'])): ?>
@@ -479,3 +484,4 @@ if (file_exists("navbar.php")) {
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
+

@@ -1,10 +1,10 @@
-<?php
+﻿<?php
 session_start();
 require_once "database.php";
 
 // If user already logged in, redirect to index
 if (isset($_SESSION["user"])) {
-    header("Location: index.php");
+    header("Location: ../index.php");
     exit();
 }
 
@@ -36,7 +36,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
     <title>Register or Continue</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="assets/styling/style.css">
 </head>
 <body class="registration_page">
 
@@ -114,7 +114,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
     document.getElementById('google-signin-btn').addEventListener('click', function () {
         const params = new URLSearchParams({
             client_id: '901502356414-324b839ks2vas27hoq8hq0448qa6a0oj.apps.googleusercontent.com',
-            redirect_uri: 'http://localhost/athina-eshop/google_callback.php',
+            redirect_uri: 'http://localhost/ATHINA-ESHOP/authentication/google_callback.php',
             response_type: 'code',
             scope: 'email profile',
             access_type: 'online',
@@ -130,7 +130,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
     document.getElementById('facebook-signin-btn').addEventListener('click', function () {
         const params = new URLSearchParams({
             client_id: '924345056652857',
-            redirect_uri: 'http://localhost/athina-eshop/facebook_callback.php',
+            redirect_uri: 'http://localhost/ATHINA-ESHOP/authentication/facebook_callback.php',
             response_type: 'code',
             // you *can* add scope here (email,public_profile) once it's properly configured in Meta
             // scope: 'email,public_profile',

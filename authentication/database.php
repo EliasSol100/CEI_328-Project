@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 
 $hostName = "localhost";
 $dbUser = "root";
@@ -11,3 +11,4 @@ if (!$conn) {
 }
 
 ?>
+
