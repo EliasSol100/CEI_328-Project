@@ -182,7 +182,5 @@ document.addEventListener('DOMContentLoaded', () => {
         // Make sure it's visually clickable
         languageSelector.style.cursor = 'pointer';
         languageSelector.setAttribute('title', 'Click to change language');
-    } else {
-        console.error('Language selector not found!');
     }
 });

@@ -18,10 +18,6 @@ $activePage = $activePage ?? '';
 
             <div class="utility-icons">
                 <i class="fas fa-search"></i>
-                <div class="language-selector">
-                    <i class="fas fa-globe"></i>
-                    <span>EN</span>
-                </div>
                 <i class="far fa-heart"></i>
                 <i class="fas fa-shopping-cart"></i>
             </div>
