@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 session_start();
 require_once "authentication/database.php";
 require_once "authentication/get_config.php";
@@ -120,7 +120,7 @@ if (isset($_SESSION["user"])) {
                     </div>
                     <div class="product-info">
                         <h3 class="product-name" data-translate="crochetBunny">Crochet Bunny Amigurumi</h3>
-                        <p class="product-price">â‚¬28</p>
+                        <p class="product-price">€28</p>
                         <div class="product-rating">
                             <div class="stars">
                                 <i class="fas fa-star"></i>
@@ -141,7 +141,7 @@ if (isset($_SESSION["user"])) {
                     </div>
                     <div class="product-info">
                         <h3 class="product-name" data-translate="pastelBlanket">Pastel Baby Blanket</h3>
-                        <p class="product-price">â‚¬45</p>
+                        <p class="product-price">€45</p>
                         <div class="product-rating">
                             <div class="stars">
                                 <i class="fas fa-star"></i>
@@ -162,7 +162,7 @@ if (isset($_SESSION["user"])) {
                     </div>
                     <div class="product-info">
                         <h3 class="product-name" data-translate="rainbowYarn">Rainbow Yarn Set</h3>
-                        <p class="product-price">â‚¬22</p>
+                        <p class="product-price">€22</p>
                         <div class="product-rating">
                             <div class="stars">
                                 <i class="fas fa-star"></i>
@@ -183,7 +183,7 @@ if (isset($_SESSION["user"])) {
                     </div>
                     <div class="product-info">
                         <h3 class="product-name" data-translate="cushionCover">Decorative Cushion Cover</h3>
-                        <p class="product-price">â‚¬26</p>
+                        <p class="product-price">€26</p>
                         <div class="product-rating">
                             <div class="stars">
                                 <i class="fas fa-star"></i>
@@ -251,51 +251,8 @@ if (isset($_SESSION["user"])) {
         </div>
     </section>
 
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="container">
-            <div class="footer-content">
-                <div class="footer-column">
-                    <h4 class="footer-title" data-translate="aboutUs">About Us</h4>
-                    <p class="footer-text" data-translate="aboutUsText">Handmade crochet creations made with love and passion. Each piece is unique and crafted with care.</p>
-                </div>
-                <div class="footer-column">
-                    <h4 class="footer-title" data-translate="quickLinks">Quick Links</h4>
-                    <ul class="footer-links">
-                        <li><a href="#" data-translate="shopAll">Shop All</a></li>
-                        <li><a href="#" data-translate="myAccount">My Account</a></li>
-                        <li><a href="#" data-translate="shoppingCart">Shopping Cart</a></li>
-                        <li><a href="#" data-translate="about">About</a></li>
-                    </ul>
-                </div>
-                <div class="footer-column">
-                    <h4 class="footer-title" data-translate="policies">Policies</h4>
-                    <ul class="footer-links">
-                        <li><a href="#" data-translate="privacyPolicy">Privacy Policy</a></li>
-                        <li><a href="#" data-translate="shippingReturns">Shipping & Returns</a></li>
-                        <li><a href="#" data-translate="termsOfService">Terms of Service</a></li>
-                        <li><a href="#" data-translate="faq">FAQ</a></li>
-                    </ul>
-                </div>
-                <div class="footer-column">
-                    <h4 class="footer-title" data-translate="newsletter">Newsletter</h4>
-                    <p class="footer-text" data-translate="newsletterText">Subscribe to get special offers and updates!</p>
-                    <form class="newsletter-form">
-                        <input type="email" data-translate-placeholder="yourEmail" placeholder="Your email" class="newsletter-input">
-                        <button type="submit" class="newsletter-btn" data-translate="subscribe">Subscribe</button>
-                    </form>
-                </div>
-            </div>
-            <div class="footer-bottom">
-                <div class="social-icons">
-                    <a href="#" class="social-icon instagram"><i class="fab fa-instagram"></i></a>
-                    <a href="#" class="social-icon facebook"><i class="fab fa-facebook-f"></i></a>
-                    <a href="#" class="social-icon email"><i class="fas fa-envelope"></i></a>
-                </div>
-                <p class="copyright" data-translate="copyright">Â© 2024 Creations by Athina. All rights reserved.</p>
-            </div>
-        </div>
-    </footer>
+    <?php include __DIR__ . '/include/footer.php'; ?>
+
 </body>
 </html>
 
