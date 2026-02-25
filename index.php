@@ -65,37 +65,10 @@ if (isset($_SESSION["user"])) {
     <script src="authentication/assets/js/translations.js" defer></script>
 </head>
 <body>
-    <!-- Header -->
-    <header class="header">
-        <div class="container">
-            <div class="header-content">
-                <!-- Logo -->
-                <div class="logo">
-                    <div class="logo-icon">CA</div>
-                    <span class="logo-text">Creations by Athina</span>
-                </div>
-                
-                <!-- Navigation -->
-                <nav class="nav">
-                    <a href="#" class="nav-link active" data-translate="home">Home</a>
-                    <a href="#" class="nav-link" data-translate="shop">Shop</a>
-                    <a href="#" class="nav-link" data-translate="about">About</a>
-                    <a href="#" class="nav-link" data-translate="contact">Contact</a>
-                </nav>
-                
-                <!-- Utility Icons -->
-                <div class="utility-icons">
-                    <i class="fas fa-search"></i>
-                    <div class="language-selector" style="cursor: pointer;">
-                        <i class="fas fa-globe"></i>
-                        <span>EN</span>
-                    </div>
-                    <i class="far fa-heart"></i>
-                    <i class="fas fa-shopping-cart"></i>
-                </div>
-            </div>
-        </div>
-    </header>
+    <?php
+    $activePage = 'home';
+    include __DIR__ . '/include/navigation.php';
+    ?>
 
     <!-- Hero Section -->
     <section class="hero">
@@ -103,9 +76,7 @@ if (isset($_SESSION["user"])) {
         <div class="hero-content">
             <h1 class="hero-title" data-translate="heroTitle">Handmade Crochet Creations with Love</h1>
             <p class="hero-subtitle" data-translate="heroSubtitle">Discover unique, handcrafted crochet items perfect for gifts or your home.</p>
-            <button class="cta-button">
-                <span data-translate="shopNow">Shop Now</span> <i class="fas fa-arrow-right"></i>
-            </button>
+            <a href="shop.php" class="cta-button"><span data-translate="shopNow">Shop Now</span> <i class="fas fa-arrow-right"></i></a>
         </div>
     </section>
 
@@ -232,7 +203,7 @@ if (isset($_SESSION["user"])) {
     <!-- View All Products Button Section -->
     <section class="view-all-section">
         <div class="container">
-            <button class="view-all-btn" data-translate="viewAllProducts">View All Products</button>
+            <a href="shop.php" class="view-all-btn" data-translate="viewAllProducts">View All Products</a>
         </div>
     </section>
 
@@ -326,6 +297,8 @@ if (isset($_SESSION["user"])) {
     </footer>
 </body>
 </html>
+
+
 
 
 

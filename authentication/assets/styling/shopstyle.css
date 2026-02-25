@@ -1,0 +1,227 @@
+﻿.shop-page {
+    background: linear-gradient(180deg, #fff 0%, #fdf6ff 100%);
+    padding: 42px 0 70px;
+}
+
+.shop-head {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.shop-head h1 {
+    font-size: 38px;
+    color: var(--purple-dark);
+    margin-bottom: 6px;
+}
+
+.shop-head p {
+    color: var(--text-gray);
+    font-size: 16px;
+}
+
+.shop-layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 26px;
+    align-items: start;
+}
+
+.shop-filters,
+.shop-products-wrap {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.07);
+}
+
+.shop-filters {
+    padding: 20px;
+    position: sticky;
+    top: 95px;
+}
+
+.shop-filters h3 {
+    font-size: 20px;
+    color: var(--purple-dark);
+    margin-bottom: 14px;
+}
+
+.filter-group {
+    margin-bottom: 20px;
+}
+
+.filter-group h4 {
+    font-size: 14px;
+    color: var(--text-dark);
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.filter-option {
+    display: block;
+    font-size: 14px;
+    color: var(--text-gray);
+    margin-bottom: 8px;
+}
+
+.price-range-input {
+    width: 100%;
+}
+
+.price-range-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #777;
+    margin-top: 5px;
+}
+
+.chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.chip {
+    border: 1px solid #ead8ff;
+    border-radius: 999px;
+    padding: 5px 11px;
+    font-size: 12px;
+    color: #68458b;
+    background: #fcf8ff;
+}
+
+.shop-products-wrap {
+    padding: 20px;
+}
+
+.shop-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 20px;
+}
+
+.shop-product-card {
+    border: 1px solid #f1e7fa;
+    border-radius: 14px;
+    overflow: hidden;
+    transition: transform 0.25s, box-shadow 0.25s;
+    background: #fff;
+}
+
+.shop-product-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.10);
+}
+
+.shop-product-image {
+    height: 220px;
+    background-size: cover;
+    background-position: center;
+    position: relative;
+}
+
+.image-1 {
+    background-image: url('https://images.unsplash.com/photo-1581833971358-2c8b550f87b3?w=900&q=80');
+}
+
+.image-2 {
+    background-image: url('https://images.unsplash.com/photo-1616627455681-7cd0cf9f4206?w=900&q=80');
+}
+
+.image-3 {
+    background-image: url('https://images.unsplash.com/photo-1512436991641-6745cdb1723f?w=900&q=80');
+}
+
+.image-4 {
+    background-image: url('https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=900&q=80');
+}
+
+.image-5 {
+    background-image: url('https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?w=900&q=80');
+}
+
+.image-6 {
+    background-image: url('https://images.unsplash.com/photo-1582562124811-c09040d0a901?w=900&q=80');
+}
+
+.shop-fav {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.95);
+    color: var(--pink);
+}
+
+.shop-product-info {
+    padding: 14px;
+}
+
+.shop-product-name {
+    font-size: 16px;
+    margin-bottom: 4px;
+    color: var(--text-dark);
+}
+
+.shop-price-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.shop-price {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--purple-dark);
+}
+
+.shop-stock {
+    font-size: 12px;
+    border-radius: 999px;
+    padding: 3px 8px;
+    background: #dff7df;
+    color: #2c7a2c;
+}
+
+.shop-stock.out {
+    background: #ffe2e2;
+    color: #9b2b2b;
+}
+
+.shop-rating {
+    font-size: 13px;
+    color: #e2ad00;
+}
+
+.shop-review-count {
+    color: #777;
+}
+
+@media (max-width: 1024px) {
+    .shop-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .shop-filters {
+        position: static;
+    }
+
+    .shop-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    .shop-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .shop-head h1 {
+        font-size: 30px;
+    }
+}
