@@ -35,7 +35,7 @@
             </div>
             <div class="footer-bottom">
                 <div class="social-icons">
-                    <a href="#" class="social-icon instagram"><i class="fab fa-instagram"></i></a>
+                    <a href="https://www.instagram.com/creations.by.athina/" class="social-icon instagram" target="_blank" rel="noopener noreferrer"><i class="fab fa-instagram"></i></a>
                     <a href="#" class="social-icon facebook"><i class="fab fa-facebook-f"></i></a>
                     <a href="#" class="social-icon email"><i class="fas fa-envelope"></i></a>
                 </div>

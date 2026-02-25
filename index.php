@@ -68,7 +68,7 @@ if (isset($_SESSION["user"])) {
 <body>
     <?php
     $activePage = 'home';
-    include __DIR__ . '/include/navigation.php';
+    include __DIR__ . '/include/header.php';
     ?>
 
     <!-- Hero Section -->

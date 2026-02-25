@@ -11,11 +11,12 @@ session_start();
     <link rel="stylesheet" href="authentication/assets/styling/navigation.css?v=2">
     <link rel="stylesheet" href="authentication/assets/styling/shopstyle.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="authentication/assets/js/translations.js" defer></script>
 </head>
 <body>
     <?php
     $activePage = 'shop';
-    include __DIR__ . '/include/navigation.php';
+    include __DIR__ . '/include/header.php';
     ?>
 
     <main class="shop-page">
