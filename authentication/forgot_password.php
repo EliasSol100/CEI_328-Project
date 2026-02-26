@@ -1,8 +1,11 @@
 <?php
 session_start();
-require '../PHPMailer-master/src/Exception.php';
-require '../PHPMailer-master/src/PHPMailer.php';
-require '../PHPMailer-master/src/SMTP.php';
+require_once __DIR__ . "/database.php";
+
+// PHPMailer from project ROOT (one level above /authentication)
+require_once __DIR__ . "/../PHPMailer-master/src/Exception.php";
+require_once __DIR__ . "/../PHPMailer-master/src/PHPMailer.php";
+require_once __DIR__ . "/../PHPMailer-master/src/SMTP.php";
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
@@ -10,112 +13,148 @@ use PHPMailer\PHPMailer\Exception;
 $error   = "";
 $success = "";
 
+/**
+ * Helper: Build the reset link URL
+ */
+function buildResetLink(string $token): string
+{
+    // Adjust this to your local / live URL if needed
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host   = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    // Path to reset_password.php inside /authentication
+    $path   = '/athina-eshop/authentication/reset_password.php';
+
+    return "{$scheme}://{$host}{$path}?token={$token}";
+}
+
 if (isset($_POST["submit"])) {
-    $email = trim($_POST["email"]);
-    require_once "database.php";
+    $email = trim($_POST["email"] ?? "");
 
-    try {
-        // Check if the email exists in the database
-        $sql  = "SELECT * FROM users WHERE email = ?";
-        $stmt = mysqli_stmt_init($conn);
-        if (!mysqli_stmt_prepare($stmt, $sql)) {
-            throw new Exception("Something went wrong.");
-        }
-        mysqli_stmt_bind_param($stmt, "s", $email);
-        mysqli_stmt_execute($stmt);
-        $result = mysqli_stmt_get_result($stmt);
-        $user   = mysqli_fetch_assoc($result);
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $error = "Please enter a valid email address.";
+    } else {
+        // 1) Look up user by email
+        $stmt = $conn->prepare("SELECT id, full_name, email FROM users WHERE email = ? LIMIT 1");
+        if (!$stmt) {
+            $error = "Something went wrong. Please try again later.";
+        } else {
+            $stmt->bind_param("s", $email);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $user   = $result->fetch_assoc();
+            $stmt->close();
 
-        if (!$user) {
-            throw new Exception("Email not found!");
-        }
+            // For security: respond the same whether user exists or not.
+            // Only send email if user is real.
+            if ($user) {
+                // 2) Create token + hashed token
+                $resetToken = bin2hex(random_bytes(32));
+                $tokenHash  = hash('sha256', $resetToken);
+                // 🔁 20-minute validity instead of 1 hour
+                $expiresAt  = date('Y-m-d H:i:s', time() + 20 * 60); // valid for 20 minutes
 
-        // Generate a unique token for password reset
-        $resetToken = bin2hex(random_bytes(50));
-        $expiry     = gmdate("Y-m-d H:i:s", time() + 3600); // Token valid for 1 hour (UTC)
+                // 3) Store token in password_resets table
+                // Optional: delete any existing reset records for this email
+                $del = $conn->prepare("DELETE FROM password_resets WHERE email = ?");
+                if ($del) {
+                    $del->bind_param("s", $email);
+                    $del->execute();
+                    $del->close();
+                }
 
-        // Store the token in the database
-        $sql  = "UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE email = ?";
-        $stmt = mysqli_stmt_init($conn);
-        if (!mysqli_stmt_prepare($stmt, $sql)) {
-            throw new Exception("Something went wrong.");
-        }
-        mysqli_stmt_bind_param($stmt, "sss", $resetToken, $expiry, $email);
-        mysqli_stmt_execute($stmt);
+                $ins = $conn->prepare("
+                    INSERT INTO password_resets (email, token_hash, expires_at)
+                    VALUES (?, ?, ?)
+                ");
+                if ($ins) {
+                    $ins->bind_param("sss", $email, $tokenHash, $expiresAt);
+                    $ins->execute();
+                    $ins->close();
+                } else {
+                    $error = "Something went wrong while creating the reset link. Please try again.";
+                }
 
-        // Send password reset email
-        $mail = new PHPMailer(true);
+                if (empty($error)) {
+                    // 4) Send reset email via PHPMailer
+                    $resetLink = buildResetLink($resetToken);
+                    $mail      = new PHPMailer(true);
 
-        try {
-            // Server settings
-            $mail->SMTPDebug  = 0;
-            $mail->isSMTP();
-            $mail->Host       = 'premium245.web-hosting.com';
-            $mail->SMTPAuth   = true;
-            $mail->Username   = 'admin@festival-web.com';
-            $mail->Password   = '!g3$~8tYju*D';
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-            $mail->Port       = 587;
+                    try {
+                        // --- SMTP settings (update if needed) ---
+                        $mail->SMTPDebug  = 0; // set to 2 while debugging
+                        $mail->isSMTP();
+                        $mail->Host       = 'premium245.web-hosting.com';  // your SMTP host
+                        $mail->SMTPAuth   = true;
+                        $mail->Username   = 'admin@festival-web.com';      // your SMTP username
+                        $mail->Password   = '!g3$~8tYju*D';                // your SMTP password
+                        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+                        $mail->Port       = 587;
 
-            // Recipients
-            $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
-            $mail->addAddress($email, $user["full_name"]);
+                        // --- Recipients ---
+                        $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
+                        $recipientName = !empty($user['full_name']) ? $user['full_name'] : 'Customer';
+                        $mail->addAddress($email, $recipientName);
 
-            // Content
-            $mail->CharSet = 'UTF-8';
-            $mail->isHTML(false);
+                        // --- Content ---
+                        $mail->CharSet = 'UTF-8';
+                        $mail->isHTML(false);
+                        $mail->Subject = 'Athina E-Shop - Password Reset';
 
-            $mail->Subject = 'Password Reset Request';
+                        // 🔁 Email text mentions 20 minutes
+                        $mail->Body =
+                            "Dear {$recipientName},\n\n" .
+                            "We received a request to reset the password for your Athina E-Shop account.\n\n" .
+                            "To choose a new password, please click the link below (or copy it into your browser):\n" .
+                            "{$resetLink}\n\n" .
+                            "This link is valid for 20 minutes.\n\n" .
+                            "If you did not request this change, you can safely ignore this email.\n\n" .
+                            "Best regards,\n" .
+                            "Athina E-Shop";
 
-            $userName   = !empty($user['full_name']) ? $user['full_name'] : 'User';
-            $resetLink  = "http://localhost/ATHINA-ESHOP/authentication/reset_password.php?token=$resetToken";
-
-            $mail->Body = "Dear $userName,\n\n"
-                . "We received a request to reset your password. Click the link below to change it:\n"
-                . "$resetLink\n\n"
-                . "If you did not request this change, please ignore this email.";
-
-            if (!$mail->send()) {
-                throw new Exception("Email could not be sent. Error: " . $mail->ErrorInfo);
+                        if (!$mail->send()) {
+                            // If mail failed, treat as generic error
+                            $error = "We couldn't send the reset email right now. Please try again later.";
+                        }
+                    } catch (Exception $e) {
+                        // PHPMailer threw an exception
+                        $error = "We couldn't send the reset email right now. Please try again later.";
+                    }
+                }
             }
 
-            $success = "The password reset link has been sent to your email. "
-                     . "Please check your inbox or your Spam folder if you don’t see it.";
-        } catch (Exception $e) {
-            throw new Exception("Failed to send email: " . $e->getMessage());
+            // 5) Generic message (even if user not found)
+            if (empty($error)) {
+                $success = "If this email is registered with Athina E-Shop, we've sent a password reset link. 
+                            Please check your inbox and Spam folder.";
+            }
         }
-    } catch (Exception $e) {
-        $error = $e->getMessage();
     }
 }
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
+    <meta charset="UTF-8"> 
     <title>Forgot Password - Athina E-Shop</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <!-- Bootstrap -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 
-    <!-- Custom Styling -->
     <link rel="stylesheet" href="../assets/styling/style.css">
+    <link rel="stylesheet" href="../assets/styling/authentication.css">
 </head>
 
 <body class="registration_page">
 
-    <!-- Crochet GIF background + overlay -->
-    <div class="registration-bg"></div>
-    <div class="registration-overlay"></div>
-
     <div class="wizard-box">
         <div class="wizard-header text-center">
-            <!-- Athina E-Shop crochet badge logo -->
             <div class="wizard-logo">
                 <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
             </div>
             <h3 class="mt-2">Password Recovery</h3>
+            <p class="wizard-subtitle mb-0">
+                Enter your email and we’ll send you a reset link (valid for 20 minutes).
+            </p>
         </div>
 
         <div class="wizard-content">
@@ -140,11 +179,15 @@ if (isset($_POST["submit"])) {
                     </div>
                     <div class="wizard-actions mb-2">
                         <button type="submit" name="submit" class="btn btn-success w-100">
-                            Send Link
+                            Send Reset Link
                         </button>
                     </div>
                 </form>
             <?php endif; ?>
+
+            <div class="form-footer">
+                <a href="login.php">Back to Login</a>
+            </div>
         </div>
     </div>
 

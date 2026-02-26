@@ -2,17 +2,14 @@
 session_start();
 require_once "database.php";
 
-// If user already logged in, redirect to index
 if (isset($_SESSION["user"])) {
     header("Location: ../index.php");
     exit();
 }
 
-// Handle manual email submission
 if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
     $manual_email = trim($_POST["manual_email"]);
 
-    // Check if email already exists
     $stmt = $conn->prepare("SELECT id FROM users WHERE email = ?");
     $stmt->bind_param("s", $manual_email);
     $stmt->execute();
@@ -34,67 +31,62 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
 <head>
     <meta charset="UTF-8">
     <title>Register or Continue</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
     <link rel="stylesheet" href="../assets/styling/style.css">
+    <link rel="stylesheet" href="../assets/styling/authentication.css">
 </head>
 <body class="registration_page">
 
-    <!-- Crochet GIF background + overlay -->
-    <div class="registration-bg"></div>
-    <div class="registration-overlay"></div>
-
     <div class="wizard-box text-center">
         <div class="wizard-header">
-            <!-- Athina E-Shop crochet badge logo -->
             <div class="wizard-logo">
                 <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
             </div>
             <h3 class="mt-2">Create Your Account</h3>
+            <p class="wizard-subtitle mb-0">
+                Join Athina E-Shop to save your details and easily track your orders.
+            </p>
         </div>
 
-        <!-- Display registration errors if any (manual + Facebook failures) -->
         <?php if (isset($_SESSION["registration_error"])): ?>
             <div class="alert alert-danger">
                 <?= $_SESSION["registration_error"]; unset($_SESSION["registration_error"]); ?>
             </div>
         <?php endif; ?>
 
-        <!-- Google Sign-In -->
         <div class="mb-3">
             <button
                 type="button"
                 id="google-signin-btn"
-                class="btn btn-light border d-flex align-items-center justify-content-center gap-2 mx-auto"
-                style="max-width: 300px;"
+                class="btn btn-light border d-flex align-items-center justify-content-center gap-2 mx-auto auth-social-btn"
             >
                 <img src="https://developers.google.com/identity/images/g-logo.png"
-                     style="height: 20px;" alt="Google logo">
+                     class="auth-social-logo" alt="Google logo">
                 Continue with Google
             </button>
         </div>
 
-        <!-- Facebook Sign-In -->
         <div class="mb-3">
             <button
                 type="button"
                 id="facebook-signin-btn"
-                class="btn btn-primary d-flex align-items-center justify-content-center gap-2 mx-auto"
-                style="max-width: 300px; background-color: #1877f2; border-color: #1877f2;"
+                class="btn d-flex align-items-center justify-content-center gap-2 mx-auto auth-social-btn auth-facebook-btn"
             >
                 <i class="bi bi-facebook"></i>
                 Continue with Facebook
             </button>
         </div>
 
-        <!-- Divider text -->
-        <p class="mt-2 mb-1 text-muted" style="font-size: 0.9rem;">Or use your email</p>
+        <p class="mt-2 mb-1 text-muted auth-divider-text">Or use your email</p>
 
-        <!-- Manual Email Entry -->
-        <form method="POST" action="registration.php" class="mt-2" style="max-width: 300px; margin: auto;">
+        <form method="POST" action="registration.php" class="mt-2 auth-email-form">
             <div class="form-group mb-3 text-start">
+                <label for="manual_email" class="visually-hidden">Email</label>
                 <input
                     type="email"
+                    id="manual_email"
                     name="manual_email"
                     class="form-control"
                     placeholder="Enter your email"
@@ -110,7 +102,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
     </div>
 
     <script>
-    // ---- Google OAuth ----
     document.getElementById('google-signin-btn').addEventListener('click', function () {
         const params = new URLSearchParams({
             client_id: '901502356414-324b839ks2vas27hoq8hq0448qa6a0oj.apps.googleusercontent.com',
@@ -126,14 +117,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
         window.location.href = authUrl;
     });
 
-    // ---- Facebook OAuth ----
     document.getElementById('facebook-signin-btn').addEventListener('click', function () {
         const params = new URLSearchParams({
             client_id: '924345056652857',
             redirect_uri: 'http://localhost/ATHINA-ESHOP/authentication/facebook_callback.php',
             response_type: 'code',
-            // you *can* add scope here (email,public_profile) once it's properly configured in Meta
-            // scope: 'email,public_profile',
             auth_type: 'rerequest'
         });
 

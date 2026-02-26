@@ -2,22 +2,144 @@
 session_start();
 require_once "database.php";
 
-// If there is no pending 2FA session, go back to login
 if (!isset($_SESSION["temp_user_id"])) {
     header("Location: login.php");
     exit();
 }
 
-$error = '';
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
 
+require_once __DIR__ . '/../PHPMailer-master/src/Exception.php';
+require_once __DIR__ . '/../PHPMailer-master/src/PHPMailer.php';
+require_once __DIR__ . '/../PHPMailer-master/src/SMTP.php';
+
+$userId        = $_SESSION["temp_user_id"];
+$error         = '';
+$infoMessage   = '';
+$emailForUser  = '';
+$mailerDetails = ''; // dev-only: holds PHPMailer error text
+
+// Helper: send 2FA email and save code + expiry
+function sendTwoFACode(mysqli $conn, int $userId, string &$errorOut, string &$mailerDetailsOut): ?string
+{
+    // Fetch user email + name
+    $stmt = $conn->prepare("SELECT email, full_name FROM users WHERE id = ?");
+    if (!$stmt) {
+        $errorOut = "Something went wrong while preparing the 2FA query.";
+        return null;
+    }
+    $stmt->bind_param("i", $userId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $user   = $result->fetch_assoc();
+    $stmt->close();
+
+    if (!$user) {
+        $errorOut = "User not found for 2FA.";
+        return null;
+    }
+
+    $email = $user["email"];
+    $name  = $user["full_name"] ?: 'User';
+
+    // Generate 6-digit code & expiry (+48 hours)
+    $code       = str_pad((string)rand(0, 999999), 6, '0', STR_PAD_LEFT);
+    $expiresObj = new DateTime("now", new DateTimeZone("UTC"));
+    $expiresObj->modify("+48 hours");
+    $expires = $expiresObj->format("Y-m-d H:i:s");
+
+    // Save code + expiry
+    $upd = $conn->prepare("UPDATE users SET twofa_code = ?, twofa_expires = ? WHERE id = ?");
+    if (!$upd) {
+        $errorOut = "Failed to update 2FA code.";
+        return null;
+    }
+    $upd->bind_param("ssi", $code, $expires, $userId);
+    $upd->execute();
+    $upd->close();
+
+    // Send email via PHPMailer (same settings as forgot_password.php)
+    try {
+        $mail = new PHPMailer(true);
+
+        // $mail->SMTPDebug = 2; // uncomment for verbose debug in your PHP error log
+        $mail->isSMTP();
+        $mail->Host       = 'premium245.web-hosting.com';
+        $mail->SMTPAuth   = true;
+        $mail->Username   = 'admin@festival-web.com';
+        $mail->Password   = '!g3$~8tYju*D';
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+        $mail->Port       = 587;
+
+        $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
+        $mail->addAddress($email, $name);
+
+        $mail->CharSet = 'UTF-8';
+        $mail->isHTML(false);
+        $mail->Subject = 'Your Athina E-Shop 2FA Code';
+        $mail->Body    = "Dear $name,\n\n"
+                       . "Your Two-Factor Authentication code is: $code\n\n"
+                       . "This code is valid for 48 hours.\n\n"
+                       . "If you did not attempt to log in, please secure your account.";
+
+        if (!$mail->send()) {
+            $errorOut        = "We couldn't send the 2FA email. Please try again later.";
+            $mailerDetailsOut = $mail->ErrorInfo;
+            return null;
+        }
+
+        // Success
+        return $email;
+
+    } catch (Exception $e) {
+        $errorOut         = "We couldn't send the 2FA email. Please try again later.";
+        $mailerDetailsOut = $e->getMessage();
+        return null;
+    }
+}
+
+// Decide if we should send/resend the code
+if ($_SERVER["REQUEST_METHOD"] === "GET" || isset($_POST["resend"])) {
+
+    // Try sending the code
+    $emailSentTo = sendTwoFACode($conn, $userId, $error, $mailerDetails);
+
+    if ($emailSentTo) {
+        $emailForUser = $emailSentTo;
+        if (isset($_POST["resend"])) {
+            $infoMessage = "A new 2FA code has been sent to your email.";
+        }
+    } else {
+        // If sending failed, we still want to show which email we *would* use (if possible)
+        $stmt = $conn->prepare("SELECT email FROM users WHERE id = ?");
+        $stmt->bind_param("i", $userId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        if ($row = $result->fetch_assoc()) {
+            $emailForUser = $row['email'];
+        }
+        $stmt->close();
+    }
+} else {
+    // POST verify, we just need email for display
+    $stmt = $conn->prepare("SELECT email FROM users WHERE id = ?");
+    $stmt->bind_param("i", $userId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($row = $result->fetch_assoc()) {
+        $emailForUser = $row['email'];
+    }
+    $stmt->close();
+}
+
+// Verification handler
 if (isset($_POST["verify"])) {
-    $code    = trim($_POST["twofa_code"] ?? '');
-    $user_id = $_SESSION["temp_user_id"];
+    $code = trim($_POST["twofa_code"] ?? '');
 
     if ($code === '') {
         $error = "Please enter your 2FA code.";
     } else {
-        // Check that code matches and is not expired
         $stmt = $conn->prepare("
             SELECT * 
             FROM users 
@@ -25,35 +147,23 @@ if (isset($_POST["verify"])) {
               AND twofa_code = ? 
               AND twofa_expires > NOW()
         ");
-        $stmt->bind_param("is", $user_id, $code);
+        $stmt->bind_param("is", $userId, $code);
         $stmt->execute();
         $result = $stmt->get_result();
 
         if ($user = $result->fetch_assoc()) {
-            // Clear 2FA code after successful verification (optional but safer)
-            $clear = $conn->prepare("UPDATE users SET twofa_code = NULL WHERE id = ?");
-            $clear->bind_param("i", $user_id);
+            // Clear code, but keep the expiry so we know 2FA is valid for 48h
+            $clear = $conn->prepare("UPDATE users SET twofa_code = NULL, last_login = NOW() WHERE id = ?");
+            $clear->bind_param("i", $userId);
             $clear->execute();
             $clear->close();
 
-            // Restore last_login (same pattern as in login.php if you want)
-            $prevLogin  = null;
-            $getLogin   = $conn->prepare("SELECT last_login FROM users WHERE id = ?");
-            $getLogin->bind_param("i", $user['id']);
-            $getLogin->execute();
-            $loginRes = $getLogin->get_result();
-            if ($row = $loginRes->fetch_assoc()) {
-                $prevLogin = $row['last_login'];
+            // get previous last_login for session
+            $prevLogin = null;
+            if (!empty($user['last_login'])) {
+                $prevLogin = $user['last_login'];
             }
-            $getLogin->close();
 
-            // Update last_login to NOW
-            $updateLogin = $conn->prepare("UPDATE users SET last_login = NOW() WHERE id = ?");
-            $updateLogin->bind_param("i", $user['id']);
-            $updateLogin->execute();
-            $updateLogin->close();
-
-            // Log user in (same structure as login.php)
             $_SESSION["user"] = [
                 "id"         => $user["id"],
                 "email"      => $user["email"],
@@ -64,7 +174,6 @@ if (isset($_POST["verify"])) {
             $_SESSION["user_id"] = $user["id"];
             $_SESSION["role"]    = $user["role"];
 
-            // Clean up temp session flags
             unset($_SESSION['temp_user_id']);
 
             header("Location: ../index.php");
@@ -90,30 +199,40 @@ if (isset($_POST["verify"])) {
         rel="stylesheet"
     >
     <link rel="stylesheet" href="../assets/styling/style.css">
+    <link rel="stylesheet" href="../assets/styling/authentication.css">
 </head>
 <body class="registration_page">
 
-    <!-- Crochet GIF background + overlay -->
-    <div class="registration-bg"></div>
-    <div class="registration-overlay"></div>
-
     <div class="wizard-box">
         <div class="wizard-header">
-            <!-- Athina E-Shop crochet badge logo -->
             <div class="wizard-logo">
                 <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
             </div>
             <h3 class="mt-2">Two-Factor Authentication</h3>
-            <p class="text-muted mb-0" style="font-size: 0.9rem;">
-                We sent a 6-digit code to your email. <br>
-                For security, this code is valid for 48 hours.
+            <p class="wizard-subtitle mb-0">
+                We send a 6-digit code to your email. For security, this code is valid for 48 hours.<br>
+                <?php if ($emailForUser): ?>
+                    Email: <strong><?= htmlspecialchars($emailForUser) ?></strong>
+                <?php endif; ?>
             </p>
         </div>
 
         <div class="wizard-content">
             <?php if (!empty($error)): ?>
                 <div class="alert alert-danger">
-                    <?= htmlspecialchars($error) ?>
+                    <?= htmlspecialchars($error) ?><br>
+                    <?php if (!empty($mailerDetails)): ?>
+                        <small class="text-muted">
+                            <!-- DEV ONLY: remove this line in production -->
+                            Mailer detail: <?= htmlspecialchars($mailerDetails) ?>
+                        </small>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if (!empty($infoMessage)): ?>
+                <div class="alert alert-success">
+                    <?= htmlspecialchars($infoMessage) ?>
                 </div>
             <?php endif; ?>
 
@@ -131,11 +250,17 @@ if (isset($_POST["verify"])) {
                     >
                 </div>
 
-                <div class="wizard-actions">
+                <div class="wizard-actions mb-2">
                     <button type="submit" name="verify" class="btn btn-success w-100">
                         Verify Code
                     </button>
                 </div>
+            </form>
+
+            <form action="twofa_verify.php" method="post" class="mt-2">
+                <button type="submit" name="resend" class="btn btn-outline-secondary w-100">
+                    Resend Code
+                </button>
             </form>
 
             <div class="form-footer text-center mt-3">

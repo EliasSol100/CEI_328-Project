@@ -1,66 +1,59 @@
 <?php
 session_start();
-
 require_once "database.php";
-
-// Get user id from session safely
-$userId = $_SESSION["user_id"] ?? ($_SESSION["user"]["id"] ?? null);
-
-// If we don't know which user this is, send them back
-if (!$userId) {
-    header("Location: registration.php");
-    exit();
-}
-
-// Load PHPMailer
-require '../PHPMailer-master/src/Exception.php';
-require '../PHPMailer-master/src/PHPMailer.php';
-require '../PHPMailer-master/src/SMTP.php';
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
-// Twilio credentials
-$accountSid        = 'ACed50809afda0163369b2505abc4354f7';
-$authToken         = '3c6a61da6d5b335f41d05f9a7caef847';
-$twilioPhoneNumber = '+12182616825';
+require '../PHPMailer-master/src/Exception.php';
+require '../PHPMailer-master/src/PHPMailer.php';
+require '../PHPMailer-master/src/SMTP.php';
 
-// Get user's email, full_name and phone DIRECTLY from DB
-$email     = '';
-$full_name = '';
-$userPhone = '';
+$feedbackMessage = '';
+$feedbackClass   = 'danger';
 
-$stmt = $conn->prepare("SELECT email, full_name, phone FROM users WHERE id = ?");
-$stmt->bind_param("i", $userId);
-$stmt->execute();
-$stmt->bind_result($email, $full_name, $userPhone);
-$stmt->fetch();
-$stmt->close();
-
-// If for some reason user row doesn't exist, bail out
-if (empty($email)) {
-    header("Location: registration.php");
+// You must have a user in session at this point
+if (!isset($_SESSION["user_id"])) {
+    header("Location: login.php");
     exit();
 }
 
-// Feedback message for UI
-$feedbackMessage = '';
-$feedbackClass   = '';
+$userId = (int) $_SESSION["user_id"];
+
+// Load user email + phone
+$stmt = $conn->prepare("SELECT email, phone, full_name, role FROM users WHERE id = ?");
+$stmt->bind_param("i", $userId);
+$stmt->execute();
+$result = $stmt->get_result();
+$userRow = $result->fetch_assoc();
+$stmt->close();
+
+if (!$userRow) {
+    session_unset();
+    session_destroy();
+    header("Location: login.php");
+    exit();
+}
+
+$email     = $userRow["email"];
+$userPhone = $userRow["phone"];
 
 if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["select_method"])) {
-    $verificationMethod = $_POST["verification_method"] ?? 'email';
-    $verification_code  = rand(100000, 999999);
+    $method = $_POST["verification_method"] ?? "email";
 
-    // Save verification code in DB for this user
-    $stmt = $conn->prepare("UPDATE users SET verification_code = ? WHERE id = ?");
-    $stmt->bind_param("si", $verification_code, $userId);
-    $stmt->execute();
-    $stmt->close();
+    // 6-digit code (shared for email & phone)
+    $verification_code = random_int(100000, 999999);
 
-    if ($verificationMethod === 'email') {
+    if ($method === "email") {
+        // Store code on the user
+        $stmt = $conn->prepare("UPDATE users SET verification_code = ? WHERE id = ?");
+        $stmt->bind_param("si", $verification_code, $userId);
+        $stmt->execute();
+        $stmt->close();
 
-        $mail = new PHPMailer(true);
+        // Send email with the code
         try {
+            $mail = new PHPMailer(true);
             $mail->isSMTP();
             $mail->Host       = 'premium245.web-hosting.com';
             $mail->SMTPAuth   = true;
@@ -69,70 +62,49 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["select_method"])) {
             $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
             $mail->Port       = 587;
 
-            $mail->setFrom('admin@festival-web.com', 'Athina E-Shop Verification');
-            $mail->addAddress($email, $full_name);
-
+            $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
+            $mail->addAddress($email, $userRow["full_name"]);
             $mail->isHTML(true);
-            $mail->Subject = 'Verify your email';
-            $mail->Body    = "<p>Your verification code is: <b>$verification_code</b></p>";
+            $mail->Subject = "Your Athina E-Shop Verification Code";
+            $mail->Body    = "<p>Your verification code is: <b>{$verification_code}</b></p>";
+
             $mail->send();
 
-            // Store the EXACT email + user id for verify.php
-            $_SESSION["verification_email"]    = $email;
-            $_SESSION["verification_user_id"]  = $userId;
-
-            // Go directly to the email verification page
             header("Location: verify.php");
             exit();
-
         } catch (Exception $e) {
-            $feedbackMessage = "Failed to send email. Please try again later.";
+            $feedbackMessage = "We couldn't send the verification email. Please try again.";
             $feedbackClass   = "danger";
         }
 
-    } elseif ($verificationMethod === 'phone') {
+    } elseif ($method === "phone") {
+        // Use shared SMS helper in send_sms.php
+        require_once "send_sms.php";
 
-        if (empty($userPhone)) {
-            $feedbackMessage = "Phone number is missing. You cannot verify by phone.";
+        // If user didn't have a phone yet, we still try with DB value
+        $phoneToUse = $userPhone;
+
+        if (empty($phoneToUse)) {
+            $feedbackMessage = "No phone number is saved on your profile.";
             $feedbackClass   = "danger";
         } else {
-            $_SESSION["phone"]             = $userPhone;
-            $_SESSION["verification_code"] = $verification_code;
+            $smsResult = sendVerificationSms(
+                $conn,
+                $email,
+                $phoneToUse,
+                (string)$verification_code,
+                "Your Athina E-Shop verification code is {$verification_code}"
+            );
 
-            $body = "Your verification code is: $verification_code";
+            if (!$smsResult["success"]) {
+                $feedbackMessage = "We couldn't send the SMS: " . $smsResult["message"];
+                $feedbackClass   = "danger";
+            } else {
+                // Remember phone in session just for display text on verify_phone.php
+                $_SESSION["phone"] = $phoneToUse;
 
-            $postData = http_build_query([
-                'From' => $twilioPhoneNumber,
-                'To'   => $userPhone,
-                'Body' => $body,
-            ]);
-
-            $curl = curl_init();
-            curl_setopt_array($curl, [
-                CURLOPT_URL            => "https://api.twilio.com/2010-04-01/Accounts/$accountSid/Messages.json",
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_POST           => true,
-                CURLOPT_POSTFIELDS     => $postData,
-                CURLOPT_HTTPHEADER     => [
-                    'Content-Type: application/x-www-form-urlencoded',
-                    'Authorization: Basic ' . base64_encode("$accountSid:$authToken"),
-                ],
-                CURLOPT_SSL_VERIFYPEER => false,
-                CURLOPT_SSL_VERIFYHOST => false,
-            ]);
-
-            $response = curl_exec($curl);
-            $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-            curl_close($curl);
-
-            if ($httpCode === 201) {
                 header("Location: verify_phone.php");
                 exit();
-            } else {
-                $responseData    = json_decode($response, true);
-                $errorMessage    = $responseData['message'] ?? 'Failed to send SMS.';
-                $feedbackMessage = $errorMessage;
-                $feedbackClass   = "danger";
             }
         }
     }
@@ -143,27 +115,28 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["select_method"])) {
 <head>
     <meta charset="UTF-8">
     <title>Select Verification Method</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet"
           href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="../assets/styling/style.css">
+    <link rel="stylesheet" href="../assets/styling/authentication.css">
 </head>
 <body class="registration_page">
-
-    <!-- Animated crochet background -->
-    <div class="registration-bg"></div>
-    <div class="registration-overlay"></div>
 
     <div class="wizard-box">
         <div class="wizard-header">
             <div class="wizard-logo">
                 <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
             </div>
-            <h3 class="mt-2">Select Verification Method</h3>
+            <h3 class="mt-2">Verification Method</h3>
+            <p class="wizard-subtitle mb-0">
+                Choose how you’d like to confirm your new account.
+            </p>
         </div>
 
         <?php if (!empty($feedbackMessage)): ?>
             <div class="alert alert-<?= htmlspecialchars($feedbackClass) ?>">
-                <?= $feedbackMessage ?>
+                <?= htmlspecialchars($feedbackMessage) ?>
             </div>
         <?php endif; ?>
 
@@ -177,13 +150,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["select_method"])) {
                     </select>
                 </div>
 
-                <div class="form-group mb-3" id="email-display" style="display: none;">
+                <div class="form-group mb-3" id="email-display">
                     <label>Registered Email</label>
                     <input type="text" class="form-control"
                            value="<?= htmlspecialchars($email) ?>" readonly>
                 </div>
 
-                <div class="form-group mb-3" id="phone-display" style="display: none;">
+                <div class="form-group mb-3" id="phone-display">
                     <label>Registered Phone</label>
                     <input type="text" class="form-control"
                            value="<?= htmlspecialchars($userPhone) ?>" readonly>
@@ -196,8 +169,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["select_method"])) {
         </form>
     </div>
 
-    <script
-        src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script>
         $(document).ready(function () {
             $('#verification_method').on('change', function () {

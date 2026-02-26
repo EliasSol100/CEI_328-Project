@@ -146,7 +146,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             $newUserId = $userId;
 
-                } else {
+        } else {
             // New user from manual email flow
             $stmt = $conn->prepare("
                 INSERT INTO users (
@@ -169,7 +169,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1
                 )
             ");
-            // 13 placeholders → 13 bound values
+            // 13 placeholders → 13 bound values (up to phone)
             $stmt->bind_param(
                 "sssssssssssss",
                 $fullName,
@@ -239,14 +239,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
     <link rel="stylesheet" href="../assets/styling/style.css">
+    <link rel="stylesheet" href="../assets/styling/authentication.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/intl-tel-input/17.0.8/css/intlTelInput.min.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/country-select-js/2.1.0/css/countrySelect.min.css" />
 </head>
 <body class="registration_page">
 
-    <!-- Animated crochet background -->
-    <div class="registration-bg"></div>
-    <div class="registration-overlay"></div>
+    <!-- (Background handled by authentication.css / body) -->
 
     <div class="wizard-box">
         <div class="wizard-header">
