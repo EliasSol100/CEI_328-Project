@@ -4,12 +4,13 @@ require_once "authentication/database.php";
 require_once "authentication/get_config.php";
 
 $system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
-$logo_path    = getSystemConfig("logo_path") ?: "authentication/assets/images/athina-eshop-logo.png";
-if (!file_exists($logo_path) && file_exists("authentication/" . $logo_path)) {
-    $logo_path = "authentication/" . $logo_path;
+$logo_path    = getSystemConfig("logo_path") ?: "assets/images/athina-eshop-logo.png";
+$logo_path    = str_replace("authentication/assets/", "assets/", $logo_path);
+if (!file_exists($logo_path) && file_exists("assets/images/athina-eshop-logo.png")) {
+    $logo_path = "assets/images/athina-eshop-logo.png";
 }
 if (!file_exists($logo_path)) {
-    $logo_path = "authentication/assets/images/athina-eshop-logo.png";
+    $logo_path = "assets/images/athina-eshop-logo.png";
 }
 
 // --------- User / Profile handling ----------
@@ -64,11 +65,11 @@ if (isset($_SESSION["user"])) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Creations by Athina - About</title>
-    <link rel="stylesheet" href="authentication/assets/styling/styles.css">
-    <link rel="stylesheet" href="authentication/assets/styling/header.css?v=3">
-    <link rel="stylesheet" href="authentication/assets/styling/about.css">
+    <link rel="stylesheet" href="assets/styling/styles.css">
+    <link rel="stylesheet" href="assets/styling/header.css?v=3">
+    <link rel="stylesheet" href="assets/styling/about.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="authentication/assets/js/translations.js" defer></script>
+    <script src="assets/js/translations.js" defer></script>
 </head>
 <body class="site-page">
     <?php

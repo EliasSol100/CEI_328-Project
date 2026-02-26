@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 session_start();
 require_once "database.php";
 
@@ -89,7 +89,7 @@ if (isset($_POST["verify"])) {
         href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css"
         rel="stylesheet"
     >
-    <link rel="stylesheet" href="assets/styling/style.css">
+    <link rel="stylesheet" href="../assets/styling/style.css">
 </head>
 <body class="registration_page">
 
@@ -101,7 +101,7 @@ if (isset($_POST["verify"])) {
         <div class="wizard-header">
             <!-- Athina E-Shop crochet badge logo -->
             <div class="wizard-logo">
-                <img src="assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
+                <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
             </div>
             <h3 class="mt-2">Two-Factor Authentication</h3>
             <p class="text-muted mb-0" style="font-size: 0.9rem;">

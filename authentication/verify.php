@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 session_start();
 require_once "database.php";
 
@@ -89,7 +89,7 @@ if (isset($_POST["verify"]) && $userRow) {
     <title>Verify Your Email</title>
     <link rel="stylesheet"
           href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="assets/styling/style.css">
+    <link rel="stylesheet" href="../assets/styling/style.css">
 </head>
 <body class="registration_page">
 
@@ -101,7 +101,7 @@ if (isset($_POST["verify"]) && $userRow) {
         <div class="wizard-header">
             <!-- Athina E-Shop crochet badge logo -->
             <div class="wizard-logo">
-                <img src="assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
+                <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
             </div>
             <h3 class="mt-2">Email Verification</h3>
         </div>

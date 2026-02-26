@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 session_start();
 require_once "database.php";
 
@@ -80,7 +80,7 @@ if (isset($_GET["token"])) {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
 
     <!-- Custom Styling -->
-    <link rel="stylesheet" href="assets/styling/style.css">
+    <link rel="stylesheet" href="../assets/styling/style.css">
 </head>
 <body class="registration_page">
 
@@ -92,7 +92,7 @@ if (isset($_GET["token"])) {
         <div class="wizard-header text-center">
             <!-- Athina E-Shop crochet badge logo -->
             <div class="wizard-logo">
-                <img src="assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
+                <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
             </div>
             <h3 class="mt-2">Password Reset</h3>
         </div>
@@ -118,10 +118,10 @@ if (isset($_GET["token"])) {
 
                         <!-- Password rules checklist (same logic as complete_profile.php) -->
                         <ul class="password-checklist mt-2" style="list-style: none; padding-left: 0; font-size: 14px;">
-                            <li id="check-length"><span class="text-danger">âœ–</span> At least 8 characters</li>
-                            <li id="check-uppercase"><span class="text-danger">âœ–</span> At least 1 uppercase letter</li>
-                            <li id="check-number"><span class="text-danger">âœ–</span> At least 1 number</li>
-                            <li id="check-symbol"><span class="text-danger">âœ–</span> At least 1 symbol</li>
+                            <li id="check-length"><span class="text-danger">✖</span> At least 8 characters</li>
+                            <li id="check-uppercase"><span class="text-danger">✖</span> At least 1 uppercase letter</li>
+                            <li id="check-number"><span class="text-danger">✖</span> At least 1 number</li>
+                            <li id="check-symbol"><span class="text-danger">✖</span> At least 1 symbol</li>
                         </ul>
                     </div>
 
@@ -170,10 +170,10 @@ if (isset($_GET["token"])) {
                     symbol: /[\W_]/.test(val)
                 };
 
-                $("#check-length").html((checks.length ? 'âœ…' : '<span class="text-danger">âœ–</span>') + ' At least 8 characters');
-                $("#check-uppercase").html((checks.uppercase ? 'âœ…' : '<span class="text-danger">âœ–</span>') + ' At least 1 uppercase letter');
-                $("#check-number").html((checks.number ? 'âœ…' : '<span class="text-danger">âœ–</span>') + ' At least 1 number');
-                $("#check-symbol").html((checks.symbol ? 'âœ…' : '<span class="text-danger">âœ–</span>') + ' At least 1 symbol');
+                $("#check-length").html((checks.length ? '✅' : '<span class="text-danger">✖</span>') + ' At least 8 characters');
+                $("#check-uppercase").html((checks.uppercase ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 uppercase letter');
+                $("#check-number").html((checks.number ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 number');
+                $("#check-symbol").html((checks.symbol ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 symbol');
             });
         });
     </script>

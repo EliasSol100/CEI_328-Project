@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 session_start();
 if (isset($_SESSION["user"])) {
     header("Location: ../index.php");
@@ -22,7 +22,7 @@ require '../PHPMailer-master/src/SMTP.php';
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
-    <link rel="stylesheet" href="assets/styling/style.css">
+    <link rel="stylesheet" href="../assets/styling/style.css">
 </head>
 
 <body class="registration_page">
@@ -35,7 +35,7 @@ require '../PHPMailer-master/src/SMTP.php';
         <div class="wizard-header text-center">
             <!-- Athina E-Shop crochet badge logo -->
             <div class="wizard-logo">
-                <img src="assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
+                <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
             </div>
             <h3 class="mt-2">System Login</h3>
         </div>
@@ -135,7 +135,7 @@ require '../PHPMailer-master/src/SMTP.php';
                                 exit();
 
                             } else {
-                                // 2FA still valid â†’ direct login
+                                // 2FA still valid → direct login
                                 // Get previous last_login
                                 $prevLogin = null;
                                 $getLogin  = $conn->prepare("SELECT last_login FROM users WHERE id = ?");

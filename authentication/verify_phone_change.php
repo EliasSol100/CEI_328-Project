@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 session_start();
 require_once "database.php";
 
@@ -48,7 +48,7 @@ if (isset($_POST["verify"])) {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <!-- Bootstrap & Toastr -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="assets/styling/style.css">
+    <link rel="stylesheet" href="../assets/styling/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css">
 </head>
 <body>

@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 session_start();
 require_once "database.php";
 
@@ -16,7 +16,7 @@ if (isset($_SESSION["user"])) {
     $email         = $_SESSION["manual_email"];
     $isSocialLogin = false;
 } else {
-    // No context â†’ back to registration
+    // No context → back to registration
     header("Location: registration.php");
     exit();
 }
@@ -39,7 +39,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $dob             = $_POST["dob"]                   ?? '';
     $phone           = trim($_POST["phone"]            ?? '');
 
-    // Full name must be 2â€“3 words
+    // Full name must be 2–3 words
     if (count($nameParts) < 2 || count($nameParts) > 3) {
         $errors[] = "Full name must be 2 or 3 words (e.g., First Last or First Middle Last).";
     }
@@ -169,7 +169,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1
                 )
             ");
-            // 13 placeholders â†’ 13 bound values
+            // 13 placeholders → 13 bound values
             $stmt->bind_param(
                 "sssssssssssss",
                 $fullName,
@@ -238,7 +238,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     <title>Complete Your Profile</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
-    <link rel="stylesheet" href="assets/styling/style.css">
+    <link rel="stylesheet" href="../assets/styling/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/intl-tel-input/17.0.8/css/intlTelInput.min.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/country-select-js/2.1.0/css/countrySelect.min.css" />
 </head>
@@ -252,7 +252,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         <div class="wizard-header">
             <!-- Athina E-Shop crochet badge logo -->
             <div class="wizard-logo">
-                <img src="assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
+                <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
             </div>
 
             <h3 class="mt-2">Complete Your Profile</h3>
@@ -355,10 +355,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                             </span>
                         </div>
                         <ul class="password-checklist mt-2" style="list-style: none; padding-left: 0; font-size: 14px;">
-                            <li id="check-length"><span class="text-danger">âœ–</span> At least 8 characters</li>
-                            <li id="check-uppercase"><span class="text-danger">âœ–</span> At least 1 uppercase letter</li>
-                            <li id="check-number"><span class="text-danger">âœ–</span> At least 1 number</li>
-                            <li id="check-symbol"><span class="text-danger">âœ–</span> At least 1 symbol</li>
+                            <li id="check-length"><span class="text-danger">✖</span> At least 8 characters</li>
+                            <li id="check-uppercase"><span class="text-danger">✖</span> At least 1 uppercase letter</li>
+                            <li id="check-number"><span class="text-danger">✖</span> At least 1 number</li>
+                            <li id="check-symbol"><span class="text-danger">✖</span> At least 1 symbol</li>
                         </ul>
                     </div>
 
@@ -547,10 +547,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 symbol: /[\W_]/.test(val)
             };
 
-            $("#check-length").html((checks.length ? 'âœ…' : '<span class="text-danger">âœ–</span>') + ' At least 8 characters');
-            $("#check-uppercase").html((checks.uppercase ? 'âœ…' : '<span class="text-danger">âœ–</span>') + ' At least 1 uppercase letter');
-            $("#check-number").html((checks.number ? 'âœ…' : '<span class="text-danger">âœ–</span>') + ' At least 1 number');
-            $("#check-symbol").html((checks.symbol ? 'âœ…' : '<span class="text-danger">âœ–</span>') + ' At least 1 symbol');
+            $("#check-length").html((checks.length ? '✅' : '<span class="text-danger">✖</span>') + ' At least 8 characters');
+            $("#check-uppercase").html((checks.uppercase ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 uppercase letter');
+            $("#check-number").html((checks.number ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 number');
+            $("#check-symbol").html((checks.symbol ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 symbol');
         });
 
         $("#phone").on("input", function () {
