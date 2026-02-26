@@ -3,6 +3,9 @@ session_start();
 require_once "authentication/database.php";
 require_once "authentication/get_config.php";
 
+// --------------------------------------------------
+// Site configuration
+// --------------------------------------------------
 $system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
 $logo_path    = getSystemConfig("logo_path") ?: "assets/images/athina-eshop-logo.png";
 $logo_path    = str_replace("authentication/assets/", "assets/", $logo_path);
@@ -13,51 +16,72 @@ if (!file_exists($logo_path)) {
     $logo_path = "assets/images/athina-eshop-logo.png";
 }
 
-// --------- User / Profile handling ----------
-$role     = "guest";
-$fullName = "Guest";
+// --------------------------------------------------
+// User / Profile handling (new users table structure)
+// --------------------------------------------------
+$role        = "guest";
+$fullName    = "Guest";
+$isLoggedIn  = isset($_SESSION["user"]);
+$userInitial = "G";
 
-if (isset($_SESSION["user"])) {
+if ($isLoggedIn) {
     $userId   = $_SESSION["user"]["id"];
     $fullName = $_SESSION["user"]["full_name"] ?? 'User';
     $role     = $_SESSION["user"]["role"] ?? 'user';
 
-    // Check if profile is complete; if not, force completion
+    // Derive initials for header avatar
+    $parts = preg_split('/\s+/', trim($fullName));
+    if (!empty($parts)) {
+        $first = strtoupper(substr($parts[0], 0, 1));
+        $last  = (count($parts) > 1) ? strtoupper(substr(end($parts), 0, 1)) : "";
+        $userInitial = $first . $last;
+    }
+
+    // Fetch latest profile data from the NEW users table
     $stmt = $conn->prepare("
-        SELECT country, city, address, postcode, dob, phone 
+        SELECT country, city, address, postcode, dob, phone, profile_complete, is_verified
         FROM users 
         WHERE id = ?
     ");
 
-    if (!$stmt) {
-        $_SESSION["user"]["profile_complete"] = false;
-        header("Location: authentication/complete_profile.php");
-        exit();
+    if ($stmt) {
+        $stmt->bind_param("i", $userId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $user   = $result->fetch_assoc();
+        $stmt->close();
+    } else {
+        $user = null;
     }
-    $stmt->bind_param("i", $userId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $user   = $result->fetch_assoc();
 
+    // Determine if profile is complete based on DB columns
     $fieldsComplete =
         $user &&
-        $user["country"]  &&
-        $user["city"]     &&
-        $user["address"]  &&
-        $user["postcode"] &&
-        $user["dob"]      &&
-        $user["phone"];
+        !empty($user["country"])  &&
+        !empty($user["city"])     &&
+        !empty($user["address"])  &&
+        !empty($user["postcode"]) &&
+        !empty($user["dob"])      &&
+        !empty($user["phone"]);
 
-    $_SESSION["user"]["profile_complete"] = $fieldsComplete;
+    // Update session flags to match DB
+    $_SESSION["user"]["profile_complete"] = (bool)$fieldsComplete;
+    $_SESSION["user"]["is_verified"]      = (int)($user["is_verified"] ?? 0);
 
+    $_SESSION['user_id'] = $userId;
+    $_SESSION['role']    = $role;
+
+    // If profile still incomplete, force user back to complete_profile wizard
     if (!$fieldsComplete) {
         header("Location: authentication/complete_profile.php");
         exit();
     }
-
-    $_SESSION['user_id'] = $userId;
-    $_SESSION['role']    = $role;
 }
+
+// Make name/initials available to header.php
+$GLOBALS['header_user_full_name'] = $fullName;
+$GLOBALS['header_user_initials']  = $userInitial;
+$GLOBALS['header_user_role']      = $role;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -66,7 +90,7 @@ if (isset($_SESSION["user"])) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Creations by Athina - Handmade Crochet Creations</title>
     <link rel="stylesheet" href="assets/styling/styles.css">
-    <link rel="stylesheet" href="assets/styling/header.css?v=3">
+    <link rel="stylesheet" href="assets/styling/header.css?v=4">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="assets/js/translations.js" defer></script>
 </head>
@@ -260,8 +284,3 @@ if (isset($_SESSION["user"])) {
 
 </body>
 </html>
-
-
-
-
-
