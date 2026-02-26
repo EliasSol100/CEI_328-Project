@@ -100,8 +100,8 @@ if (isset($_SESSION["user"])) {
                         <h4>Price</h4>
                         <input class="price-range-input" type="range" min="10" max="80" value="55">
                         <div class="price-range-labels">
-                            <span>�10</span>
-                            <span>�80</span>
+                            <span>€10</span>
+                            <span>€80</span>
                         </div>
                     </div>
 
@@ -124,7 +124,7 @@ if (isset($_SESSION["user"])) {
                             </div>
                             <div class="shop-product-info">
                                 <h3 class="shop-product-name">Crochet Bunny Amigurumi</h3>
-                                <div class="shop-price-row"><span class="shop-price">�28</span><span class="shop-stock">In Stock</span></div>
+                                <div class="shop-price-row"><span class="shop-price">€28</span><span class="shop-stock">In Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9733; <span class="shop-review-count">(24)</span></div>
                             </div>
                         </article>
@@ -135,7 +135,7 @@ if (isset($_SESSION["user"])) {
                             </div>
                             <div class="shop-product-info">
                                 <h3 class="shop-product-name">Pastel Baby Blanket</h3>
-                                <div class="shop-price-row"><span class="shop-price">�45</span><span class="shop-stock">In Stock</span></div>
+                                <div class="shop-price-row"><span class="shop-price">€45</span><span class="shop-stock">In Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9733; <span class="shop-review-count">(18)</span></div>
                             </div>
                         </article>
@@ -146,7 +146,7 @@ if (isset($_SESSION["user"])) {
                             </div>
                             <div class="shop-product-info">
                                 <h3 class="shop-product-name">Crochet Tote Bag</h3>
-                                <div class="shop-price-row"><span class="shop-price">�32</span><span class="shop-stock">In Stock</span></div>
+                                <div class="shop-price-row"><span class="shop-price">€32</span><span class="shop-stock">In Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9734; <span class="shop-review-count">(31)</span></div>
                             </div>
                         </article>
@@ -157,7 +157,7 @@ if (isset($_SESSION["user"])) {
                             </div>
                             <div class="shop-product-info">
                                 <h3 class="shop-product-name">Rainbow Yarn Set</h3>
-                                <div class="shop-price-row"><span class="shop-price">�22</span><span class="shop-stock">In Stock</span></div>
+                                <div class="shop-price-row"><span class="shop-price">€22</span><span class="shop-stock">In Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9733; <span class="shop-review-count">(45)</span></div>
                             </div>
                         </article>
@@ -168,7 +168,7 @@ if (isset($_SESSION["user"])) {
                             </div>
                             <div class="shop-product-info">
                                 <h3 class="shop-product-name">Decorative Cushion Cover</h3>
-                                <div class="shop-price-row"><span class="shop-price">�26</span><span class="shop-stock">In Stock</span></div>
+                                <div class="shop-price-row"><span class="shop-price">€26</span><span class="shop-stock">In Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9734; <span class="shop-review-count">(22)</span></div>
                             </div>
                         </article>
@@ -179,7 +179,7 @@ if (isset($_SESSION["user"])) {
                             </div>
                             <div class="shop-product-info">
                                 <h3 class="shop-product-name">Teddy Bear Amigurumi</h3>
-                                <div class="shop-price-row"><span class="shop-price">�30</span><span class="shop-stock out">Out of Stock</span></div>
+                                <div class="shop-price-row"><span class="shop-price">€30</span><span class="shop-stock out">Out of Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9734; <span class="shop-review-count">(38)</span></div>
                             </div>
                         </article>
