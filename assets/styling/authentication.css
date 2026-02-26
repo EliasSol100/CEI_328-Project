@@ -1,0 +1,296 @@
+/* ===============================
+   Athina E-Shop Authentication Styles
+   Used by: login, registration, complete_profile,
+            verification, 2FA, forgot password
+   =============================== */
+
+/* Page layout */
+body.registration_page {
+    min-height: 100vh;
+    margin: 0;
+    padding: 40px 16px;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: #f5f5f7; /* light grey similar to Figma admin */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Main auth card */
+.wizard-box {
+    position: relative;
+    max-width: 480px;
+    width: 100%;
+    background-color: #ffffff;
+    border-radius: 18px;
+    border: 1px solid #e5e7eb;              /* grey border */
+    box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+    padding: 24px 24px 28px;
+}
+
+/* Header area */
+.wizard-header {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.wizard-logo {
+    text-align: center;
+    margin-bottom: 10px;
+}
+
+.wizard-logo img {
+    max-height: 72px;
+    object-fit: contain;
+}
+
+.wizard-header h3 {
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: #111827;
+}
+
+.wizard-subtitle {
+    font-size: 0.9rem;
+    color: #6b7280;
+}
+
+/* Generic form layout */
+.wizard-content .form-group {
+    margin-bottom: 16px;
+}
+
+.form-group {
+    margin-bottom: 16px;
+    text-align: left;
+}
+
+label {
+    display: block;
+    margin-bottom: 6px;
+    color: #111827;
+    font-weight: 500;
+    font-size: 0.9rem;
+}
+
+/* Fields */
+.form-control {
+    width: 100%;
+    min-height: 48px;
+    padding: 10px 12px;
+    font-size: 0.95rem;
+    line-height: 1.4;
+    border-radius: 10px;
+    border: 1px solid #d1d5db;
+    box-sizing: border-box;
+}
+
+.form-control:focus {
+    border-color: #a855f7;
+    box-shadow: 0 0 0 1px #a855f7;
+    outline: none;
+}
+
+/* Selects inside auth card */
+.wizard-box select.form-control,
+.wizard-box select {
+    min-height: 48px;
+}
+
+/* Alerts (errors / success) */
+.alert {
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    margin-bottom: 14px;
+}
+
+.alert-danger {
+    background-color: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+}
+
+.alert-success {
+    background-color: #dcfce7;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+}
+
+/* Buttons in auth card – rounded, solid */
+.wizard-actions {
+    margin-top: 10px;
+}
+
+.wizard-box .btn {
+    border-radius: 999px;
+    font-weight: 500;
+    font-size: 0.95rem;
+    padding: 0.6rem 1.2rem;
+}
+
+/* Primary / success → dark pill (like dashboard actions) */
+.wizard-box .btn-primary,
+.wizard-box .btn-success {
+    background-color: #111827;
+    border-color: #111827;
+}
+
+.wizard-box .btn-primary:hover,
+.wizard-box .btn-success:hover {
+    background-color: #020617;
+    border-color: #020617;
+}
+
+/* Secondary button */
+.wizard-box .btn-secondary {
+    background-color: #e5e7eb;
+    border-color: #e5e7eb;
+    color: #111827;
+}
+
+.wizard-box .btn-secondary:hover {
+    background-color: #d1d5db;
+    border-color: #d1d5db;
+}
+
+/* Social login buttons */
+.auth-social-btn {
+    max-width: 300px;
+}
+
+.auth-social-logo {
+    height: 20px;
+}
+
+.auth-facebook-btn {
+    background-color: #1877f2;
+    border-color: #1877f2;
+}
+
+.auth-facebook-btn:hover {
+    background-color: #1455b9;
+    border-color: #1455b9;
+}
+
+/* Divider text under social buttons */
+.auth-divider-text {
+    font-size: 0.9rem;
+}
+
+/* Narrow email-only form */
+.auth-email-form {
+    max-width: 300px;
+    margin: 0 auto;
+}
+
+/* Footer links */
+.form-footer {
+    margin-top: 18px;
+    font-size: 0.9rem;
+    text-align: center;
+    color: #4b5563;
+}
+
+.form-footer a {
+    color: #7c3aed;
+    text-decoration: none;
+}
+
+.form-footer a:hover {
+    text-decoration: underline;
+}
+
+/* Password toggle pill */
+span.input-group-text.toggle-password {
+    width: 46px;
+    justify-content: center;
+    border-radius: 999px;
+    border-left: 0;
+}
+
+.input-group .form-control {
+    border-radius: 999px 0 0 999px;
+}
+
+/* Password checklist */
+.password-checklist {
+    list-style: none;
+    padding-left: 0;
+    font-size: 0.85rem;
+    color: #4b5563;
+}
+
+/* Step indicator for multi-step profile form */
+.step-indicator {
+    background-color: #f3f4f6;
+    height: 8px;
+    border-radius: 999px;
+    overflow: hidden;
+    margin-top: 10px;
+    margin-bottom: 22px;
+    position: relative;
+}
+
+.step-indicator-fill {
+    background: linear-gradient(90deg, #a855f7, #ec4899);
+    height: 100%;
+    width: 33%;
+    transition: width 0.3s ease;
+}
+
+.progress-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.7rem;
+    color: #111827;
+    font-weight: 600;
+}
+
+/* Multi-step */
+.form-step {
+    display: none;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.form-step.active {
+    display: flex;
+}
+
+/* Username helper */
+#username-message-wrapper {
+    min-height: 2.5rem;
+}
+
+#username-status {
+    display: block;
+    font-size: 0.85rem;
+}
+
+/* Inline error helpers (JS toggles visibility) */
+#phone-error,
+#dob-error {
+    display: none;
+    font-size: 0.8rem;
+}
+
+/* Generic muted text used in headers */
+.text-muted-small {
+    font-size: 0.9rem;
+    color: #6b7280;
+}
+
+/* Responsive spacing */
+@media (min-width: 768px) {
+    body.registration_page {
+        padding: 64px 16px;
+    }
+
+    .wizard-box {
+        padding: 32px 40px 36px;
+    }
+}

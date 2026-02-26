@@ -18,6 +18,8 @@ header.header .header-content {
     column-gap: 24px;
 }
 
+/* ---------------- Logo ---------------- */
+
 header.header .logo {
     display: inline-flex;
     align-items: center;
@@ -46,6 +48,8 @@ header.header .logo-text {
     color: var(--purple-dark);
 }
 
+/* ---------------- Navigation ---------------- */
+
 header.header .nav {
     display: flex;
     justify-content: center;
@@ -71,12 +75,16 @@ header.header .nav-link:hover {
     color: var(--purple-dark);
 }
 
+/* ---------------- Right Utility Section ---------------- */
+
 header.header .utility-icons {
     display: flex;
     align-items: center;
     gap: 14px;
     justify-self: end;
 }
+
+/* ---------------- Language Selector ---------------- */
 
 header.header .language-selector {
     display: inline-flex;
@@ -106,29 +114,123 @@ header.header .language-selector:focus-visible {
     outline-offset: 2px;
 }
 
+/* ---------------- Default Utility Icons ---------------- */
+
 header.header .utility-icon {
     color: var(--text-dark);
     text-decoration: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 40px;
     height: 40px;
     border-radius: 10px;
+    padding: 0 10px;
 }
 
 header.header .utility-icon i {
-    font-size: 24px !important;
-    transition: color 0.3s;
-}
-
-header.header .auth-icon i {
     font-size: 22px !important;
+    transition: color 0.3s;
 }
 
 header.header .utility-icon:hover i {
     color: var(--purple-dark);
 }
+
+/* ============================= */
+/* ===== Logged In Styling ===== */
+/* ============================= */
+
+.user-menu {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* User Chip */
+
+.user-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: #f3e8ff;
+    border: 1px solid #e9d5ff;
+}
+
+/* Initials Circle */
+
+.user-avatar-circle {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--purple-dark);
+    color: #ffffff;
+    font-size: 0.8rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Name + label */
+
+.user-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+}
+
+.user-label {
+    font-size: 0.65rem;
+    color: #6b7280;
+}
+
+.user-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #111827;
+    max-width: 140px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Logout Pill */
+
+.logout-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    text-decoration: none;
+    border: 1px solid #ef4444;
+    color: #ef4444;
+    transition: all 0.2s ease;
+}
+
+.logout-pill:hover {
+    background: #fee2e2;
+}
+
+/* Logged Out Auth Button */
+
+.auth-icon {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+}
+
+.auth-icon .auth-label {
+    font-size: 0.85rem;
+}
+
+/* ============================= */
+/* ========= Responsive ========= */
+/* ============================= */
 
 @media (max-width: 1024px) {
     header.header .header-content {
@@ -146,9 +248,14 @@ header.header .utility-icon:hover i {
         gap: 24px;
         flex-wrap: wrap;
     }
+
+    .user-name {
+        max-width: 100px;
+    }
 }
 
 @media (max-width: 768px) {
+
     header.header {
         padding: 8px 0 !important;
     }
@@ -158,7 +265,7 @@ header.header .utility-icon:hover i {
     }
 
     header.header .nav-link {
-        font-size: 16px !important;
+        font-size: 15px !important;
     }
 
     header.header .utility-icon i {
@@ -174,4 +281,7 @@ header.header .utility-icon:hover i {
         font-size: 20px;
     }
 
+    .logout-pill span {
+        display: none; /* icon only on small screens */
+    }
 }
