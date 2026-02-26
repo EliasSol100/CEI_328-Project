@@ -1,5 +1,62 @@
 <?php
 session_start();
+require_once "authentication/database.php";
+require_once "authentication/get_config.php";
+
+$system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
+$logo_path    = getSystemConfig("logo_path") ?: "authentication/assets/images/athina-eshop-logo.png";
+if (!file_exists($logo_path) && file_exists("authentication/" . $logo_path)) {
+    $logo_path = "authentication/" . $logo_path;
+}
+if (!file_exists($logo_path)) {
+    $logo_path = "authentication/assets/images/athina-eshop-logo.png";
+}
+
+// --------- User / Profile handling ----------
+$role     = "guest";
+$fullName = "Guest";
+
+if (isset($_SESSION["user"])) {
+    $userId   = $_SESSION["user"]["id"];
+    $fullName = $_SESSION["user"]["full_name"] ?? 'User';
+    $role     = $_SESSION["user"]["role"] ?? 'user';
+
+    // Check if profile is complete; if not, force completion
+    $stmt = $conn->prepare("
+        SELECT country, city, address, postcode, dob, phone 
+        FROM users 
+        WHERE id = ?
+    ");
+
+    if (!$stmt) {
+        $_SESSION["user"]["profile_complete"] = false;
+        header("Location: authentication/complete_profile.php");
+        exit();
+    }
+    $stmt->bind_param("i", $userId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $user   = $result->fetch_assoc();
+
+    $fieldsComplete =
+        $user &&
+        $user["country"]  &&
+        $user["city"]     &&
+        $user["address"]  &&
+        $user["postcode"] &&
+        $user["dob"]      &&
+        $user["phone"];
+
+    $_SESSION["user"]["profile_complete"] = $fieldsComplete;
+
+    if (!$fieldsComplete) {
+        header("Location: authentication/complete_profile.php");
+        exit();
+    }
+
+    $_SESSION['user_id'] = $userId;
+    $_SESSION['role']    = $role;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -8,12 +65,12 @@ session_start();
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Creations by Athina - Shop</title>
     <link rel="stylesheet" href="authentication/assets/styling/styles.css">
-    <link rel="stylesheet" href="authentication/assets/styling/navigation.css?v=2">
+    <link rel="stylesheet" href="authentication/assets/styling/header.css?v=3">
     <link rel="stylesheet" href="authentication/assets/styling/shopstyle.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="authentication/assets/js/translations.js" defer></script>
 </head>
-<body>
+<body class="site-page">
     <?php
     $activePage = 'shop';
     include __DIR__ . '/include/header.php';
@@ -43,8 +100,8 @@ session_start();
                         <h4>Price</h4>
                         <input class="price-range-input" type="range" min="10" max="80" value="55">
                         <div class="price-range-labels">
-                            <span>€10</span>
-                            <span>€80</span>
+                            <span>ï¿½10</span>
+                            <span>ï¿½80</span>
                         </div>
                     </div>
 
@@ -67,7 +124,7 @@ session_start();
                             </div>
                             <div class="shop-product-info">
                                 <h3 class="shop-product-name">Crochet Bunny Amigurumi</h3>
-                                <div class="shop-price-row"><span class="shop-price">€28</span><span class="shop-stock">In Stock</span></div>
+                                <div class="shop-price-row"><span class="shop-price">ï¿½28</span><span class="shop-stock">In Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9733; <span class="shop-review-count">(24)</span></div>
                             </div>
                         </article>
@@ -78,7 +135,7 @@ session_start();
                             </div>
                             <div class="shop-product-info">
                                 <h3 class="shop-product-name">Pastel Baby Blanket</h3>
-                                <div class="shop-price-row"><span class="shop-price">€45</span><span class="shop-stock">In Stock</span></div>
+                                <div class="shop-price-row"><span class="shop-price">ï¿½45</span><span class="shop-stock">In Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9733; <span class="shop-review-count">(18)</span></div>
                             </div>
                         </article>
@@ -89,7 +146,7 @@ session_start();
                             </div>
                             <div class="shop-product-info">
                                 <h3 class="shop-product-name">Crochet Tote Bag</h3>
-                                <div class="shop-price-row"><span class="shop-price">€32</span><span class="shop-stock">In Stock</span></div>
+                                <div class="shop-price-row"><span class="shop-price">ï¿½32</span><span class="shop-stock">In Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9734; <span class="shop-review-count">(31)</span></div>
                             </div>
                         </article>
@@ -100,7 +157,7 @@ session_start();
                             </div>
                             <div class="shop-product-info">
                                 <h3 class="shop-product-name">Rainbow Yarn Set</h3>
-                                <div class="shop-price-row"><span class="shop-price">€22</span><span class="shop-stock">In Stock</span></div>
+                                <div class="shop-price-row"><span class="shop-price">ï¿½22</span><span class="shop-stock">In Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9733; <span class="shop-review-count">(45)</span></div>
                             </div>
                         </article>
@@ -111,7 +168,7 @@ session_start();
                             </div>
                             <div class="shop-product-info">
                                 <h3 class="shop-product-name">Decorative Cushion Cover</h3>
-                                <div class="shop-price-row"><span class="shop-price">€26</span><span class="shop-stock">In Stock</span></div>
+                                <div class="shop-price-row"><span class="shop-price">ï¿½26</span><span class="shop-stock">In Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9734; <span class="shop-review-count">(22)</span></div>
                             </div>
                         </article>
@@ -122,7 +179,7 @@ session_start();
                             </div>
                             <div class="shop-product-info">
                                 <h3 class="shop-product-name">Teddy Bear Amigurumi</h3>
-                                <div class="shop-price-row"><span class="shop-price">€30</span><span class="shop-stock out">Out of Stock</span></div>
+                                <div class="shop-price-row"><span class="shop-price">ï¿½30</span><span class="shop-stock out">Out of Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9734; <span class="shop-review-count">(38)</span></div>
                             </div>
                         </article>

@@ -26,9 +26,13 @@ if (isset($_SESSION["user"])) {
         SELECT country, city, address, postcode, dob, phone 
         FROM users 
         WHERE id = ?
-
-        // tapakis
     ");
+
+    if (!$stmt) {
+        $_SESSION["user"]["profile_complete"] = false;
+        header("Location: authentication/complete_profile.php");
+        exit();
+    }
     $stmt->bind_param("i", $userId);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -61,11 +65,11 @@ if (isset($_SESSION["user"])) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Creations by Athina - Handmade Crochet Creations</title>
     <link rel="stylesheet" href="authentication/assets/styling/styles.css">
-    <link rel="stylesheet" href="authentication/assets/styling/navigation.css?v=2">
+    <link rel="stylesheet" href="authentication/assets/styling/header.css?v=3">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="authentication/assets/js/translations.js" defer></script>
 </head>
-<body>
+<body class="site-page">
     <?php
     $activePage = 'home';
     include __DIR__ . '/include/header.php';
