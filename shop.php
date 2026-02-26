@@ -85,6 +85,16 @@ if (isset($_SESSION["user"])) {
 
             <div class="shop-layout">
                 <aside class="shop-filters">
+                    <div class="shop-search">
+                        <label for="shop-search-input" class="shop-search-label">Search</label>
+                        <div class="shop-search-input-wrap">
+                            <i class="fas fa-search" aria-hidden="true"></i>
+                            <input id="shop-search-input" type="search" placeholder="Search products...">
+                        </div>
+                    </div>
+
+                    <br>
+
                     <h3>Filters</h3>
 
                     <div class="filter-group">

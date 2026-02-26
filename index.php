@@ -232,7 +232,7 @@ if (isset($_SESSION["user"])) {
             <div class="features-grid">
                 <div class="feature-card">
                     <div class="feature-icon">
-                        <i class="fas fa-sparkles"></i>
+                        <i class="fas fa-star"></i>
                     </div>
                     <h3 class="feature-title" data-translate="handmadeQuality">Handmade Quality</h3>
                     <p class="feature-description" data-translate="handmadeQualityDesc">Each item is carefully crafted by hand with attention to detail</p>

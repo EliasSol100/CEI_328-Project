@@ -13,6 +13,7 @@
                         <li><a href="#" data-translate="myAccount">My Account</a></li>
                         <li><a href="#" data-translate="shoppingCart">Shopping Cart</a></li>
                         <li><a href="about.php" data-translate="about">About</a></li>
+                        <li><a href="contact.php" data-translate="contact">Contact</a></li>
                     </ul>
                 </div>
                 <div class="footer-column">
