@@ -74,7 +74,35 @@ header.header .nav-link:hover {
 header.header .utility-icons {
     display: flex;
     align-items: center;
+    gap: 14px;
     justify-self: end;
+}
+
+header.header .language-selector {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #4a5568;
+    font-size: 32px;
+    padding: 6px 8px;
+    border-radius: 10px;
+    user-select: none;
+}
+
+header.header .language-selector span {
+    font-size: 30px;
+    line-height: 1;
+    color: #334155;
+    font-weight: 500;
+}
+
+header.header .language-selector:hover {
+    background: rgba(106, 13, 173, 0.08);
+}
+
+header.header .language-selector:focus-visible {
+    outline: 2px solid rgba(106, 13, 173, 0.35);
+    outline-offset: 2px;
 }
 
 header.header .utility-icon {
@@ -129,5 +157,13 @@ header.header .utility-icon:hover i {
 
     header.header .utility-icon i {
         font-size: 20px !important;
+    }
+
+    header.header .language-selector {
+        font-size: 26px;
+    }
+
+    header.header .language-selector span {
+        font-size: 24px;
     }
 }

@@ -1,4 +1,3 @@
-// Translations object
 const translations = {
     en: {
         // Header
@@ -6,12 +5,12 @@ const translations = {
         shop: "Shop",
         about: "About",
         contact: "Contact",
-        
+
         // Hero Section
         heroTitle: "Handmade Crochet Creations with Love",
         heroSubtitle: "Discover unique, handcrafted crochet items perfect for gifts or your home.",
         shopNow: "Shop Now",
-        
+
         // Shop by Collection
         shopByCollection: "Shop by Collection",
         exploreCollections: "Explore our carefully curated collections",
@@ -19,23 +18,40 @@ const translations = {
         cozyBlankets: "Cozy Blankets",
         accessories: "Accessories",
         homeDecor: "Home Decor",
-        
+
         // Best Sellers
         bestSellers: "Best Sellers",
         mostLoved: "Our most loved creations",
         inStock: "In Stock",
+        outOfStock: "Out of Stock",
         viewAllProducts: "View All Products",
-        
+
+        // Shop Page
+        shopPageSubtitle: "Find your favorite handmade crochet creations",
+        shopSearchPlaceholder: "Search products...",
+        filters: "Filters",
+        category: "Category",
+        allProducts: "All Products",
+        blankets: "Blankets",
+        price: "Price",
+        tags: "Tags",
+        giftReady: "Gift-ready",
+        babySafe: "Baby-safe",
+        pastelTag: "Pastel",
+        limitedTag: "Limited",
+
         // Products
         crochetBunny: "Crochet Bunny Amigurumi",
         pastelBlanket: "Pastel Baby Blanket",
+        crochetToteBag: "Crochet Tote Bag",
         rainbowYarn: "Rainbow Yarn Set",
         cushionCover: "Decorative Cushion Cover",
-        
+        teddyBearAmigurumi: "Teddy Bear Amigurumi",
+
         // Follow Journey
         followJourney: "Follow Our Journey",
         instagramHandle: "@creationsbyathina",
-        
+
         // Features
         handmadeQuality: "Handmade Quality",
         handmadeQualityDesc: "Each item is carefully crafted by hand with attention to detail",
@@ -43,7 +59,7 @@ const translations = {
         perfectGiftsDesc: "Unique presents that show you care, with gift wrapping available",
         ecoFriendly: "Eco-Friendly",
         ecoFriendlyDesc: "Made with sustainable and high-quality materials",
-        
+
         // Footer
         aboutUs: "About Us",
         aboutUsText: "Handmade crochet creations made with love and passion. Each piece is unique and crafted with care.",
@@ -68,47 +84,64 @@ const translations = {
         shop: "Κατάστημα",
         about: "Σχετικά",
         contact: "Επικοινωνία",
-        
+
         // Hero Section
-        heroTitle: "Χειροποίητες Βελονάκια Δημιουργίες με Αγάπη",
-        heroSubtitle: "Ανακαλύψτε μοναδικά, χειροποίητα βελονάκια αντικείμενα ιδανικά για δώρα ή το σπίτι σας.",
+        heroTitle: "Χειροποίητες Πλεκτές Δημιουργίες με Αγάπη",
+        heroSubtitle: "Ανακάλυψε μοναδικά, χειροποίητα πλεκτά αντικείμενα ιδανικά για δώρα ή το σπίτι σου.",
         shopNow: "Αγόρασε Τώρα",
-        
+
         // Shop by Collection
-        shopByCollection: "Αγόρασε Ανά Συλλογή",
-        exploreCollections: "Εξερευνήστε τις προσεκτικά επιλεγμένες συλλογές μας",
+        shopByCollection: "Αγόρασε ανά Συλλογή",
+        exploreCollections: "Εξερεύνησε τις προσεκτικά επιλεγμένες συλλογές μας",
         amigurumiToys: "Amigurumi Παιχνίδια",
         cozyBlankets: "Ζεστές Κουβέρτες",
         accessories: "Αξεσουάρ",
         homeDecor: "Διακόσμηση Σπιτιού",
-        
+
         // Best Sellers
-        bestSellers: "Περισσότερο Αγαπημένα",
+        bestSellers: "Best Sellers",
         mostLoved: "Οι πιο αγαπημένες δημιουργίες μας",
-        inStock: "Σε Απόθεμα",
-        viewAllProducts: "Δες Όλα τα Προϊόντα",
-        
+        inStock: "Σε απόθεμα",
+        outOfStock: "Εκτός αποθέματος",
+        viewAllProducts: "Δες όλα τα προϊόντα",
+
+        // Shop Page
+        shopPageSubtitle: "Βρες τις αγαπημένες σου χειροποίητες πλεκτές δημιουργίες",
+        shopSearchPlaceholder: "Αναζήτηση προϊόντων...",
+        filters: "Φίλτρα",
+        category: "Κατηγορία",
+        allProducts: "Όλα τα προϊόντα",
+        blankets: "Κουβέρτες",
+        price: "Τιμή",
+        tags: "Tags",
+        giftReady: "Κατάλληλο για δώρο",
+        babySafe: "Ασφαλές για μωρά",
+        pastelTag: "Παστέλ",
+        limitedTag: "Περιορισμένο",
+
         // Products
-        crochetBunny: "Βελονάκι Κουνελάκι Amigurumi",
+        crochetBunny: "Πλεκτό Κουνελάκι Amigurumi",
         pastelBlanket: "Παστέλ Κουβέρτα Μωρού",
+        crochetToteBag: "Πλεκτή Tote Τσάντα",
         rainbowYarn: "Σετ Νήματα Ουράνιο Τόξο",
-        cushionCover: "Διακοσμητικό Καπάκι Μαξιλαριού",
-        
+        cushionCover: "Διακοσμητικό Κάλυμμα Μαξιλαριού",
+        teddyBearAmigurumi: "Amigurumi Αρκουδάκι",
+
         // Follow Journey
-        followJourney: "Ακολούθησε το Ταξίδι Μας",
+        followJourney: "Ακολούθησε το Ταξίδι μας",
         instagramHandle: "@creationsbyathina",
-        
+
         // Features
         handmadeQuality: "Χειροποίητη Ποιότητα",
-        handmadeQualityDesc: "Κάθε αντικείμενο είναι προσεκτικά κατασκευασμένο με το χέρι με προσοχή στη λεπτομέρεια",
+        handmadeQualityDesc: "Κάθε αντικείμενο είναι προσεκτικά κατασκευασμένο στο χέρι με προσοχή στη λεπτομέρεια",
         perfectGifts: "Ιδανικά Δώρα",
         perfectGiftsDesc: "Μοναδικά δώρα που δείχνουν ότι νοιάζεσαι, με δυνατότητα συσκευασίας δώρου",
         ecoFriendly: "Φιλικό προς το Περιβάλλον",
         ecoFriendlyDesc: "Κατασκευασμένα με βιώσιμα και υψηλής ποιότητας υλικά",
-        
+
         // Footer
-        aboutUs: "Σχετικά με Εμάς",
-        aboutUsText: "Χειροποίητες βελονάκια δημιουργίες φτιαγμένες με αγάπη και πάθος. Κάθε κομμάτι είναι μοναδικό και κατασκευασμένο με φροντίδα.",
+        aboutUs: "Σχετικά με εμάς",
+        aboutUsText: "Χειροποίητες πλεκτές δημιουργίες φτιαγμένες με αγάπη και πάθος. Κάθε κομμάτι είναι μοναδικό και κατασκευασμένο με φροντίδα.",
         quickLinks: "Γρήγοροι Σύνδεσμοι",
         shopAll: "Όλα τα Προϊόντα",
         myAccount: "Ο Λογαριασμός μου",
@@ -119,68 +152,62 @@ const translations = {
         termsOfService: "Όροι Χρήσης",
         faq: "Συχνές Ερωτήσεις",
         newsletter: "Ενημέρωση",
-        newsletterText: "Εγγραφείτε για να λαμβάνετε ειδικές προσφορές και ενημερώσεις!",
-        yourEmail: "Το email σας",
+        newsletterText: "Εγγράψου για να λαμβάνεις ειδικές προσφορές και ενημερώσεις!",
+        yourEmail: "Το email σου",
         subscribe: "Εγγραφή",
         copyright: "© 2024 Creations by Athina. Όλα τα δικαιώματα διατηρούνται."
     }
 };
 
-// Language switcher functionality
-let currentLanguage = localStorage.getItem('language') || 'en';
+let currentLanguage = localStorage.getItem("language") || "en";
 
 function setLanguage(lang) {
     currentLanguage = lang;
-    localStorage.setItem('language', lang);
-    
-    // Update all elements with data-translate attribute
-    document.querySelectorAll('[data-translate]').forEach(element => {
-        const key = element.getAttribute('data-translate');
+    localStorage.setItem("language", lang);
+
+    document.querySelectorAll("[data-translate]").forEach((element) => {
+        const key = element.getAttribute("data-translate");
         if (translations[lang] && translations[lang][key]) {
             element.textContent = translations[lang][key];
         }
     });
-    
-    // Update placeholders for input fields
-    document.querySelectorAll('[data-translate-placeholder]').forEach(element => {
-        const key = element.getAttribute('data-translate-placeholder');
+
+    document.querySelectorAll("[data-translate-placeholder]").forEach((element) => {
+        const key = element.getAttribute("data-translate-placeholder");
         if (translations[lang] && translations[lang][key]) {
             element.placeholder = translations[lang][key];
         }
     });
-    
-    // Update language selector display
-    const langDisplay = document.querySelector('.language-selector span');
+
+    const langDisplay = document.querySelector(".language-selector span");
     if (langDisplay) {
-        // Show "ΕΛ" for Greek, "EN" for English
-        langDisplay.textContent = lang === 'el' ? 'ΕΛ' : 'EN';
+        langDisplay.textContent = lang === "el" ? "ΕΛ" : "EN";
     }
-    
-    // Update HTML lang attribute
+
     document.documentElement.lang = lang;
-    
-    console.log('Language set to:', lang);
 }
 
-// Initialize language on page load
-document.addEventListener('DOMContentLoaded', () => {
-    // Set initial language
+document.addEventListener("DOMContentLoaded", () => {
     setLanguage(currentLanguage);
-    
-    // Add click event to language selector (works for the whole div, icon, and span)
-    const languageSelector = document.querySelector('.language-selector');
+
+    const languageSelector = document.querySelector(".language-selector");
     if (languageSelector) {
-        // Use event delegation to catch all clicks
-        languageSelector.addEventListener('click', function(e) {
+        languageSelector.addEventListener("click", (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const newLang = currentLanguage === 'en' ? 'el' : 'en';
-            console.log('Switching language from', currentLanguage, 'to', newLang);
+            const newLang = currentLanguage === "en" ? "el" : "en";
             setLanguage(newLang);
         });
-        
-        // Make sure it's visually clickable
-        languageSelector.style.cursor = 'pointer';
-        languageSelector.setAttribute('title', 'Click to change language');
+
+        languageSelector.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                const newLang = currentLanguage === "en" ? "el" : "en";
+                setLanguage(newLang);
+            }
+        });
+
+        languageSelector.style.cursor = "pointer";
+        languageSelector.setAttribute("title", "Click to change language");
     }
 });

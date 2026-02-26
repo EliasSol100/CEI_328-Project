@@ -80,8 +80,8 @@ if (isset($_SESSION["user"])) {
     <main class="shop-page">
         <div class="container">
             <div class="shop-head">
-                <h1>Shop</h1>
-                <p>Find your favorite handmade crochet creations</p>
+                <h1 data-translate="shop">Shop</h1>
+                <p data-translate="shopPageSubtitle">Find your favorite handmade crochet creations</p>
             </div>
 
             <div class="shop-layout">
@@ -89,25 +89,25 @@ if (isset($_SESSION["user"])) {
                     <div class="shop-search">
                         <div class="shop-search-input-wrap">
                             <i class="fas fa-search" aria-hidden="true"></i>
-                            <input id="shop-search-input" type="search" placeholder="Search products...">
+                            <input id="shop-search-input" type="search" data-translate-placeholder="shopSearchPlaceholder" placeholder="Search products...">
                         </div>
                     </div>
 
                     <br>
 
-                    <h3>Filters</h3>
+                    <h3 data-translate="filters">Filters</h3>
 
                     <div class="filter-group">
-                        <h4>Category</h4>
-                        <label class="filter-option"><input type="radio" name="category" checked> All Products</label>
-                        <label class="filter-option"><input type="radio" name="category"> Amigurumi Toys</label>
-                        <label class="filter-option"><input type="radio" name="category"> Blankets</label>
-                        <label class="filter-option"><input type="radio" name="category"> Accessories</label>
-                        <label class="filter-option"><input type="radio" name="category"> Home Decor</label>
+                        <h4 data-translate="category">Category</h4>
+                        <label class="filter-option"><input type="radio" name="category" checked> <span data-translate="allProducts">All Products</span></label>
+                        <label class="filter-option"><input type="radio" name="category"> <span data-translate="amigurumiToys">Amigurumi Toys</span></label>
+                        <label class="filter-option"><input type="radio" name="category"> <span data-translate="blankets">Blankets</span></label>
+                        <label class="filter-option"><input type="radio" name="category"> <span data-translate="accessories">Accessories</span></label>
+                        <label class="filter-option"><input type="radio" name="category"> <span data-translate="homeDecor">Home Decor</span></label>
                     </div>
 
                     <div class="filter-group">
-                        <h4>Price</h4>
+                        <h4 data-translate="price">Price</h4>
                         <input class="price-range-input" type="range" min="10" max="80" value="55">
                         <div class="price-range-labels">
                             <span>€10</span>
@@ -116,12 +116,12 @@ if (isset($_SESSION["user"])) {
                     </div>
 
                     <div class="filter-group">
-                        <h4>Tags</h4>
+                        <h4 data-translate="tags">Tags</h4>
                         <div class="chip-row">
-                            <span class="chip">Gift-ready</span>
-                            <span class="chip">Baby-safe</span>
-                            <span class="chip">Pastel</span>
-                            <span class="chip">Limited</span>
+                            <span class="chip" data-translate="giftReady">Gift-ready</span>
+                            <span class="chip" data-translate="babySafe">Baby-safe</span>
+                            <span class="chip" data-translate="pastelTag">Pastel</span>
+                            <span class="chip" data-translate="limitedTag">Limited</span>
                         </div>
                     </div>
                 </aside>
@@ -133,8 +133,8 @@ if (isset($_SESSION["user"])) {
                                 <button class="shop-fav"><i class="far fa-heart"></i></button>
                             </div>
                             <div class="shop-product-info">
-                                <h3 class="shop-product-name">Crochet Bunny Amigurumi</h3>
-                                <div class="shop-price-row"><span class="shop-price">€28</span><span class="shop-stock">In Stock</span></div>
+                                <h3 class="shop-product-name" data-translate="crochetBunny">Crochet Bunny Amigurumi</h3>
+                                <div class="shop-price-row"><span class="shop-price">€28</span><span class="shop-stock" data-translate="inStock">In Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9733; <span class="shop-review-count">(24)</span></div>
                             </div>
                         </article>
@@ -144,8 +144,8 @@ if (isset($_SESSION["user"])) {
                                 <button class="shop-fav"><i class="far fa-heart"></i></button>
                             </div>
                             <div class="shop-product-info">
-                                <h3 class="shop-product-name">Pastel Baby Blanket</h3>
-                                <div class="shop-price-row"><span class="shop-price">€45</span><span class="shop-stock">In Stock</span></div>
+                                <h3 class="shop-product-name" data-translate="pastelBlanket">Pastel Baby Blanket</h3>
+                                <div class="shop-price-row"><span class="shop-price">€45</span><span class="shop-stock" data-translate="inStock">In Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9733; <span class="shop-review-count">(18)</span></div>
                             </div>
                         </article>
@@ -155,8 +155,8 @@ if (isset($_SESSION["user"])) {
                                 <button class="shop-fav"><i class="far fa-heart"></i></button>
                             </div>
                             <div class="shop-product-info">
-                                <h3 class="shop-product-name">Crochet Tote Bag</h3>
-                                <div class="shop-price-row"><span class="shop-price">€32</span><span class="shop-stock">In Stock</span></div>
+                                <h3 class="shop-product-name" data-translate="crochetToteBag">Crochet Tote Bag</h3>
+                                <div class="shop-price-row"><span class="shop-price">€32</span><span class="shop-stock" data-translate="inStock">In Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9734; <span class="shop-review-count">(31)</span></div>
                             </div>
                         </article>
@@ -166,8 +166,8 @@ if (isset($_SESSION["user"])) {
                                 <button class="shop-fav"><i class="far fa-heart"></i></button>
                             </div>
                             <div class="shop-product-info">
-                                <h3 class="shop-product-name">Rainbow Yarn Set</h3>
-                                <div class="shop-price-row"><span class="shop-price">€22</span><span class="shop-stock">In Stock</span></div>
+                                <h3 class="shop-product-name" data-translate="rainbowYarn">Rainbow Yarn Set</h3>
+                                <div class="shop-price-row"><span class="shop-price">€22</span><span class="shop-stock" data-translate="inStock">In Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9733; <span class="shop-review-count">(45)</span></div>
                             </div>
                         </article>
@@ -177,8 +177,8 @@ if (isset($_SESSION["user"])) {
                                 <button class="shop-fav"><i class="far fa-heart"></i></button>
                             </div>
                             <div class="shop-product-info">
-                                <h3 class="shop-product-name">Decorative Cushion Cover</h3>
-                                <div class="shop-price-row"><span class="shop-price">€26</span><span class="shop-stock">In Stock</span></div>
+                                <h3 class="shop-product-name" data-translate="cushionCover">Decorative Cushion Cover</h3>
+                                <div class="shop-price-row"><span class="shop-price">€26</span><span class="shop-stock" data-translate="inStock">In Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9734; <span class="shop-review-count">(22)</span></div>
                             </div>
                         </article>
@@ -188,8 +188,8 @@ if (isset($_SESSION["user"])) {
                                 <button class="shop-fav"><i class="far fa-heart"></i></button>
                             </div>
                             <div class="shop-product-info">
-                                <h3 class="shop-product-name">Teddy Bear Amigurumi</h3>
-                                <div class="shop-price-row"><span class="shop-price">€30</span><span class="shop-stock out">Out of Stock</span></div>
+                                <h3 class="shop-product-name" data-translate="teddyBearAmigurumi">Teddy Bear Amigurumi</h3>
+                                <div class="shop-price-row"><span class="shop-price">€30</span><span class="shop-stock out" data-translate="outOfStock">Out of Stock</span></div>
                                 <div class="shop-rating">&#9733;&#9733;&#9733;&#9733;&#9734; <span class="shop-review-count">(38)</span></div>
                             </div>
                         </article>

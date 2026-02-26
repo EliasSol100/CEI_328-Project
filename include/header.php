@@ -9,6 +9,10 @@
             <?php include __DIR__ . '/navigation.php'; ?>
 
             <div class="utility-icons">
+                <div class="language-selector" role="button" tabindex="0" aria-label="Toggle language">
+                    <i class="fas fa-globe"></i>
+                    <span>EN</span>
+                </div>
                 <a href="#" class="utility-icon cart-icon" aria-label="Shopping cart">
                     <i class="fas fa-shopping-cart"></i>
                 </a>
