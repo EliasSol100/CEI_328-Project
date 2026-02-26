@@ -13,6 +13,9 @@
                     <i class="fas fa-globe"></i>
                     <span>EN</span>
                 </div>
+                <a href="authentication/login.php" class="utility-icon auth-icon" aria-label="Register or Login" title="Register / Login">
+                    <i class="fas fa-right-to-bracket"></i>
+                </a>
                 <a href="#" class="utility-icon cart-icon" aria-label="Shopping cart">
                     <i class="fas fa-shopping-cart"></i>
                 </a>

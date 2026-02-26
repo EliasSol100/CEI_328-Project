@@ -83,14 +83,15 @@ header.header .language-selector {
     align-items: center;
     gap: 8px;
     color: #4a5568;
-    font-size: 32px;
-    padding: 6px 8px;
+    font-size: 20px;
+    padding: 0 10px;
+    height: 40px;
     border-radius: 10px;
     user-select: none;
 }
 
 header.header .language-selector span {
-    font-size: 30px;
+    font-size: 24px;
     line-height: 1;
     color: #334155;
     font-weight: 500;
@@ -111,13 +112,18 @@ header.header .utility-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
 }
 
 header.header .utility-icon i {
     font-size: 24px !important;
     transition: color 0.3s;
+}
+
+header.header .auth-icon i {
+    font-size: 22px !important;
 }
 
 header.header .utility-icon:hover i {
@@ -160,10 +166,12 @@ header.header .utility-icon:hover i {
     }
 
     header.header .language-selector {
-        font-size: 26px;
+        font-size: 18px;
+        height: 36px;
     }
 
     header.header .language-selector span {
-        font-size: 24px;
+        font-size: 20px;
     }
+
 }

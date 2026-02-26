@@ -5,6 +5,7 @@ const translations = {
         shop: "Shop",
         about: "About",
         contact: "Contact",
+        registerLogin: "Register / Login",
 
         // Hero Section
         heroTitle: "Handmade Crochet Creations with Love",
@@ -84,6 +85,7 @@ const translations = {
         shop: "Κατάστημα",
         about: "Σχετικά",
         contact: "Επικοινωνία",
+        registerLogin: "Σύνδεση / Εγγραφή",
 
         // Hero Section
         heroTitle: "Χειροποίητες Πλεκτές Δημιουργίες με Αγάπη",
@@ -181,7 +183,7 @@ function setLanguage(lang) {
 
     const langDisplay = document.querySelector(".language-selector span");
     if (langDisplay) {
-        langDisplay.textContent = lang === "el" ? "ΕΛ" : "EN";
+        langDisplay.textContent = lang === "el" ? "GR" : "EN";
     }
 
     document.documentElement.lang = lang;
