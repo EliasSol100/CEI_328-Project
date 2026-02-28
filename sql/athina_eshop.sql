@@ -400,8 +400,8 @@ INSERT IGNORE INTO `products` (`sku`, `nameGR`, `nameEN`, `basePrice`, `costPric
   ('SKU-005', 'Κούκλα Κατά Παραγγελία',  'Custom Doll',     55.00, 18.00,  0, 'made_to_order', 1, 'Dolls');
 
 INSERT IGNORE INTO `users` (`userID`, `role`, `email`, `passwordHash`, `name`, `surname`) VALUES
-  (1, 'admin', 'admin@athina.gr',         '$2y$10$placeholder', 'Admin', 'User'),
-  (2, 'user',  'maria.p@example.com',     '$2y$10$placeholder', 'Maria', 'Papadopoulou'),
+  (1, 'admin', 'admin@athina.gr',         '$2y$10$jwEUeKHu2AaY4iOI4ywfb.nwR3GQ17Cynz0ngpdbPDDJ/5CnXIZde', 'Admin', 'User'),
+  (2, 'user',  'client@athina.gr',         '$2y$10$jwEUeKHu2AaY4iOI4ywfb.nwR3GQ17Cynz0ngpdbPDDJ/5CnXIZde', 'Client', 'Test'),
   (3, 'user',  'nikos.g@example.com',     '$2y$10$placeholder', 'Nikos', 'Georgiou'),
   (4, 'user',  'eleni.k@example.com',     '$2y$10$placeholder', 'Eleni', 'Konstantinou');
 
@@ -427,7 +427,7 @@ INSERT IGNORE INTO `custom_orders` (`userID`, `email`, `requestDescription`, `st
   (3, 'andreas@example.com', 'Wedding gift basket with personalized items',   'pending',     'Andreas Makris',  120.00, '2026-02-28', 'WEDDING01');
 
 INSERT IGNORE INTO `promotions` (`promotionName`, `discountType`, `discountValue`, `scope`, `categoryID`, `startDate`, `endDate`, `isActive`) VALUES
-  ('Valentine\'s Day Sale', 'percentage', 15, 'store',    NULL, '2026-02-10', '2026-02-14', 1),
+  ('Valentines Day Sale', 'percentage', 15, 'store',    NULL, '2026-02-10', '2026-02-14', 1),
   ('Baby Items Discount',   'percentage', 10, 'category', 2,    '2026-01-20', '2026-02-20', 1);
 
 INSERT IGNORE INTO `operational_costs` (`costDate`, `category`, `description`, `amount`) VALUES

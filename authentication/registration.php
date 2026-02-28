@@ -13,7 +13,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
     $manual_email = trim($_POST["manual_email"]);
 
     // Check if email already exists
-    $stmt = $conn->prepare("SELECT id FROM users WHERE email = ?");
+    $stmt = $conn->prepare("SELECT userID FROM users WHERE email = ?");
     $stmt->bind_param("s", $manual_email);
     $stmt->execute();
     $stmt->store_result();

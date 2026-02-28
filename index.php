@@ -24,9 +24,10 @@ if (isset($_SESSION["user"])) {
 
     // Check if profile is complete; if not, force completion
     $stmt = $conn->prepare("
-        SELECT country, city, address, postcode, dob, phone 
-        FROM users 
-        WHERE id = ?
+        SELECT u.phoneNumber, a.country, a.city, a.address, a.postalCode
+        FROM users u
+        LEFT JOIN addresses a ON u.userID = a.userID
+        WHERE u.userID = ?
     ");
 
     if (!$stmt) {
@@ -41,16 +42,15 @@ if (isset($_SESSION["user"])) {
 
     $fieldsComplete =
         $user &&
-        $user["country"]  &&
-        $user["city"]     &&
-        $user["address"]  &&
-        $user["postcode"] &&
-        $user["dob"]      &&
-        $user["phone"];
+        $user["phoneNumber"] &&
+        $user["country"]     &&
+        $user["city"]        &&
+        $user["address"]     &&
+        $user["postalCode"];
 
     $_SESSION["user"]["profile_complete"] = $fieldsComplete;
 
-    if (!$fieldsComplete) {
+    if (!$fieldsComplete && $role !== 'admin') {
         header("Location: authentication/complete_profile.php");
         exit();
     }

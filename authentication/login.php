@@ -7,12 +7,6 @@ if (isset($_SESSION["user"])) {
 
 require_once "database.php";
 
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception;
-
-require '../PHPMailer-master/src/Exception.php';
-require '../PHPMailer-master/src/PHPMailer.php';
-require '../PHPMailer-master/src/SMTP.php';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -74,106 +68,49 @@ require '../PHPMailer-master/src/SMTP.php';
             </p>
 
             <?php
-            if (isset($_POST["login"])) {
-                $loginInput = trim($_POST["login_input"]);
-                $password   = $_POST["password"];
+if (isset($_POST["login"])) {
+    $loginInput = trim($_POST["login_input"]);
+    $password = $_POST["password"];
 
-                $sql  = "SELECT * FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?)";
-                $stmt = mysqli_stmt_init($conn);
+    $sql = "SELECT * FROM users WHERE LOWER(email) = LOWER(?)";
+    $stmt = mysqli_stmt_init($conn);
 
-                if (mysqli_stmt_prepare($stmt, $sql)) {
-                    mysqli_stmt_bind_param($stmt, "ss", $loginInput, $loginInput);
-                    mysqli_stmt_execute($stmt);
-                    $result = mysqli_stmt_get_result($stmt);
+    if (mysqli_stmt_prepare($stmt, $sql)) {
+        mysqli_stmt_bind_param($stmt, "s", $loginInput);
+        mysqli_stmt_execute($stmt);
+        $result = mysqli_stmt_get_result($stmt);
 
-                    if ($user = mysqli_fetch_assoc($result)) {
-                        if (password_verify($password, $user["password"])) {
+        if ($user = mysqli_fetch_assoc($result)) {
+            if (password_verify($password, $user["passwordHash"])) {
 
-                            $now = new DateTime();
+                $_SESSION["user"] = [
+                    "id" => $user["userID"],
+                    "email" => $user["email"],
+                    "full_name" => $user["name"] . ' ' . $user["surname"],
+                    "role" => $user["role"],
+                ];
+                $_SESSION['user_id'] = $user['userID'];
+                $_SESSION['role'] = $user['role'];
 
-                            // 2FA: require every 48 hours
-                            $twofaExpired = empty($user["twofa_expires"]) || new DateTime($user["twofa_expires"]) < $now;
-
-                            if ($twofaExpired) {
-                                // Generate 2FA code
-                                $twofa_code = rand(100000, 999999);
-                                $expiresObj = clone $now;
-                                $expires    = $expiresObj->modify('+48 hours')->format('Y-m-d H:i:s');
-
-                                $updateSql  = "UPDATE users SET twofa_code = ?, twofa_expires = ? WHERE id = ?";
-                                $stmtUpdate = mysqli_stmt_init($conn);
-                                if (mysqli_stmt_prepare($stmtUpdate, $updateSql)) {
-                                    mysqli_stmt_bind_param($stmtUpdate, "ssi", $twofa_code, $expires, $user['id']);
-                                    mysqli_stmt_execute($stmtUpdate);
-                                }
-
-                                // Send 2FA via email
-                                try {
-                                    $mail = new PHPMailer(true);
-                                    $mail->isSMTP();
-                                    $mail->Host       = 'premium245.web-hosting.com';
-                                    $mail->SMTPAuth   = true;
-                                    $mail->Username   = 'admin@festival-web.com';
-                                    $mail->Password   = '!g3$~8tYju*D';
-                                    $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-                                    $mail->Port       = 587;
-
-                                    $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
-                                    $mail->addAddress($user['email'], $user['full_name']);
-                                    $mail->isHTML(true);
-                                    $mail->Subject = "Your 2FA Login Code";
-                                    $mail->Body    = "<p>Your 2FA code is: <b>$twofa_code</b></p>";
-
-                                    $mail->send();
-                                } catch (Exception $e) {
-                                    echo "<div class='alert alert-danger'>We couldn't send the 2FA email. Please try again later.</div>";
-                                }
-
-                                // Store temp user id for 2FA verification
-                                $_SESSION['temp_user_id'] = $user['id'];
-                                header("Location: twofa_verify.php");
-                                exit();
-
-                            } else {
-                                // 2FA still valid → direct login
-                                // Get previous last_login
-                                $prevLogin = null;
-                                $getLogin  = $conn->prepare("SELECT last_login FROM users WHERE id = ?");
-                                $getLogin->bind_param("i", $user['id']);
-                                $getLogin->execute();
-                                $loginResult = $getLogin->get_result();
-                                if ($row = $loginResult->fetch_assoc()) {
-                                    $prevLogin = $row['last_login'];
-                                }
-
-                                // Update last_login to now
-                                $updateLogin = $conn->prepare("UPDATE users SET last_login = NOW() WHERE id = ?");
-                                $updateLogin->bind_param("i", $user['id']);
-                                $updateLogin->execute();
-
-                                // Set session with previous login time
-                                $_SESSION["user"] = [
-                                    "id"         => $user["id"],
-                                    "email"      => $user["email"],
-                                    "full_name"  => $user["full_name"],
-                                    "role"       => $user["role"],
-                                    "last_login" => $prevLogin
-                                ];
-                                $_SESSION['user_id'] = $user['id'];
-                                $_SESSION['role']    = $user['role'];
-
-                                header("Location: ../index.php");
-                                exit();
-                            }
-                        } else {
-                            echo "<div class='alert alert-danger'>Incorrect password.</div>";
-                        }
-                    } else {
-                        echo "<div class='alert alert-danger'>Email or username not found.</div>";
-                    }
+                if ($user["role"] === 'admin') {
+                    header("Location: ../modules/admin/dashboard.php");
                 }
+                else {
+                    header("Location: ../index.php");
+                }
+                exit();
+
             }
-            ?>
+            else {
+                echo "<div class='alert alert-danger'>Invalid email or password.</div>";
+            }
+        }
+        else {
+            echo "<div class='alert alert-danger'>Invalid email or password.</div>";
+        }
+    }
+}
+?>
 
             <!-- Login form -->
             <form action="login.php" method="post" class="mt-3">

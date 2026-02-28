@@ -4,8 +4,8 @@ require_once "authentication/database.php";
 require_once "authentication/get_config.php";
 
 $system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
-$logo_path    = getSystemConfig("logo_path") ?: "assets/images/athina-eshop-logo.png";
-$logo_path    = str_replace("authentication/assets/", "assets/", $logo_path);
+$logo_path = getSystemConfig("logo_path") ?: "assets/images/athina-eshop-logo.png";
+$logo_path = str_replace("authentication/assets/", "assets/", $logo_path);
 if (!file_exists($logo_path) && file_exists("assets/images/athina-eshop-logo.png")) {
     $logo_path = "assets/images/athina-eshop-logo.png";
 }
@@ -14,18 +14,20 @@ if (!file_exists($logo_path)) {
 }
 
 // --------- User / Profile handling ----------
-$role     = "guest";
+$role = "guest";
 $fullName = "Guest";
 
 if (isset($_SESSION["user"])) {
-    $userId   = $_SESSION["user"]["id"];
+    $userId = $_SESSION["user"]["id"];
     $fullName = $_SESSION["user"]["full_name"] ?? 'User';
-    $role     = $_SESSION["user"]["role"] ?? 'user';
+    $role = $_SESSION["user"]["role"] ?? 'user';
 
+    // Check if profile is complete; if not, force completion
     $stmt = $conn->prepare("
-        SELECT country, city, address, postcode, dob, phone
-        FROM users
-        WHERE id = ?
+        SELECT u.phoneNumber, a.country, a.city, a.address, a.postalCode
+        FROM users u
+        LEFT JOIN addresses a ON u.userID = a.userID
+        WHERE u.userID = ?
     ");
 
     if (!$stmt) {
@@ -33,30 +35,28 @@ if (isset($_SESSION["user"])) {
         header("Location: authentication/complete_profile.php");
         exit();
     }
-
     $stmt->bind_param("i", $userId);
     $stmt->execute();
     $result = $stmt->get_result();
-    $user   = $result->fetch_assoc();
+    $user = $result->fetch_assoc();
 
     $fieldsComplete =
         $user &&
+        $user["phoneNumber"] &&
         $user["country"] &&
         $user["city"] &&
         $user["address"] &&
-        $user["postcode"] &&
-        $user["dob"] &&
-        $user["phone"];
+        $user["postalCode"];
 
     $_SESSION["user"]["profile_complete"] = $fieldsComplete;
 
-    if (!$fieldsComplete) {
+    if (!$fieldsComplete && $role !== 'admin') {
         header("Location: authentication/complete_profile.php");
         exit();
     }
 
     $_SESSION['user_id'] = $userId;
-    $_SESSION['role']    = $role;
+    $_SESSION['role'] = $role;
 }
 ?>
 <!DOCTYPE html>
@@ -73,9 +73,9 @@ if (isset($_SESSION["user"])) {
 </head>
 <body class="site-page">
     <?php
-    $activePage = 'about';
-    include __DIR__ . '/include/header.php';
-    ?>
+$activePage = 'about';
+include __DIR__ . '/include/header.php';
+?>
 
     <main class="about-page">
         <section class="about-hero">
