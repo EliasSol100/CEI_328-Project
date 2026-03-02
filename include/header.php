@@ -48,6 +48,23 @@ if ($isLoggedIn && !$initials) {
                     <span>EN</span>
                 </div>
 
+                <?php
+                // Normalize role for comparison
+                $normalizedRole = strtolower((string)$headerRole);
+                $isAdmin = in_array($normalizedRole, ['admin', 'administrator', 'superadmin'], true);
+                ?>
+
+                <?php if ($isLoggedIn && $isAdmin): ?>
+                    <!-- ADMIN DASHBOARD BUTTON (visible only for admin roles) -->
+                    <a href="<?php echo $rootPrefix; ?>modules/admin/admin_dashboard.php"
+                       class="utility-icon admin-icon"
+                       aria-label="Admin Dashboard"
+                       title="Admin Dashboard">
+                        <i class="fas fa-shield-halved"></i>
+                        <span class="admin-label">Admin</span>
+                    </a>
+                <?php endif; ?>
+
                 <?php if ($isLoggedIn): ?>
                     <!-- LOGGED-IN STATE: avatar + dropdown -->
                     <div class="utility-icon user-dropdown-wrapper">
