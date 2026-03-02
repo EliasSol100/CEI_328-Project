@@ -288,6 +288,35 @@ header.header .utility-icon:hover > i {
 }
 
 /* ============================= */
+/* ====== Admin Button ========= */
+/* ============================= */
+
+header.header .admin-icon {
+    background: var(--purple-dark);
+    color: #ffffff;
+    border-radius: 999px;
+    padding: 0 14px;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+header.header .admin-icon > i {
+    font-size: 16px !important;
+    color: #ffffff;
+}
+
+header.header .admin-icon .admin-label {
+    font-size: 13px;
+    line-height: 1;
+}
+
+header.header .admin-icon:hover {
+    background: #4b0a7d;
+}
+
+/* ============================= */
 /* ========= Responsive ========= */
 /* ============================= */
 
@@ -310,6 +339,11 @@ header.header .utility-icon:hover > i {
 
     .user-name {
         max-width: 100px;
+    }
+
+    /* Optionally hide the 'Admin' text label on smaller screens, keep icon only */
+    header.header .admin-icon .admin-label {
+        display: none;
     }
 }
 

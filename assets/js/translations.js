@@ -283,7 +283,7 @@ function setLanguage(lang) {
 
     const langDisplay = document.querySelector(".language-selector span");
     if (langDisplay) {
-        langDisplay.textContent = lang === "el" ? "EL" : "EN";
+        langDisplay.textContent = lang === "el" ? "ΕΛ" : "EN";
     }
 
     document.documentElement.lang = lang;
