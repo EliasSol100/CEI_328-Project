@@ -6,7 +6,6 @@ if (isset($_SESSION["user"])) {
 }
 
 require_once "database.php";
-
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -17,102 +16,126 @@ require_once "database.php";
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
     <link rel="stylesheet" href="../assets/styling/style.css">
+    <link rel="stylesheet" href="../assets/styling/authentication.css">
 </head>
 
 <body class="registration_page">
 
-    <!-- Crochet GIF background + overlay -->
-    <div class="registration-bg"></div>
-    <div class="registration-overlay"></div>
-
     <div class="wizard-box">
         <div class="wizard-header text-center">
-            <!-- Athina E-Shop crochet badge logo -->
             <div class="wizard-logo">
                 <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
             </div>
             <h3 class="mt-2">System Login</h3>
+            <p class="wizard-subtitle mb-0">
+                Sign in to your Athina E-Shop account to view your details and track your orders.
+            </p>
         </div>
 
         <div class="wizard-content">
             <!-- Social Sign-In -->
             <div class="mb-3">
-                <!-- Google Sign-In -->
                 <button
                     type="button"
                     id="google-signin-btn"
-                    class="btn btn-light border d-flex align-items-center justify-content-center gap-2 mx-auto"
-                    style="max-width: 300px;"
+                    class="btn btn-light border d-flex align-items-center justify-content-center gap-2 mx-auto auth-social-btn"
                 >
                     <img src="https://developers.google.com/identity/images/g-logo.png"
-                         style="height: 20px;" alt="Google logo">
+                         class="auth-social-logo" alt="Google logo">
                     Continue with Google
                 </button>
             </div>
 
             <div class="mb-3">
-                <!-- Facebook Sign-In -->
                 <button
                     type="button"
                     id="facebook-signin-btn"
-                    class="btn btn-primary d-flex align-items-center justify-content-center gap-2 mx-auto"
-                    style="max-width: 300px; background-color: #1877f2; border-color: #1877f2;"
+                    class="btn d-flex align-items-center justify-content-center gap-2 mx-auto auth-social-btn auth-facebook-btn"
                 >
                     <i class="bi bi-facebook"></i>
                     Continue with Facebook
                 </button>
             </div>
 
-            <p class="mt-2 mb-3 text-muted text-center" style="font-size: 0.9rem;">
-                Or login with your username or email
+            <p class="mt-2 mb-3 text-muted text-center auth-divider-text">
+                Or login with your email or username
             </p>
 
             <?php
-if (isset($_POST["login"])) {
-    $loginInput = trim($_POST["login_input"]);
-    $password = $_POST["password"];
+            if (isset($_POST["login"])) {
+                $loginInput = trim($_POST["login_input"]);
+                $password   = $_POST["password"];
 
-    $sql = "SELECT * FROM users WHERE LOWER(email) = LOWER(?)";
-    $stmt = mysqli_stmt_init($conn);
+                // Alias userID as id so existing PHP code can keep using $user["id"]
+                $sql  = "SELECT *, userID AS id FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?)";
+                $stmt = mysqli_stmt_init($conn);
 
-    if (mysqli_stmt_prepare($stmt, $sql)) {
-        mysqli_stmt_bind_param($stmt, "s", $loginInput);
-        mysqli_stmt_execute($stmt);
-        $result = mysqli_stmt_get_result($stmt);
+                if (mysqli_stmt_prepare($stmt, $sql)) {
+                    mysqli_stmt_bind_param($stmt, "ss", $loginInput, $loginInput);
+                    mysqli_stmt_execute($stmt);
+                    $result = mysqli_stmt_get_result($stmt);
 
-        if ($user = mysqli_fetch_assoc($result)) {
-            if (password_verify($password, $user["passwordHash"])) {
+                    if ($user = mysqli_fetch_assoc($result)) {
+                        if (password_verify($password, $user["password"])) {
 
-                $_SESSION["user"] = [
-                    "id" => $user["userID"],
-                    "email" => $user["email"],
-                    "full_name" => $user["name"] . ' ' . $user["surname"],
-                    "role" => $user["role"],
-                ];
-                $_SESSION['user_id'] = $user['userID'];
-                $_SESSION['role'] = $user['role'];
+                            $now = new DateTime();
 
-                if ($user["role"] === 'admin') {
-                    header("Location: ../modules/admin/dashboard.php");
+                            // Check if previous 2FA is still valid (within 48 hours)
+                            $twofaValid =
+                                !empty($user["twofa_expires"]) &&
+                                (new DateTime($user["twofa_expires"])) > $now;
+
+                            if ($twofaValid) {
+                                // 2FA still valid → direct login
+
+                                // get previous last_login for session display
+                                $prevLogin = null;
+                                $getLogin  = $conn->prepare("SELECT last_login FROM users WHERE userID = ?");
+                                $getLogin->bind_param("i", $user['id']);
+                                $getLogin->execute();
+                                $loginResult = $getLogin->get_result();
+                                if ($row = $loginResult->fetch_assoc()) {
+                                    $prevLogin = $row['last_login'];
+                                }
+                                $getLogin->close();
+
+                                // update last_login to now
+                                $updateLogin = $conn->prepare("UPDATE users SET last_login = NOW() WHERE userID = ?");
+                                $updateLogin->bind_param("i", $user['id']);
+                                $updateLogin->execute();
+                                $updateLogin->close();
+
+                                // create full user session
+                                $_SESSION["user"] = [
+                                    "id"         => $user["id"],
+                                    "email"      => $user["email"],
+                                    "full_name"  => $user["full_name"],
+                                    "role"       => $user["role"],
+                                    "last_login" => $prevLogin
+                                ];
+                                $_SESSION['user_id'] = $user['id'];
+                                $_SESSION['role']    = $user['role'];
+
+                                header("Location: ../index.php");
+                                exit();
+                            } else {
+                                // 2FA required (first time or expired > 48h)
+                                $_SESSION['temp_user_id'] = $user['id'];
+                                header("Location: twofa_verify.php");
+                                exit();
+                            }
+                        } else {
+                            echo "<div class='alert alert-danger'>Incorrect password.</div>";
+                        }
+                    } else {
+                        echo "<div class='alert alert-danger'>Email or username not found.</div>";
+                    }
+                } else {
+                    echo "<div class='alert alert-danger'>Something went wrong. Please try again.</div>";
                 }
-                else {
-                    header("Location: ../index.php");
-                }
-                exit();
-
             }
-            else {
-                echo "<div class='alert alert-danger'>Invalid email or password.</div>";
-            }
-        }
-        else {
-            echo "<div class='alert alert-danger'>Invalid email or password.</div>";
-        }
-    }
-}
-?>
+            ?>
 
-            <!-- Login form -->
             <form action="login.php" method="post" class="mt-3">
                 <div class="form-group mb-3">
                     <label for="login_input">Username or Email Address</label>
@@ -150,10 +173,8 @@ if (isset($_POST["login"])) {
         </div>
     </div>
 
-    <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script>
-        // Google OAuth (same config as registration.php)
         document.getElementById('google-signin-btn').addEventListener('click', function () {
             const params = new URLSearchParams({
                 client_id: '901502356414-324b839ks2vas27hoq8hq0448qa6a0oj.apps.googleusercontent.com',
@@ -169,14 +190,11 @@ if (isset($_POST["login"])) {
             window.location.href = authUrl;
         });
 
-        // Facebook OAuth (same as registration.php)
         document.getElementById('facebook-signin-btn').addEventListener('click', function () {
             const params = new URLSearchParams({
                 client_id: '924345056652857',
                 redirect_uri: 'http://localhost/ATHINA-ESHOP/authentication/facebook_callback.php',
                 response_type: 'code',
-                // scope can be added when fully configured
-                // scope: 'email,public_profile',
                 auth_type: 'rerequest'
             });
 
@@ -184,7 +202,6 @@ if (isset($_POST["login"])) {
             window.location.href = fbAuthUrl;
         });
 
-        // Toggle password visibility
         $(document).ready(function () {
             $(".toggle-password").click(function () {
                 const input = $($(this).data("target"));

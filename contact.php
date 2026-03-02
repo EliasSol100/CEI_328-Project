@@ -14,20 +14,18 @@ if (!file_exists($logo_path)) {
 }
 
 // --------- User / Profile handling ----------
-$role = "guest";
+$role     = "guest";
 $fullName = "Guest";
 
 if (isset($_SESSION["user"])) {
-    $userId = $_SESSION["user"]["id"];
+    $userId   = $_SESSION["user"]["id"];
     $fullName = $_SESSION["user"]["full_name"] ?? 'User';
-    $role = $_SESSION["user"]["role"] ?? 'user';
+    $role     = $_SESSION["user"]["role"] ?? 'user';
 
-    // Check if profile is complete; if not, force completion
     $stmt = $conn->prepare("
-        SELECT u.phoneNumber, a.country, a.city, a.address, a.postalCode
-        FROM users u
-        LEFT JOIN addresses a ON u.userID = a.userID
-        WHERE u.userID = ?
+        SELECT phone, country, city, address, postcode
+        FROM users
+        WHERE userID = ?
     ");
 
     if (!$stmt) {
@@ -35,18 +33,19 @@ if (isset($_SESSION["user"])) {
         header("Location: authentication/complete_profile.php");
         exit();
     }
+
     $stmt->bind_param("i", $userId);
     $stmt->execute();
     $result = $stmt->get_result();
-    $user = $result->fetch_assoc();
+    $user   = $result->fetch_assoc();
 
     $fieldsComplete =
         $user &&
-        $user["phoneNumber"] &&
-        $user["country"] &&
-        $user["city"] &&
-        $user["address"] &&
-        $user["postalCode"];
+        !empty($user["phone"]) &&
+        !empty($user["country"]) &&
+        !empty($user["city"]) &&
+        !empty($user["address"]) &&
+        !empty($user["postcode"]);
 
     $_SESSION["user"]["profile_complete"] = $fieldsComplete;
 
@@ -56,68 +55,64 @@ if (isset($_SESSION["user"])) {
     }
 
     $_SESSION['user_id'] = $userId;
-    $_SESSION['role'] = $role;
+    $_SESSION['role']    = $role;
 }
+
+// Make name / role available to header.php
+$GLOBALS['header_user_full_name'] = $fullName;
+$GLOBALS['header_user_role']      = $role;
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Creations by Athina - Contact</title>
+    <title>Creations by Athina - About</title>
     <link rel="stylesheet" href="assets/styling/styles.css">
-    <link rel="stylesheet" href="assets/styling/header.css?v=3">
-    <link rel="stylesheet" href="assets/styling/contact.css">
+    <link rel="stylesheet" href="assets/styling/header.css?v=5">
+    <link rel="stylesheet" href="assets/styling/about.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="assets/js/translations.js" defer></script>
 </head>
 <body class="site-page">
     <?php
-$activePage = 'contact';
-include __DIR__ . '/include/header.php';
-?>
+    $activePage = 'about';
+    include __DIR__ . '/include/header.php';
+    ?>
 
-    <main class="contact-page">
-        <section class="contact-content">
-            <div class="container contact-grid">
-                <article class="contact-card form-card">
-                    <h2>Get in Touch</h2>
-                    <form class="contact-form" action="#" method="post">
-                        <div class="contact-field">
-                            <label for="contact-name">Name</label>
-                            <input id="contact-name" type="text">
-                        </div>
-                        <div class="contact-field">
-                            <label for="contact-email">Email</label>
-                            <input id="contact-email" type="email">
-                        </div>
-                        <div class="contact-field">
-                            <label for="contact-message">Message</label>
-                            <textarea id="contact-message" rows="6"></textarea>
-                        </div>
-                        <button type="submit" class="contact-btn">Send Message</button>
-                    </form>
-                </article>
+    <main class="about-page">
+        <section class="about-hero">
+            <div class="container">
+                <h1>About Creations by Athina</h1>
+                <p>
+                    We create handmade crochet pieces with patience, care, and attention to detail.
+                    Every design is made to feel personal, warm, and truly unique.
+                </p>
+            </div>
+        </section>
 
-                <article class="contact-card info-card">
-                    <h2>Contact Information</h2>
-
-                    <h3>Email</h3>
-                    <p>hello@creationsbyathina.com</p>
-
-                    <h3>Phone</h3>
-                    <p>+30 210 123 4567</p>
-
-                    <h3>Address</h3>
-                    <p>123 Craft Street</p>
-                    <p>Athens, 10563</p>
-                    <p>Greece</p>
-
-                    <h3>Business Hours</h3>
-                    <p>Monday - Friday: 9:00 AM - 6:00 PM</p>
-                    <p>Saturday: 10:00 AM - 4:00 PM</p>
-                    <p>Sunday: Closed</p>
-                </article>
+        <section class="about-story">
+            <div class="container">
+                <div class="about-card">
+                    <h2>Our Story</h2>
+                    <p>
+                        What started as a simple love for yarn became a small creative studio focused on quality.
+                        From soft toys to home decor, each piece is crafted by hand and checked before it reaches you.
+                    </p>
+                    <p>
+                        Our goal is simple: offer products that are beautiful, durable, and made with heart.
+                        We believe handmade work should carry personality, not mass-production vibes.
+                    </p>
+                </div>
+                <div class="about-card">
+                    <h2>What We Value</h2>
+                    <ul>
+                        <li>Handcrafted quality in every stitch</li>
+                        <li>Thoughtful design and practical use</li>
+                        <li>Friendly support and clear communication</li>
+                        <li>Unique products made in small batches</li>
+                    </ul>
+                </div>
             </div>
         </section>
     </main>

@@ -1,16 +1,18 @@
 ﻿<?php
+session_start(); // ADDED so $_SESSION["phone"] actually works
+
 // Database connection
 require_once "database.php";
 
 // Twilio credentials
 $accountSid = 'ACed50809afda0163369b2505abc4354f7'; // Your Twilio Account SID
-$authToken = 'a0e8ced97d0ab07db55e20f99fa7121e'; // Your Twilio Auth Token
-$twilioPhoneNumber = '+12182616825'; // Your Twilio phone number
+$authToken = 'a0e8ced97d0ab07db55e20f99fa7121e';   // Your Twilio Auth Token
+$twilioPhoneNumber = '+12182616825';               // Your Twilio phone number
 
 // Get data from the AJAX request
-$email = $_POST['email']; // Get email from the request
-$phone = $_POST['phone']; // Get phone number from the request
-$body = $_POST['message']; // Get the SMS message body
+$email = $_POST['email'];             // Get email from the request
+$phone = $_POST['phone'];             // Get phone number from the request
+$body  = $_POST['message'];           // Get the SMS message body
 $verification_code = $_POST['verification_code']; // Get the verification code
  
 $_SESSION["phone"] = $phone;
@@ -25,7 +27,7 @@ if (mysqli_stmt_prepare($stmt, $sql)) {
     // Prepare the POST data for Twilio
     $postData = http_build_query([
         'From' => $twilioPhoneNumber,
-        'To' => $phone,
+        'To'   => $phone,
         'Body' => $body,
     ]);
 
@@ -73,4 +75,3 @@ if (mysqli_stmt_prepare($stmt, $sql)) {
     die("Something went wrong with the database query.");
 }
 ?>
-
