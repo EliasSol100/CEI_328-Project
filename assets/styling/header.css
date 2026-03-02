@@ -18,6 +18,8 @@ header.header .header-content {
     column-gap: 24px;
 }
 
+/* ---------------- Logo ---------------- */
+
 header.header .logo {
     display: inline-flex;
     align-items: center;
@@ -46,6 +48,8 @@ header.header .logo-text {
     color: var(--purple-dark);
 }
 
+/* ---------------- Navigation ---------------- */
+
 header.header .nav {
     display: flex;
     justify-content: center;
@@ -71,12 +75,16 @@ header.header .nav-link:hover {
     color: var(--purple-dark);
 }
 
+/* ---------------- Right Utility Section ---------------- */
+
 header.header .utility-icons {
     display: flex;
     align-items: center;
     gap: 14px;
     justify-self: end;
 }
+
+/* ---------------- Language Selector ---------------- */
 
 header.header .language-selector {
     display: inline-flex;
@@ -106,29 +114,182 @@ header.header .language-selector:focus-visible {
     outline-offset: 2px;
 }
 
+/* ---------------- Default Utility Icons ---------------- */
+
 header.header .utility-icon {
     color: var(--text-dark);
     text-decoration: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 40px;
     height: 40px;
     border-radius: 10px;
+    padding: 0 10px;
 }
 
-header.header .utility-icon i {
-    font-size: 24px !important;
+/* IMPORTANT: only affect the direct <i> child, not nested dropdown icons */
+header.header .utility-icon > i {
+    font-size: 22px !important;
     transition: color 0.3s;
 }
 
-header.header .auth-icon i {
-    font-size: 22px !important;
-}
-
-header.header .utility-icon:hover i {
+header.header .utility-icon:hover > i {
     color: var(--purple-dark);
 }
+
+/* ============================= */
+/* ===== Logged In Styling ===== */
+/* ============================= */
+
+.user-menu {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* User Chip */
+
+.user-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: #f3e8ff;
+    border: 1px solid #e9d5ff;
+}
+
+/* Initials Circle (avatar) */
+
+.user-avatar-circle {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--purple-dark);
+    color: #ffffff;
+    font-size: 0.8rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Name + label (legacy chip) */
+
+.user-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+}
+
+.user-label {
+    font-size: 0.65rem;
+    color: #6b7280;
+}
+
+.user-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #111827;
+    max-width: 140px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* --- User Dropdown --- */
+
+.user-dropdown-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+/* the avatar icon button */
+.dropdown-toggle {
+    cursor: pointer;
+}
+
+/* base state: hidden but still rendered so we can animate */
+.user-dropdown {
+    position: absolute;
+    top: 120%;
+    right: 0;
+    background: #fff;
+    min-width: 170px;
+    border-radius: 10px;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+    padding: 8px 0;
+    display: flex;
+    flex-direction: column;
+    z-index: 1000;
+
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(8px);
+    pointer-events: none;
+    transition:
+        opacity 0.18s ease-out,
+        transform 0.18s ease-out,
+        visibility 0s linear 0.18s;
+}
+
+/* OPEN STATE – controlled by JS only */
+.user-dropdown-wrapper.open .user-dropdown {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+    pointer-events: auto;
+    transition:
+        opacity 0.18s ease-out,
+        transform 0.18s ease-out,
+        visibility 0s;
+}
+
+.dropdown-item {
+    padding: 10px 16px;
+    text-decoration: none;
+    color: #333;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: background 0.2s ease;
+}
+
+/* make sure dropdown icons keep their own colors */
+.dropdown-item i {
+    font-size: 16px;
+}
+
+.dropdown-item:hover {
+    background: #f5f5f5;
+}
+
+.logout-item {
+    color: #d9534f;
+}
+
+.logout-item i {
+    color: #d9534f;
+}
+
+/* Logged Out Auth Button */
+
+.auth-icon {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+}
+
+.auth-icon .auth-label {
+    font-size: 0.85rem;
+}
+
+/* ============================= */
+/* ========= Responsive ========= */
+/* ============================= */
 
 @media (max-width: 1024px) {
     header.header .header-content {
@@ -146,9 +307,14 @@ header.header .utility-icon:hover i {
         gap: 24px;
         flex-wrap: wrap;
     }
+
+    .user-name {
+        max-width: 100px;
+    }
 }
 
 @media (max-width: 768px) {
+
     header.header {
         padding: 8px 0 !important;
     }
@@ -158,10 +324,10 @@ header.header .utility-icon:hover i {
     }
 
     header.header .nav-link {
-        font-size: 16px !important;
+        font-size: 15px !important;
     }
 
-    header.header .utility-icon i {
+    header.header .utility-icon > i {
         font-size: 20px !important;
     }
 
@@ -173,5 +339,42 @@ header.header .utility-icon:hover i {
     header.header .language-selector span {
         font-size: 20px;
     }
+}
 
+/* ============================= */
+/* === Fix Bootstrap overrides == */
+/* ============================= */
+
+/* Hide Bootstrap's default caret arrow that appears on .dropdown-toggle
+   for ANY dropdown inside the header */
+header.header .dropdown-toggle::after {
+    display: none !important;
+}
+
+/* Only strip Bootstrap button chrome for the avatar dropdown inside user-dropdown-wrapper,
+   so other dropdown buttons keep their background */
+header.header .user-dropdown-wrapper .dropdown-toggle {
+    border: none !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    /* NOTE: no background here on purpose, so the avatar keeps its purple background */
+}
+
+/* ============================= */
+/* === Force avatar visible ==== */
+/* ============================= */
+
+/* In case page-level CSS (e.g. account.css / Bootstrap) hides the avatar,
+   force it to be visible inside the header. */
+header.header .utility-icons .user-dropdown-wrapper {
+    display: flex !important;
+    align-items: center !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+header.header .utility-icons .user-avatar-circle {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
 }

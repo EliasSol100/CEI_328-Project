@@ -77,6 +77,7 @@
     margin-top: 5px;
 }
 
+/* TAG chips */
 .chip-row {
     display: flex;
     flex-wrap: wrap;
@@ -91,6 +92,75 @@
     color: #68458b;
     background: #fcf8ff;
 }
+
+/* --- COLOR FILTERS (now matching plush colours) --- */
+
+.color-filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+.color-swatch {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.color-swatch input {
+    display: none;
+}
+
+.color-dot {
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    border: 2px solid rgba(0, 0, 0, 0.04);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+/* Individual colours (picked from actual plush palette) */
+.color-orange { background: #ff9736; } /* Flame Dragon */
+.color-yellow { background: #ffeaa7; } /* Electric Mouse */
+.color-lilac  { background: #c7a6ff; } /* Lilac Turtle */
+.color-cream  { background: #f5e1b8; } /* Daisy Bunny */
+.color-beige  { background: #e1c1aa; } /* Meadow Bunny */
+.color-pink   { background: #ff8ac2; } /* Berry Bunny */
+
+.color-swatch input:checked + .color-dot {
+    transform: scale(1.12);
+    box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.2);
+    border-color: rgba(124, 58, 237, 0.5);
+}
+
+/* Clear filters button */
+.filter-clear-wrap {
+    margin-top: 26px;
+}
+
+.clear-filters-btn {
+    width: 100%;
+    padding: 11px 0;
+    border-radius: 999px;
+    border: 1.5px solid #c7a8e6;
+    background: #fff;
+    color: #7c3aed;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.clear-filters-btn:hover {
+    background: linear-gradient(90deg, #f5e7ff, #ffe6f4);
+    box-shadow: 0 6px 14px rgba(124, 58, 237, 0.15);
+    transform: translateY(-1px);
+}
+
+/* PRODUCTS WRAP */
 
 .shop-products-wrap {
     padding: 20px;
@@ -185,28 +255,29 @@
     position: relative;
 }
 
+/* Local plush images */
 .image-1 {
-    background-image: url('https://images.unsplash.com/photo-1581833971358-2c8b550f87b3?w=900&q=80');
+    background-image: url('../images/products/flame-dragon-plush.jpg');
 }
 
 .image-2 {
-    background-image: url('https://images.unsplash.com/photo-1616627455681-7cd0cf9f4206?w=900&q=80');
+    background-image: url('../images/products/electric-mouse-plush.jpg');
 }
 
 .image-3 {
-    background-image: url('https://images.unsplash.com/photo-1512436991641-6745cdb1723f?w=900&q=80');
+    background-image: url('../images/products/lilac-sea-turtle-plush.jpg');
 }
 
 .image-4 {
-    background-image: url('https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=900&q=80');
+    background-image: url('../images/products/bunny-pink-hat-plush.jpg');
 }
 
 .image-5 {
-    background-image: url('https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?w=900&q=80');
+    background-image: url('../images/products/bunny-meadow-plush.jpg');
 }
 
 .image-6 {
-    background-image: url('https://images.unsplash.com/photo-1582562124811-c09040d0a901?w=900&q=80');
+    background-image: url('../images/products/bunny-berry-plush.jpg');
 }
 
 .shop-fav {
@@ -265,6 +336,8 @@
 .shop-review-count {
     color: #777;
 }
+
+/* RESPONSIVE */
 
 @media (max-width: 1024px) {
     .shop-layout {

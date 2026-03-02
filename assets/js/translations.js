@@ -77,7 +77,57 @@ const translations = {
         newsletterText: "Subscribe to get special offers and updates!",
         yourEmail: "Your email",
         subscribe: "Subscribe",
-        copyright: "© 2024 Creations by Athina. All rights reserved."
+        copyright: "© 2024 Creations by Athina. All rights reserved.",
+
+        // --- Account Page ---
+        accountTitle: "My Account",
+        lastLoginLabel: "Last login:",
+        lastUpdatedLabel: "Last updated:",
+
+        sidebarOrders: "Orders",
+        sidebarWishlist: "Wishlist",
+        sidebarAddresses: "Addresses",
+        sidebarSettings: "Settings",
+        sidebarLogout: "Logout",
+
+        ordersTitle: "Order History",
+        ordersEmpty: "You haven’t placed any orders yet. Once you purchase something from the shop, it will appear here.",
+
+        wishlistTitle: "My Wishlist",
+        wishlistEmpty: "Your wishlist is empty. Add some favorites from the shop!",
+
+        addressesTitle: "Saved Addresses",
+        addressesAddNew: "Add New",
+        addressHomeLabel: "Home",
+        addressDefaultBadge: "Default",
+        addressRegistrationNote: "This is the address you provided during registration.",
+        addressesNoneText: "You don’t have any saved addresses yet. Click \"Add New\" to create one.",
+        addressSetDefault: "Set as Default",
+        addressCurrentDefault: "Current Default",
+
+        settingsTitle: "Account Settings",
+        settingsFirstName: "First Name",
+        settingsLastName: "Last Name",
+        settingsUsername: "Username",
+        settingsPhone: "Phone Number",
+        settingsPhoneNote: "Changing your phone will require a verification code sent to your current email.",
+        settingsEmail: "Email",
+        settingsEmailNote: "Changing your email will require a verification code sent to your current email.",
+        settingsSaveChanges: "Save Changes",
+
+        avatarModalTitle: "Change Profile Picture",
+        avatarModalLabel: "Upload a new image",
+        avatarModalNote: "JPG, PNG, GIF or WEBP. Max size 2MB.",
+        btnCancel: "Cancel",
+        btnSavePicture: "Save Picture",
+
+        addressModalTitle: "Add New Address",
+        addressCountryLabel: "Country",
+        addressCityLabel: "City",
+        addressAddressLabel: "Address",
+        addressPostcodeLabel: "Postal Code",
+        addressMakeDefault: "Set as default shipping address",
+        addressSaveAddress: "Save Address"
     },
     el: {
         // Header
@@ -157,7 +207,57 @@ const translations = {
         newsletterText: "Εγγράψου για να λαμβάνεις ειδικές προσφορές και ενημερώσεις!",
         yourEmail: "Το email σου",
         subscribe: "Εγγραφή",
-        copyright: "© 2024 Creations by Athina. Όλα τα δικαιώματα διατηρούνται."
+        copyright: "© 2024 Creations by Athina. Όλα τα δικαιώματα διατηρούνται.",
+
+        // --- Account Page ---
+        accountTitle: "Ο Λογαριασμός μου",
+        lastLoginLabel: "Τελευταία σύνδεση:",
+        lastUpdatedLabel: "Τελευταία ενημέρωση:",
+
+        sidebarOrders: "Παραγγελίες",
+        sidebarWishlist: "Λίστα Επιθυμιών",
+        sidebarAddresses: "Διευθύνσεις",
+        sidebarSettings: "Ρυθμίσεις",
+        sidebarLogout: "Αποσύνδεση",
+
+        ordersTitle: "Ιστορικό Παραγγελιών",
+        ordersEmpty: "Δεν έχεις κάνει ακόμα καμία παραγγελία. Μόλις αγοράσεις κάτι από το κατάστημα, θα εμφανιστεί εδώ.",
+
+        wishlistTitle: "Η Λίστα Επιθυμιών μου",
+        wishlistEmpty: "Η λίστα επιθυμιών σου είναι άδεια. Πρόσθεσε μερικά αγαπημένα από το κατάστημα!",
+
+        addressesTitle: "Αποθηκευμένες Διευθύνσεις",
+        addressesAddNew: "Προσθήκη",
+        addressHomeLabel: "Σπίτι",
+        addressDefaultBadge: "Προεπιλογή",
+        addressRegistrationNote: "Αυτή είναι η διεύθυνση που δήλωσες κατά την εγγραφή.",
+        addressesNoneText: "Δεν έχεις αποθηκευμένες διευθύνσεις. Πάτησε «Προσθήκη» για να δημιουργήσεις μία.",
+        addressSetDefault: "Ορισμός ως Προεπιλογή",
+        addressCurrentDefault: "Τρέχουσα Προεπιλογή",
+
+        settingsTitle: "Ρυθμίσεις Λογαριασμού",
+        settingsFirstName: "Όνομα",
+        settingsLastName: "Επώνυμο",
+        settingsUsername: "Όνομα χρήστη",
+        settingsPhone: "Τηλέφωνο",
+        settingsPhoneNote: "Η αλλαγή τηλεφώνου απαιτεί κωδικό επιβεβαίωσης.",
+        settingsEmail: "Email",
+        settingsEmailNote: "Η αλλαγή email απαιτεί κωδικό επιβεβαίωσης που θα σταλεί στο τρέχον email σου.",
+        settingsSaveChanges: "Αποθήκευση Αλλαγών",
+
+        avatarModalTitle: "Αλλαγή Εικόνας Προφίλ",
+        avatarModalLabel: "Ανέβασε νέα εικόνα",
+        avatarModalNote: "JPG, PNG, GIF ή WEBP. Μέγιστο μέγεθος 2MB.",
+        btnCancel: "Άκυρο",
+        btnSavePicture: "Αποθήκευση Εικόνας",
+
+        addressModalTitle: "Προσθήκη Νέας Διεύθυνσης",
+        addressCountryLabel: "Χώρα",
+        addressCityLabel: "Πόλη",
+        addressAddressLabel: "Διεύθυνση",
+        addressPostcodeLabel: "Τ.Κ.",
+        addressMakeDefault: "Ορισμός ως προεπιλεγμένη διεύθυνση αποστολής",
+        addressSaveAddress: "Αποθήκευση Διεύθυνσης"
     }
 };
 
@@ -183,7 +283,7 @@ function setLanguage(lang) {
 
     const langDisplay = document.querySelector(".language-selector span");
     if (langDisplay) {
-        langDisplay.textContent = lang === "el" ? "GR" : "EN";
+        langDisplay.textContent = lang === "el" ? "EL" : "EN";
     }
 
     document.documentElement.lang = lang;

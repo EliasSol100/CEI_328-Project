@@ -28,6 +28,51 @@
     background-color: var(--white);
 }
 
+/* ============================
+   Account page layout & helpers
+   ============================ */
+
+body.account-page {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background-color: #f5f7fb;
+}
+
+.account-main {
+    flex: 1 0 auto;
+}
+
+body.account-page .footer {
+    flex-shrink: 0;
+}
+
+/* Avatar + country select helpers used in account.php */
+
+.account-avatar-wrapper {
+    width: 80px;
+    height: 80px;
+}
+
+.account-avatar-placeholder {
+    width: 80px;
+    height: 80px;
+    background: linear-gradient(135deg, #fce7f3, #e9d5ff);
+    color: #7c3aed;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 34px;
+}
+
+.country-select {
+    width: 100%;
+}
+
+/* ============================
+   Storefront sections
+   ============================ */
+
 .container {
     max-width: 1200px;
     margin: 0 auto;
@@ -86,7 +131,7 @@
 }
 
 .hero-title {
-    font-size: 48px;
+    font-size: 40px;
     font-weight: 700;
     color: var(--text-dark);
     margin-bottom: 16px;
@@ -94,9 +139,9 @@
 }
 
 .hero-subtitle {
-    font-size: 20px;
+    font-size: 18px;
     color: var(--text-dark);
-    margin-bottom: 32px;
+    margin-bottom: 28px;
     max-width: 600px;
 }
 
@@ -104,8 +149,8 @@
     background: linear-gradient(90deg, var(--purple-gradient-start) 0%, var(--purple-gradient-end) 100%);
     color: var(--white);
     border: none;
-    padding: 16px 40px;
-    font-size: 18px;
+    padding: 14px 34px;
+    font-size: 16px;
     font-weight: 600;
     border-radius: 50px;
     cursor: pointer;
@@ -113,11 +158,13 @@
     align-items: center;
     gap: 10px;
     transition: transform 0.3s, box-shadow 0.3s;
+    text-decoration: none; /* remove underline on links */
 }
 
 .cta-button:hover {
     transform: translateY(-2px);
     box-shadow: 0 8px 20px rgba(153, 50, 204, 0.4);
+    text-decoration: none;
 }
 
 .cta-button i {
@@ -132,17 +179,17 @@
 
 .section-title {
     text-align: center;
-    font-size: 36px;
+    font-size: 32px;
     font-weight: 700;
     color: var(--text-dark);
-    margin-bottom: 12px;
+    margin-bottom: 10px;
 }
 
 .section-subtitle {
     text-align: center;
-    font-size: 18px;
+    font-size: 15px;
     color: var(--text-gray);
-    margin-bottom: 50px;
+    margin-bottom: 40px;
 }
 
 .collection-grid {
@@ -167,7 +214,7 @@
 
 .collection-image {
     width: 100%;
-    height: 300px;
+    height: 260px;
     background-size: cover;
     background-position: center;
 }
@@ -193,7 +240,7 @@
     bottom: 20px;
     left: 20px;
     color: var(--white);
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 600;
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
@@ -226,7 +273,7 @@
 .product-image-wrapper {
     position: relative;
     width: 100%;
-    height: 280px;
+    height: 260px;
     overflow: hidden;
 }
 
@@ -244,10 +291,10 @@
 
 .wishlist-btn {
     position: absolute;
-    top: 15px;
-    right: 15px;
-    width: 40px;
-    height: 40px;
+    top: 12px;
+    right: 12px;
+    width: 34px;
+    height: 34px;
     background-color: var(--white);
     border: none;
     border-radius: 50%;
@@ -265,7 +312,7 @@
 
 .wishlist-btn i {
     color: var(--text-dark);
-    font-size: 18px;
+    font-size: 16px;
 }
 
 .product-info {
@@ -280,7 +327,7 @@
 }
 
 .product-price {
-    font-size: 24px;
+    font-size: 22px;
     font-weight: 700;
     color: var(--purple-dark);
     margin-bottom: 10px;
@@ -335,6 +382,7 @@
     border-radius: 50px;
     cursor: pointer;
     transition: background-color 0.3s, color 0.3s;
+    text-decoration: none;
 }
 
 .view-all-btn:hover {
@@ -350,18 +398,24 @@
 
 .journey-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 20px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    margin-bottom: 24px;
+}
+
+.journey-item {
+    text-align: center;
 }
 
 .journey-image {
     width: 100%;
-    height: 300px;
+    height: 260px;
     border-radius: 16px;
     background-size: cover;
     background-position: center;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     transition: transform 0.3s;
+    margin-bottom: 10px;
 }
 
 .journey-image:hover {
@@ -382,6 +436,24 @@
 
 .img-journey-4 {
     background-image: url('https://images.unsplash.com/photo-1581833971358-2c8b550f87b3?w=400&q=80');
+}
+
+.journey-caption {
+    font-size: 14px;
+    color: var(--text-gray);
+    max-width: 260px;
+    margin: 0 auto;
+}
+
+.view-instagram-btn {
+    display: inline-block;
+    padding: 10px 26px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    background: linear-gradient(90deg, var(--purple-gradient-start) 0%, var(--purple-gradient-end) 100%);
+    color: #fff;
 }
 
 /* Features Section */
@@ -563,7 +635,7 @@
     .journey-grid {
         grid-template-columns: repeat(2, 1fr);
     }
-    
+
     .footer-content {
         grid-template-columns: repeat(2, 1fr);
     }
@@ -573,22 +645,22 @@
     .hero-title {
         font-size: 32px;
     }
-    
+
     .hero-subtitle {
         font-size: 16px;
     }
-    
+
     .collection-grid,
     .products-grid,
     .journey-grid,
     .features-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .footer-content {
         grid-template-columns: 1fr;
     }
-    
+
     .footer-bottom {
         flex-direction: column;
         gap: 20px;
