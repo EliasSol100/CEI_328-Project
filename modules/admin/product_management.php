@@ -22,18 +22,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $sku      = trim($_POST['sku']      ?? '');
 
         if ($action === 'add') {
-            if (empty($sku)) $sku = 'SKU-' . strtoupper(substr(md5(microtime()), 0, 6));
-            $stmt = mysqli_prepare($conn, "INSERT INTO products (sku,nameEN,nameGR,descriptionEN,descriptionGR,basePrice,costPrice,inventory,cartStatus,category) VALUES (?,?,?,?,?,?,?,?,?,?)");
-            mysqli_stmt_bind_param($stmt, 'sssssddsss', $sku, $nameEN, $nameGR, $descEN, $descGR, $price, $cost, $inv, $status, $category);
+            if (empty($sku)) {
+                $sku = 'SKU-' . strtoupper(substr(md5(microtime()), 0, 6));
+            }
+
+            $stmt = mysqli_prepare(
+                $conn,
+                "INSERT INTO products
+                 (sku, nameEN, nameGR, descriptionEN, descriptionGR, basePrice, costPrice, inventory, cartStatus, category)
+                 VALUES (?,?,?,?,?,?,?,?,?,?)"
+            );
+            // sku (s), nameEN (s), nameGR (s), descEN (s), descGR (s),
+            // basePrice (d), costPrice (d), inventory (i), cartStatus (s), category (s)
+            mysqli_stmt_bind_param(
+                $stmt,
+                'sssssddiss',
+                $sku,
+                $nameEN,
+                $nameGR,
+                $descEN,
+                $descGR,
+                $price,
+                $cost,
+                $inv,
+                $status,
+                $category
+            );
             mysqli_stmt_execute($stmt);
             $flash = 'ok:Product added successfully.';
         } else {
             $id = (int)($_POST['productID'] ?? 0);
-            $stmt = mysqli_prepare($conn, "UPDATE products SET nameEN=?,nameGR=?,descriptionEN=?,descriptionGR=?,basePrice=?,costPrice=?,inventory=?,cartStatus=?,category=? WHERE productID=?");
-            mysqli_stmt_bind_param($stmt, 'ssssddssi', $nameEN, $nameGR, $descEN, $descGR, $price, $cost, $inv, $status, $category, $id);
-            // fix bind param types
-            $stmt = mysqli_prepare($conn, "UPDATE products SET nameEN=?,nameGR=?,descriptionEN=?,descriptionGR=?,basePrice=?,costPrice=?,inventory=?,cartStatus=?,category=? WHERE productID=?");
-            mysqli_stmt_bind_param($stmt, 'ssssddissi', $nameEN, $nameGR, $descEN, $descGR, $price, $cost, $inv, $status, $category, $id);
+
+            $stmt = mysqli_prepare(
+                $conn,
+                "UPDATE products
+                 SET nameEN=?,
+                     nameGR=?,
+                     descriptionEN=?,
+                     descriptionGR=?,
+                     basePrice=?,
+                     costPrice=?,
+                     inventory=?,
+                     cartStatus=?,
+                     category=?
+                 WHERE productID=?"
+            );
+            // nameEN (s), nameGR (s), descEN (s), descGR (s),
+            // basePrice (d), costPrice (d), inventory (i), cartStatus (s), category (s), productID (i)
+            mysqli_stmt_bind_param(
+                $stmt,
+                'ssssddissi',
+                $nameEN,
+                $nameGR,
+                $descEN,
+                $descGR,
+                $price,
+                $cost,
+                $inv,
+                $status,
+                $category,
+                $id
+            );
             mysqli_stmt_execute($stmt);
             $flash = 'ok:Product updated successfully.';
         }
@@ -51,35 +100,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-if (isset($_GET['flash'])) $flash = $_GET['flash'];
+if (isset($_GET['flash'])) {
+    $flash = $_GET['flash'];
+}
 
 /* ── Load products ── */
 $products = [];
 $r = mysqli_query($conn, "SELECT * FROM products ORDER BY nameEN ASC");
-if ($r) { while ($row = mysqli_fetch_assoc($r)) $products[] = $row; }
+if ($r) {
+    while ($row = mysqli_fetch_assoc($r)) {
+        $products[] = $row;
+    }
+}
 
 /* ── Load one product for edit modal ── */
 $editProduct = null;
 if (isset($_GET['edit'])) {
     $eid = (int)$_GET['edit'];
     $r   = mysqli_query($conn, "SELECT * FROM products WHERE productID=$eid");
-    if ($r) $editProduct = mysqli_fetch_assoc($r);
+    if ($r) {
+        $editProduct = mysqli_fetch_assoc($r);
+    }
 }
 
 $availStatus = [
-    'active'       => ['label' => 'in stock',      'badge' => 'badge-dark'],
-    'low_stock'    => ['label' => 'low stock',      'badge' => 'badge-warning'],
-    'out_of_stock' => ['label' => 'out of stock',   'badge' => 'badge-red'],
-    'made_to_order'=> ['label' => 'made to order',  'badge' => 'badge-muted'],
+    'active'        => ['label' => 'in stock',      'badge' => 'badge-dark'],
+    'low_stock'     => ['label' => 'low stock',     'badge' => 'badge-warning'],
+    'out_of_stock'  => ['label' => 'out of stock',  'badge' => 'badge-red'],
+    'made_to_order' => ['label' => 'made to order', 'badge' => 'badge-muted'],
 ];
 
 /* ── Images keyed by productID ── */
 $images = [];
 $r = mysqli_query($conn, "SELECT productID, imageID FROM photos GROUP BY productID");
-if ($r) { while ($row = mysqli_fetch_assoc($r)) $images[$row['productID']] = $row['imageID']; }
+if ($r) {
+    while ($row = mysqli_fetch_assoc($r)) {
+        $images[$row['productID']] = $row['imageID'];
+    }
+}
 
 $categories = ['Animals','Blankets','Bags','Decor','Dolls'];
-$statuses   = ['active'=>'In Stock','low_stock'=>'Low Stock','out_of_stock'=>'Out of Stock','made_to_order'=>'Made to Order'];
+
+$statuses = [
+    'active'        => 'In Stock',
+    'low_stock'     => 'Low Stock',
+    'out_of_stock'  => 'Out of Stock',
+    'made_to_order' => 'Made to Order',
+];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -128,46 +195,50 @@ $statuses   = ['active'=>'In Stock','low_stock'=>'Low Stock','out_of_stock'=>'Ou
           </thead>
           <tbody>
             <?php foreach ($products as $p): ?>
-            <?php $st = $availStatus[$p['cartStatus']] ?? ['label'=>$p['cartStatus'],'badge'=>'badge-muted']; ?>
-            <tr>
-              <td>
-                <div class="prod-thumb">
-                  <?php if (isset($images[$p['productID']])): ?>
-                    <img src="ajax/product_image.php?id=<?= $images[$p['productID']] ?>" alt="">
+              <?php $st = $availStatus[$p['cartStatus']] ?? ['label'=>$p['cartStatus'],'badge'=>'badge-muted']; ?>
+              <tr>
+                <td>
+                  <div class="prod-thumb">
+                    <?php if (isset($images[$p['productID']])): ?>
+                      <img src="ajax/product_image.php?id=<?= $images[$p['productID']] ?>" alt="">
+                    <?php else: ?>
+                      <i class="fas fa-image"></i>
+                    <?php endif; ?>
+                  </div>
+                </td>
+                <td class="font-600"><?= htmlspecialchars($p['nameEN']) ?></td>
+                <td class="text-muted"><?= htmlspecialchars($p['category'] ?? '—') ?></td>
+                <td>
+                  <?php if ($p['costPrice'] > 0 && $p['basePrice'] !== $p['costPrice']): ?>
+                    <span class="price-old">€<?= number_format($p['costPrice'],2) ?></span>
+                    <span class="price-new">€<?= number_format($p['basePrice'],2) ?></span>
                   <?php else: ?>
-                    <i class="fas fa-image"></i>
+                    <span class="price-new">€<?= number_format($p['basePrice'],2) ?></span>
                   <?php endif; ?>
-                </div>
-              </td>
-              <td class="font-600"><?= htmlspecialchars($p['nameEN']) ?></td>
-              <td class="text-muted"><?= htmlspecialchars($p['category'] ?? '—') ?></td>
-              <td>
-                <?php if ($p['costPrice'] > 0 && $p['basePrice'] !== $p['costPrice']): ?>
-                  <span class="price-old">€<?= number_format($p['costPrice'],2) ?></span>
-                  <span class="price-new">€<?= number_format($p['basePrice'],2) ?></span>
-                <?php else: ?>
-                  <span class="price-new">€<?= number_format($p['basePrice'],2) ?></span>
-                <?php endif; ?>
-              </td>
-              <td><span class="badge <?= $st['badge'] ?>"><?= $st['label'] ?></span></td>
-              <td><?= $p['cartStatus'] === 'made_to_order' ? 'N/A' : (int)$p['inventory'] ?></td>
-              <td style="text-align:right">
-                <a href="?edit=<?= $p['productID'] ?>" class="btn-edit">
-                  <i class="fas fa-pen"></i> Edit
-                </a>
-                <form method="POST" style="display:inline"
-                      onsubmit="return confirmDelete('Delete <?= htmlspecialchars(addslashes($p['nameEN'])) ?>?')">
-                  <input type="hidden" name="action" value="delete">
-                  <input type="hidden" name="productID" value="<?= $p['productID'] ?>">
-                  <button type="submit" class="btn-delete">
-                    <i class="fas fa-trash"></i> Delete
-                  </button>
-                </form>
-              </td>
-            </tr>
+                </td>
+                <td><span class="badge <?= $st['badge'] ?>"><?= $st['label'] ?></span></td>
+                <td><?= $p['cartStatus'] === 'made_to_order' ? 'N/A' : (int)$p['inventory'] ?></td>
+                <td style="text-align:right">
+                  <a href="?edit=<?= $p['productID'] ?>" class="btn-edit">
+                    <i class="fas fa-pen"></i> Edit
+                  </a>
+                  <form method="POST" style="display:inline"
+                        onsubmit="return confirmDelete('Delete <?= htmlspecialchars(addslashes($p['nameEN'])) ?>?')">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="productID" value="<?= $p['productID'] ?>">
+                    <button type="submit" class="btn-delete">
+                      <i class="fas fa-trash"></i> Delete
+                    </button>
+                  </form>
+                </td>
+              </tr>
             <?php endforeach; ?>
             <?php if (empty($products)): ?>
-              <tr><td colspan="7" class="text-muted" style="text-align:center;padding:32px 0;">No products yet. Click "Add Product" to get started.</td></tr>
+              <tr>
+                <td colspan="7" class="text-muted" style="text-align:center;padding:32px 0;">
+                  No products yet. Click "Add Product" to get started.
+                </td>
+              </tr>
             <?php endif; ?>
           </tbody>
         </table>

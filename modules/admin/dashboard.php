@@ -57,12 +57,19 @@ if ($r) { while ($row = mysqli_fetch_assoc($r)) $topProducts[] = $row; }
 
 /* ── Recent orders ── */
 $recentOrders = [];
-$r = mysqli_query($conn, "SELECT o.orderNumber, o.status, o.totalAmount,
-      DATE_FORMAT(o.createdAt,'%m/%d/%Y') AS date,
-      CONCAT(COALESCE(u.name,'Guest'),' ',COALESCE(u.surname,'')) AS customer
-      FROM orders o
-      LEFT JOIN users u ON u.userID = o.userID
-      ORDER BY o.createdAt DESC LIMIT 5");
+$r = mysqli_query(
+    $conn,
+    "SELECT 
+        o.orderNumber, 
+        o.status, 
+        o.totalAmount,
+        DATE_FORMAT(o.createdAt,'%m/%d/%Y') AS date,
+        COALESCE(u.full_name, u.email, 'Guest') AS customer
+     FROM orders o
+     LEFT JOIN users u ON u.userID = o.userID
+     ORDER BY o.createdAt DESC
+     LIMIT 5"
+);
 if ($r) { while ($row = mysqli_fetch_assoc($r)) $recentOrders[] = $row; }
 
 $statusLabel = [

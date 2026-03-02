@@ -13,6 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $productID = (int)$_POST['productID'];
         $inventory = (int)$_POST['inventory'];
         $status    = $_POST['cartStatus'] ?? 'active';
+
         $stmt = mysqli_prepare($conn, "UPDATE products SET inventory=?, cartStatus=? WHERE productID=?");
         mysqli_stmt_bind_param($stmt, 'isi', $inventory, $status, $productID);
         mysqli_stmt_execute($stmt);
@@ -23,6 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $colorID  = (int)$_POST['colorID'];
         $stock    = (int)$_POST['globalInventoryAvailable'];
         $isActive = (int)$_POST['isActive'];
+
         $stmt = mysqli_prepare($conn, "UPDATE colors SET globalInventoryAvailable=?, isActive=? WHERE colorID=?");
         mysqli_stmt_bind_param($stmt, 'iii', $stock, $isActive, $colorID);
         mysqli_stmt_execute($stmt);
@@ -33,17 +35,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-if (isset($_GET['flash'])) $flash = $_GET['flash'];
+if (isset($_GET['flash'])) {
+    $flash = $_GET['flash'];
+}
 
 /* ── Load products ── */
 $products = [];
 $r = mysqli_query($conn, "SELECT productID, nameEN, category, inventory, cartStatus FROM products ORDER BY nameEN");
-if ($r) { while ($row = mysqli_fetch_assoc($r)) $products[] = $row; }
+if ($r) {
+    while ($row = mysqli_fetch_assoc($r)) {
+        $products[] = $row;
+    }
+}
 
 /* ── Load colours ── */
 $colours = [];
 $r = mysqli_query($conn, "SELECT * FROM colors ORDER BY colorName");
-if ($r) { while ($row = mysqli_fetch_assoc($r)) $colours[] = $row; }
+if ($r) {
+    while ($row = mysqli_fetch_assoc($r)) {
+        $colours[] = $row;
+    }
+}
 
 $statusOptions = [
     'active'       => 'In Stock',
@@ -89,7 +101,9 @@ $statusBadge = [
       <!-- ── Product Stock Table ── -->
       <div class="card mb-6">
         <div class="card-title">Product Stock Levels</div>
-        <p class="text-sm text-muted mb-4">Update the quantity and availability status per product. Changes reflect immediately on the storefront.</p>
+        <p class="text-sm text-muted mb-4">
+          Update the quantity and availability status per product. Changes reflect immediately on the storefront.
+        </p>
         <table class="data-table">
           <thead>
             <tr>
@@ -124,8 +138,14 @@ $statusBadge = [
                 <form method="POST" style="display:flex;gap:8px;align-items:center">
                   <input type="hidden" name="action"    value="update_stock">
                   <input type="hidden" name="productID" value="<?= $p['productID'] ?>">
-                  <input type="number" name="inventory" value="<?= (int)$p['inventory'] ?>"
-                         min="0" class="form-input" style="width:80px;padding:6px 8px">
+                  <input
+                    type="number"
+                    name="inventory"
+                    value="<?= (int)$p['inventory'] ?>"
+                    min="0"
+                    class="form-input"
+                    style="width:80px;padding:6px 8px"
+                  >
                   <select name="cartStatus" class="form-input" style="width:150px">
                     <?php foreach ($statusOptions as $val=>$lbl): ?>
                       <option value="<?= $val ?>" <?= $p['cartStatus']===$val?'selected':'' ?>><?= $lbl ?></option>
@@ -145,7 +165,9 @@ $statusBadge = [
       <!-- ── Colour Yarn Stock ── -->
       <div class="card">
         <div class="card-title">Yarn Colour Inventory</div>
-        <p class="text-sm text-muted mb-4">Track how many units of each yarn colour you have in stock. Disabling a colour globally removes it from all product pages.</p>
+        <p class="text-sm text-muted mb-4">
+          Track how many units of each yarn colour you have in stock. Disabling a colour globally removes it from all product pages.
+        </p>
         <table class="data-table">
           <thead>
             <tr>
@@ -171,9 +193,14 @@ $statusBadge = [
                 <form method="POST" style="display:flex;gap:8px;align-items:center">
                   <input type="hidden" name="action"  value="update_color_stock">
                   <input type="hidden" name="colorID" value="<?= $c['colorID'] ?>">
-                  <input type="number" name="globalInventoryAvailable"
-                         value="<?= (int)$c['globalInventoryAvailable'] ?>"
-                         min="0" class="form-input" style="width:90px;padding:6px 8px">
+                  <input
+                    type="number"
+                    name="globalInventoryAvailable"
+                    value="<?= (int)$c['globalInventoryAvailable'] ?>"
+                    min="0"
+                    class="form-input"
+                    style="width:90px;padding:6px 8px"
+                  >
                   <select name="isActive" class="form-input" style="width:130px">
                     <option value="1" <?= $c['isActive']?'selected':'' ?>>Available</option>
                     <option value="0" <?= !$c['isActive']?'selected':'' ?>>Unavailable</option>

@@ -10,54 +10,102 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $orderID = (int)($_POST['orderID'] ?? 0);
     $status  = $_POST['status'] ?? '';
     $allowed = ['pending','accepted','in_production','shipped','completed','cancelled'];
-    if ($orderID && in_array($status, $allowed)) {
+
+    if ($orderID && in_array($status, $allowed, true)) {
         $stmt = mysqli_prepare($conn, "UPDATE orders SET status=? WHERE orderID=?");
-        mysqli_stmt_bind_param($stmt, 'si', $status, $orderID);
-        mysqli_stmt_execute($stmt);
-        $flash = 'ok:Order status updated.';
+        if ($stmt) {
+            mysqli_stmt_bind_param($stmt, 'si', $status, $orderID);
+            mysqli_stmt_execute($stmt);
+            mysqli_stmt_close($stmt);
+            $flash = 'ok:Order status updated.';
+        } else {
+            $flash = 'err:Could not update order.';
+        }
+    } else {
+        $flash = 'err:Invalid status update.';
     }
+
     header('Location: order_management.php?flash=' . urlencode($flash));
     exit;
 }
 
-if (isset($_GET['flash'])) $flash = $_GET['flash'];
-
-/* ── View single order details ── */
-$viewOrder = null;
-$viewItems = [];
-if (isset($_GET['view'])) {
-    $vid = (int)$_GET['view'];
-    $r   = mysqli_query($conn, "SELECT o.*, CONCAT(COALESCE(u.name,'Guest'),' ',COALESCE(u.surname,'')) AS customer,
-           COALESCE(u.email, o.email) AS customerEmail,
-           COALESCE(u.phoneNumber,'—') AS phone,
-           p.paymentStatus, p.provider
-           FROM orders o
-           LEFT JOIN users u ON u.userID = o.userID
-           LEFT JOIN payments p ON p.orderID = o.orderID
-           WHERE o.orderID=$vid LIMIT 1");
-    if ($r) $viewOrder = mysqli_fetch_assoc($r);
-
-    $r2 = mysqli_query($conn, "SELECT oi.*, p.nameEN, p.category
-           FROM order_items oi JOIN products p ON p.productID=oi.productID
-           WHERE oi.orderID=$vid");
-    if ($r2) { while ($row = mysqli_fetch_assoc($r2)) $viewItems[] = $row; }
+if (isset($_GET['flash'])) {
+    $flash = $_GET['flash'];
 }
 
-/* ── Load all orders ── */
+/* ── View single order details (optional) ── */
+$viewOrder = null;
+$viewItems = [];
+
+if (isset($_GET['view'])) {
+    $vid = (int)$_GET['view'];
+
+    $sqlOrder = "
+        SELECT
+            o.*,
+            COALESCE(
+              NULLIF(u.full_name, ''),
+              'Guest'
+            ) AS customer,
+            COALESCE(u.email, o.email) AS customerEmail,
+            COALESCE(u.phone, '—')     AS phone,
+            p.paymentStatus,
+            p.provider
+        FROM orders o
+        LEFT JOIN users    u ON u.userID  = o.userID
+        LEFT JOIN payments p ON p.orderID = o.orderID
+        WHERE o.orderID = {$vid}
+        LIMIT 1
+    ";
+    $r = mysqli_query($conn, $sqlOrder);
+    if ($r) {
+        $viewOrder = mysqli_fetch_assoc($r);
+    }
+
+    $sqlItems = "
+        SELECT oi.*, p.nameEN, p.category
+        FROM order_items oi
+        JOIN products p ON p.productID = oi.productID
+        WHERE oi.orderID = {$vid}
+    ";
+    $r2 = mysqli_query($conn, $sqlItems);
+    if ($r2) {
+        while ($row = mysqli_fetch_assoc($r2)) {
+            $viewItems[] = $row;
+        }
+    }
+}
+
+/* ── Load all orders list ── */
 $orders = [];
-$r = mysqli_query($conn, "SELECT o.orderID, o.orderNumber, o.status, o.totalAmount,
-      DATE_FORMAT(o.createdAt,'%m/%d/%Y') AS date,
-      COUNT(oi.orderItemID) AS item_count,
-      CONCAT(COALESCE(u.name,'Guest'),' ',COALESCE(u.surname,'')) AS customer,
-      COALESCE(u.email, o.email) AS email,
-      COALESCE(p.paymentStatus,'—') AS paymentStatus
-      FROM orders o
-      LEFT JOIN users u ON u.userID = o.userID
-      LEFT JOIN order_items oi ON oi.orderID = o.orderID
-      LEFT JOIN payments p ON p.orderID = o.orderID
-      GROUP BY o.orderID
-      ORDER BY o.createdAt DESC");
-if ($r) { while ($row = mysqli_fetch_assoc($r)) $orders[] = $row; }
+
+$sqlOrders = "
+    SELECT
+        o.orderID,
+        o.orderNumber,
+        o.status,
+        o.totalAmount,
+        DATE_FORMAT(o.createdAt,'%m/%d/%Y') AS date,
+        COUNT(oi.orderItemID) AS item_count,
+        COALESCE(
+          NULLIF(u.full_name, ''),
+          'Guest'
+        ) AS customer,
+        COALESCE(u.email, o.email)    AS email,
+        COALESCE(p.paymentStatus,'—') AS paymentStatus
+    FROM orders o
+    LEFT JOIN users       u  ON u.userID   = o.userID
+    LEFT JOIN order_items oi ON oi.orderID = o.orderID
+    LEFT JOIN payments    p  ON p.orderID  = o.orderID
+    GROUP BY o.orderID
+    ORDER BY o.createdAt DESC
+";
+$r = mysqli_query($conn, $sqlOrders);
+if ($r) {
+    while ($row = mysqli_fetch_assoc($r)) {
+        $orders[] = $row;
+    }
+}
 
 $statusOptions = [
     'pending'       => 'Pending',
@@ -93,147 +141,154 @@ $statusBadge = [
     <div class="content-header">
       <div class="content-header-left">
         <h1>Order Management</h1>
-        <p>View and manage customer orders with full details for handmade fulfilment.</p>
+        <p>View, update and track all customer orders.</p>
       </div>
     </div>
 
     <div class="content-body">
 
       <?php if ($flash): ?>
-        <?php [$type,$msg] = explode(':', $flash, 2); ?>
-        <div class="flash flash-<?= $type === 'ok' ? 'success' : 'error' ?>"><?= htmlspecialchars($msg) ?></div>
+        <?php [$type, $msg] = explode(':', $flash, 2); ?>
+        <div class="flash flash-<?= $type === 'ok' ? 'success' : 'error' ?>">
+          <?= htmlspecialchars($msg) ?>
+        </div>
       <?php endif; ?>
 
-      <!-- ── Orders Table ── -->
+      <!-- Single order detail view -->
+      <?php if ($viewOrder): ?>
       <div class="card mb-6">
+        <div class="card-header-flex">
+          <div>
+            <div class="card-title">
+              Order #<?= htmlspecialchars($viewOrder['orderNumber']) ?>
+            </div>
+            <p class="text-sm text-muted">
+              Placed on <?= htmlspecialchars(date('m/d/Y', strtotime($viewOrder['createdAt']))) ?>
+            </p>
+          </div>
+          <a href="order_management.php" class="btn-secondary">
+            <i class="fas fa-arrow-left"></i> Back to all orders
+          </a>
+        </div>
+
+        <div class="order-detail-grid">
+          <div class="order-detail-block">
+            <h4>Customer</h4>
+            <p class="mb-1"><strong><?= htmlspecialchars($viewOrder['customer']) ?></strong></p>
+            <p class="text-sm text-muted"><?= htmlspecialchars($viewOrder['customerEmail']) ?></p>
+            <p class="text-sm text-muted">Phone: <?= htmlspecialchars($viewOrder['phone']) ?></p>
+          </div>
+          <div class="order-detail-block">
+            <h4>Order Info</h4>
+            <p class="text-sm mb-1">Status: <strong><?= htmlspecialchars($viewOrder['status']) ?></strong></p>
+            <p class="text-sm mb-1">Total: <strong>€<?= number_format((float)$viewOrder['totalAmount'], 2) ?></strong></p>
+            <p class="text-sm text-muted">
+              Payment: <?= htmlspecialchars($viewOrder['paymentStatus'] ?? '—') ?>
+              <?php if (!empty($viewOrder['provider'])): ?>
+                (<?= htmlspecialchars($viewOrder['provider']) ?>)
+              <?php endif; ?>
+            </p>
+          </div>
+        </div>
+
+        <h4 style="margin-top:24px;margin-bottom:8px;">Items</h4>
+        <?php if (empty($viewItems)): ?>
+          <p class="text-sm text-muted">No items found for this order.</p>
+        <?php else: ?>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Category</th>
+                <th>Qty</th>
+                <th>Unit Price</th>
+                <th>Line Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php foreach ($viewItems as $it): ?>
+              <tr>
+                <td><?= htmlspecialchars($it['nameEN']) ?></td>
+                <td class="text-muted"><?= htmlspecialchars($it['category'] ?? '—') ?></td>
+                <td><?= (int)$it['quantity'] ?></td>
+                <td>€<?= number_format((float)$it['unitPrice'], 2) ?></td>
+                <td class="font-600">
+                  €<?= number_format((float)$it['quantity'] * (float)$it['unitPrice'], 2) ?>
+                </td>
+              </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        <?php endif; ?>
+      </div>
+      <?php endif; ?>
+
+      <!-- Orders list -->
+      <div class="card">
         <div class="card-title">All Orders</div>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Order Number</th>
-              <th>Customer</th>
-              <th>Date</th>
-              <th>Items</th>
-              <th>Status</th>
-              <th>Payment</th>
-              <th>Total</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <?php foreach ($orders as $ord): ?>
-            <?php $isGift = false; /* extend logic if needed */ ?>
-            <tr>
-              <td class="font-600"><?= htmlspecialchars($ord['orderNumber']) ?></td>
-              <td>
-                <div class="font-600"><?= htmlspecialchars(trim($ord['customer'])) ?></div>
-                <div class="text-muted" style="font-size:12px"><?= htmlspecialchars($ord['email'] ?? '') ?></div>
-              </td>
-              <td class="text-muted"><?= $ord['date'] ?></td>
-              <td><?= (int)$ord['item_count'] ?> items</td>
-              <td>
-                <form method="POST" style="display:inline">
-                  <input type="hidden" name="orderID" value="<?= $ord['orderID'] ?>">
-                  <select name="status" class="status-select status-select-auto"
-                          onchange="this.form.submit()">
-                    <?php foreach ($statusOptions as $val=>$lbl): ?>
-                      <option value="<?= $val ?>" <?= $ord['status']===$val?'selected':'' ?>><?= $lbl ?></option>
-                    <?php endforeach; ?>
-                  </select>
-                </form>
-              </td>
-              <td>
-                <?php $ps = $ord['paymentStatus']; ?>
-                <span class="badge <?= $ps==='paid'?'badge-paid':'badge-muted' ?>">
-                  <?= htmlspecialchars($ps) ?>
-                </span>
-              </td>
-              <td class="font-600">€<?= number_format($ord['totalAmount'],2) ?></td>
-              <td>
-                <a href="?view=<?= $ord['orderID'] ?>" class="btn-view">
-                  <i class="fas fa-eye"></i> View Details
-                </a>
-              </td>
-            </tr>
-            <?php endforeach; ?>
-            <?php if (empty($orders)): ?>
-              <tr><td colspan="8" class="text-muted" style="text-align:center;padding:32px 0;">No orders found.</td></tr>
-            <?php endif; ?>
-          </tbody>
-        </table>
+        <?php if (empty($orders)): ?>
+          <p class="text-sm text-muted">No orders have been placed yet.</p>
+        <?php else: ?>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Order #</th>
+                <th>Customer</th>
+                <th>Items</th>
+                <th>Total</th>
+                <th>Date</th>
+                <th>Payment</th>
+                <th>Status</th>
+                <th style="text-align:right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php foreach ($orders as $o): ?>
+              <?php
+                $st = $statusBadge[$o['status']] ?? 'badge-muted';
+                $label = $statusOptions[$o['status']] ?? $o['status'];
+              ?>
+              <tr>
+                <td class="font-600"><?= htmlspecialchars($o['orderNumber']) ?></td>
+                <td>
+                  <div><?= htmlspecialchars($o['customer']) ?></div>
+                  <div class="text-sm text-muted"><?= htmlspecialchars($o['email'] ?? '') ?></div>
+                </td>
+                <td><?= (int)$o['item_count'] ?></td>
+                <td class="font-600">€<?= number_format((float)$o['totalAmount'], 2) ?></td>
+                <td class="text-muted"><?= htmlspecialchars($o['date']) ?></td>
+                <td class="text-sm"><?= htmlspecialchars($o['paymentStatus']) ?></td>
+                <td>
+                  <span class="badge <?= $st ?>"><?= htmlspecialchars($label) ?></span>
+                </td>
+                <td style="text-align:right; white-space:nowrap;">
+                  <a href="order_management.php?view=<?= (int)$o['orderID'] ?>" class="btn-secondary btn-sm">
+                    <i class="fas fa-eye"></i> View
+                  </a>
+                  <form method="POST" style="display:inline-flex;gap:4px;align-items:center;">
+                    <input type="hidden" name="orderID" value="<?= (int)$o['orderID'] ?>">
+                    <select name="status" class="form-input" style="width:140px;padding:4px 6px;font-size:12px;">
+                      <?php foreach ($statusOptions as $val => $lbl): ?>
+                        <option value="<?= $val ?>" <?= $o['status'] === $val ? 'selected' : '' ?>>
+                          <?= $lbl ?>
+                        </option>
+                      <?php endforeach; ?>
+                    </select>
+                    <button type="submit" class="btn-primary btn-sm">
+                      <i class="fas fa-save"></i>
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        <?php endif; ?>
       </div>
 
-      <!-- ── Fulfilment notes ── -->
-      <div class="alert-card alert-purple">
-        <div class="alert-title" style="font-size:15px"><i class="fas fa-clipboard-list"></i> Fulfilment Notes</div>
-        <p class="alert-text" style="margin-bottom:8px">
-          <strong>Colour Accuracy:</strong> Each order item displays the selected colour prominently.
-          Verify yarn availability before starting production to ensure accurate fulfilment.
-        </p>
-        <p class="alert-text" style="margin-bottom:8px">
-          <strong>Gift Orders:</strong> Orders marked with a gift icon include a gift message.
-          Package these orders with special care and include the gift message card.
-        </p>
-        <p class="alert-text">
-          <strong>Variations:</strong> Pay attention to size and yarn type specifications.
-          These affect the materials and time needed for each item.
-        </p>
-      </div>
-
-    </div>
+    </div><!-- /content-body -->
   </main>
 </div>
-
-<!-- ── Order Detail Modal ── -->
-<?php if ($viewOrder): ?>
-<div class="modal-overlay show" id="modalOrderDetail">
-  <div class="modal-box" style="width:640px">
-    <h3><?= htmlspecialchars($viewOrder['orderNumber']) ?></h3>
-    <p class="modal-sub">Full order details</p>
-
-    <div class="grid-2" style="margin-bottom:16px;font-size:13.5px">
-      <div>
-        <div class="text-muted text-sm">Customer</div>
-        <div class="font-600"><?= htmlspecialchars(trim($viewOrder['customer'])) ?></div>
-        <div class="text-muted text-sm"><?= htmlspecialchars($viewOrder['customerEmail'] ?? '') ?></div>
-        <div class="text-muted text-sm"><?= htmlspecialchars($viewOrder['phone'] ?? '') ?></div>
-      </div>
-      <div>
-        <div class="text-muted text-sm">Order Info</div>
-        <div><strong>Status:</strong>
-          <span class="badge <?= $statusBadge[$viewOrder['status']] ?? 'badge-muted' ?>" style="margin-left:4px">
-            <?= $statusOptions[$viewOrder['status']] ?? $viewOrder['status'] ?>
-          </span>
-        </div>
-        <div><strong>Payment:</strong> <?= htmlspecialchars($viewOrder['paymentStatus'] ?? '—') ?> via <?= htmlspecialchars($viewOrder['provider'] ?? '—') ?></div>
-        <div><strong>Total:</strong> €<?= number_format($viewOrder['totalAmount'],2) ?></div>
-      </div>
-    </div>
-
-    <div class="card-title" style="font-size:13.5px;margin-bottom:8px">Order Items</div>
-    <table class="data-table">
-      <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th></tr></thead>
-      <tbody>
-        <?php foreach ($viewItems as $item): ?>
-        <tr>
-          <td><?= htmlspecialchars($item['nameEN']) ?></td>
-          <td><?= (int)$item['quantity'] ?></td>
-          <td>€<?= number_format($item['unitPrice'],2) ?></td>
-          <td>€<?= number_format($item['quantity'] * $item['unitPrice'],2) ?></td>
-        </tr>
-        <?php endforeach; ?>
-        <?php if (empty($viewItems)): ?>
-          <tr><td colspan="4" class="text-muted">No items found.</td></tr>
-        <?php endif; ?>
-      </tbody>
-    </table>
-
-    <div class="modal-footer">
-      <a href="order_management.php" class="btn-cancel">Close</a>
-    </div>
-  </div>
-</div>
-<?php endif; ?>
 
 <script src="assets/admin.js"></script>
 </body>
