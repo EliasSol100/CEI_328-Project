@@ -61,6 +61,51 @@ if (isset($_SESSION["user"])) {
 $GLOBALS['header_user_full_name'] = $fullName;
 $GLOBALS['header_user_role']      = $role;
 
+// ---------------------------------------------
+// Wishlist handling (session-based, toggle on shop.php)
+// ---------------------------------------------
+if (!isset($_SESSION['wishlist']) || !is_array($_SESSION['wishlist'])) {
+    $_SESSION['wishlist'] = [];
+}
+
+// Valid product keys used in the shop
+$wishlistProductKeys = [
+    'flame_dragon',
+    'electric_mouse',
+    'lilac_turtle',
+    'daisy_bunny',
+    'meadow_bunny',
+    'berry_bunny'
+];
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action     = $_POST['action']      ?? '';
+    $productKey = $_POST['product_key'] ?? '';
+
+    if ($action === 'toggle_wishlist_item' && $productKey && in_array($productKey, $wishlistProductKeys, true)) {
+        // Toggle logic: if in wishlist → remove; if not → add
+        if (in_array($productKey, $_SESSION['wishlist'], true)) {
+            $_SESSION['wishlist'] = array_values(array_filter(
+                $_SESSION['wishlist'],
+                fn($key) => $key !== $productKey
+            ));
+        } else {
+            $_SESSION['wishlist'][] = $productKey;
+        }
+
+        // Redirect back to shop.php (same page) to avoid form re-submit on refresh
+        $query  = $_SERVER['QUERY_STRING'] ?? '';
+        $target = 'shop.php';
+        if ($query !== '') {
+            $target .= '?' . $query;
+        }
+
+        // NOTE: removed the #product-... anchor to avoid auto-scrolling down
+        header("Location: {$target}");
+        exit();
+    }
+}
+
 // Wishlist for current session (simple implementation)
 $wishlist = isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])
     ? $_SESSION['wishlist']
@@ -238,13 +283,14 @@ if (!in_array($selectedCategory, $allowedCategories, true)) {
                     <div class="shop-grid">
                         <!-- 1: Flame Dragon -->
                         <?php $fav = in_array('flame_dragon', $wishlist, true); ?>
-                        <article class="shop-product-card"
+                        <article id="product-flame_dragon"
+                                 class="shop-product-card"
                                  data-category="dragon"
                                  data-color="orange"
                                  data-price="38">
                             <div class="shop-product-image image-1">
-                                <form method="post" action="profile/account.php?tab=wishlist">
-                                    <input type="hidden" name="action" value="add_wishlist_item">
+                                <form method="post" action="shop.php">
+                                    <input type="hidden" name="action" value="toggle_wishlist_item">
                                     <input type="hidden" name="product_key" value="flame_dragon">
                                     <button type="submit" class="shop-fav" title="Add to wishlist">
                                         <i class="<?php echo $fav ? 'fas' : 'far'; ?> fa-heart"></i>
@@ -266,13 +312,14 @@ if (!in_array($selectedCategory, $allowedCategories, true)) {
 
                         <!-- 2: Electric Mouse -->
                         <?php $fav = in_array('electric_mouse', $wishlist, true); ?>
-                        <article class="shop-product-card"
+                        <article id="product-electric_mouse"
+                                 class="shop-product-card"
                                  data-category="electric"
                                  data-color="yellow"
                                  data-price="34">
                             <div class="shop-product-image image-2">
-                                <form method="post" action="profile/account.php?tab=wishlist">
-                                    <input type="hidden" name="action" value="add_wishlist_item">
+                                <form method="post" action="shop.php">
+                                    <input type="hidden" name="action" value="toggle_wishlist_item">
                                     <input type="hidden" name="product_key" value="electric_mouse">
                                     <button type="submit" class="shop-fav" title="Add to wishlist">
                                         <i class="<?php echo $fav ? 'fas' : 'far'; ?> fa-heart"></i>
@@ -294,13 +341,14 @@ if (!in_array($selectedCategory, $allowedCategories, true)) {
 
                         <!-- 3: Lilac Sea Turtle -->
                         <?php $fav = in_array('lilac_turtle', $wishlist, true); ?>
-                        <article class="shop-product-card"
+                        <article id="product-lilac_turtle"
+                                 class="shop-product-card"
                                  data-category="sea"
                                  data-color="lilac"
                                  data-price="40">
                             <div class="shop-product-image image-3">
-                                <form method="post" action="profile/account.php?tab=wishlist">
-                                    <input type="hidden" name="action" value="add_wishlist_item">
+                                <form method="post" action="shop.php">
+                                    <input type="hidden" name="action" value="toggle_wishlist_item">
                                     <input type="hidden" name="product_key" value="lilac_turtle">
                                     <button type="submit" class="shop-fav" title="Add to wishlist">
                                         <i class="<?php echo $fav ? 'fas' : 'far'; ?> fa-heart"></i>
@@ -322,13 +370,14 @@ if (!in_array($selectedCategory, $allowedCategories, true)) {
 
                         <!-- 4: Daisy Dress Bunny -->
                         <?php $fav = in_array('daisy_bunny', $wishlist, true); ?>
-                        <article class="shop-product-card"
+                        <article id="product-daisy_bunny"
+                                 class="shop-product-card"
                                  data-category="bunny"
                                  data-color="cream"
                                  data-price="42">
                             <div class="shop-product-image image-4">
-                                <form method="post" action="profile/account.php?tab=wishlist">
-                                    <input type="hidden" name="action" value="add_wishlist_item">
+                                <form method="post" action="shop.php">
+                                    <input type="hidden" name="action" value="toggle_wishlist_item">
                                     <input type="hidden" name="product_key" value="daisy_bunny">
                                     <button type="submit" class="shop-fav" title="Add to wishlist">
                                         <i class="<?php echo $fav ? 'fas' : 'far'; ?> fa-heart"></i>
@@ -350,13 +399,14 @@ if (!in_array($selectedCategory, $allowedCategories, true)) {
 
                         <!-- 5: Meadow Bunny -->
                         <?php $fav = in_array('meadow_bunny', $wishlist, true); ?>
-                        <article class="shop-product-card"
+                        <article id="product-meadow_bunny"
+                                 class="shop-product-card"
                                  data-category="bunny"
                                  data-color="beige"
                                  data-price="39">
                             <div class="shop-product-image image-5">
-                                <form method="post" action="profile/account.php?tab=wishlist">
-                                    <input type="hidden" name="action" value="add_wishlist_item">
+                                <form method="post" action="shop.php">
+                                    <input type="hidden" name="action" value="toggle_wishlist_item">
                                     <input type="hidden" name="product_key" value="meadow_bunny">
                                     <button type="submit" class="shop-fav" title="Add to wishlist">
                                         <i class="<?php echo $fav ? 'fas' : 'far'; ?> fa-heart"></i>
@@ -378,13 +428,14 @@ if (!in_array($selectedCategory, $allowedCategories, true)) {
 
                         <!-- 6: Berry Bunny -->
                         <?php $fav = in_array('berry_bunny', $wishlist, true); ?>
-                        <article class="shop-product-card"
+                        <article id="product-berry_bunny"
+                                 class="shop-product-card"
                                  data-category="bunny"
                                  data-color="pink"
                                  data-price="35">
                             <div class="shop-product-image image-6">
-                                <form method="post" action="profile/account.php?tab=wishlist">
-                                    <input type="hidden" name="action" value="add_wishlist_item">
+                                <form method="post" action="shop.php">
+                                    <input type="hidden" name="action" value="toggle_wishlist_item">
                                     <input type="hidden" name="product_key" value="berry_bunny">
                                     <button type="submit" class="shop-fav" title="Add to wishlist">
                                         <i class="<?php echo $fav ? 'fas' : 'far'; ?> fa-heart"></i>

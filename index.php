@@ -26,10 +26,10 @@ $userInitial = "G";
 
 if ($isLoggedIn) {
     // These come from your login / verification flows
-    $userId    = $_SESSION["user"]["id"]          ?? null;
-    $fullName  = $_SESSION["user"]["full_name"]   ?? 'User';
-    $role      = $_SESSION["user"]["role"]        ?? 'user';
-    $userEmail = $_SESSION["user"]["email"]       ?? ($_SESSION["email"] ?? null);
+    $userId    = $_SESSION["user"]["id"]        ?? null;
+    $fullName  = $_SESSION["user"]["full_name"] ?? 'User';
+    $role      = $_SESSION["user"]["role"]      ?? 'user';
+    $userEmail = $_SESSION["user"]["email"]     ?? ($_SESSION["email"] ?? null);
 
     // Derive initials for header avatar
     $parts = preg_split('/\s+/', trim($fullName));
@@ -45,7 +45,7 @@ if ($isLoggedIn) {
         // Fetch latest profile data from the users table using EMAIL (safe, unique)
         $stmt = $conn->prepare("
             SELECT country, city, address, postcode, dob, phone, profile_complete, is_verified
-            FROM users 
+            FROM users
             WHERE email = ?
             LIMIT 1
         ");
@@ -108,6 +108,7 @@ $wishlist = isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])
     <link rel="stylesheet" href="assets/styling/header.css?v=5">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="assets/js/translations.js" defer></script>
+    <script src="assets/js/header.js" defer></script>
 </head>
 <body class="site-page">
     <?php
