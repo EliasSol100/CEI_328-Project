@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Mar 02, 2026 at 03:41 PM
+-- Generation Time: Mar 02, 2026 at 08:59 PM
 -- Server version: 10.11.11-MariaDB
 -- PHP Version: 8.2.4
 
@@ -136,10 +136,10 @@ CREATE TABLE `colors` (
 --
 
 INSERT INTO `colors` (`colorID`, `colorName`, `globalInventoryAvailable`, `isActive`, `updatedAt`) VALUES
-(1, 'Cream White', 50, 1, '2026-03-01 15:12:21'),
+(1, 'Cream White', 50, 1, '2026-03-02 21:39:36'),
 (2, 'Soft Pink', 35, 1, '2026-03-01 15:12:21'),
 (3, 'Mint Green', 0, 0, '2026-03-01 15:12:21'),
-(4, 'Coral', 0, 0, '2026-03-01 15:12:21'),
+(4, 'Coral', 0, 0, '2026-03-02 21:39:20'),
 (5, 'Sky Blue', 20, 1, '2026-03-01 15:12:21'),
 (6, 'Lavender', 15, 1, '2026-03-01 15:12:21');
 
@@ -498,7 +498,6 @@ INSERT INTO `system_config` (`config_key`, `config_value`) VALUES
 CREATE TABLE `users` (
   `userID` int(11) NOT NULL,
   `full_name` varchar(128) NOT NULL,
-  `id_card` varchar(100) DEFAULT NULL,
   `email` varchar(255) NOT NULL,
   `username` varchar(100) NOT NULL,
   `password` varchar(255) NOT NULL,
@@ -518,7 +517,6 @@ CREATE TABLE `users` (
   `twofa_expires` datetime DEFAULT NULL,
   `role` varchar(20) DEFAULT 'user',
   `profile_complete` tinyint(1) DEFAULT 0,
-  `lms_access` tinyint(1) DEFAULT 0,
   `first_name` varchar(100) DEFAULT NULL,
   `middle_name` varchar(100) DEFAULT NULL,
   `last_name` varchar(100) DEFAULT NULL,
@@ -533,10 +531,10 @@ CREATE TABLE `users` (
 -- Dumping data for table `users`
 --
 
-INSERT INTO `users` (`userID`, `full_name`, `id_card`, `email`, `username`, `password`, `verification_token`, `is_verified`, `reset_token`, `reset_token_expiry`, `verification_code`, `verification_expires_at`, `phone`, `country`, `city`, `address`, `postcode`, `dob`, `twofa_code`, `twofa_expires`, `role`, `profile_complete`, `lms_access`, `first_name`, `middle_name`, `last_name`, `profile_image`, `last_login`, `createdAt`, `status`, `updated_at`) VALUES
-(3, 'Nikos Georgiou', NULL, 'nikos.g@example.com', 'nikosg', '$2y$10$jwEUeKHu2AaY4iOI4ywfb.nwR3GQ17Cynz0ngpdbPDDJ/5CnXIZde', NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '1990-01-01', NULL, NULL, 'user', 0, 0, 'Nikos', NULL, 'Georgiou', NULL, NULL, '2026-01-23 14:00:00', 'active', '2026-01-23 14:00:00'),
-(4, 'Eleni Konstantinou', NULL, 'eleni.k@example.com', 'elenik', '$2y$10$jwEUeKHu2AaY4iOI4ywfb.nwR3GQ17Cynz0ngpdbPDDJ/5CnXIZde', NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '1992-05-15', NULL, NULL, 'user', 0, 0, 'Eleni', NULL, 'Konstantinou', NULL, NULL, '2026-01-22 09:00:00', 'active', '2026-01-22 09:00:00'),
-(5, 'Elias Solomonides', NULL, 'eliassolomonides0@gmail.com', 'EliasSol100', '$2y$10$a3LeTHaraet42jsOj0KCtexsXlaMzbQ7Mjtkpo7CgsqrWWxhhq4wm', NULL, 1, NULL, NULL, NULL, NULL, '+35799221775', 'Cyprus (Κύπρος)', 'Limassol', 'Darvinou 5', '3041', '2003-11-26', NULL, '2026-03-03 14:18:27', 'user', 1, 0, 'Elias', NULL, 'Solomonides', 'user_5_1772459845.jpg', '2026-03-02 15:07:53', '2026-03-01 15:59:10', 'active', '2026-03-02 15:57:25');
+INSERT INTO `users` (`userID`, `full_name`, `email`, `username`, `password`, `verification_token`, `is_verified`, `reset_token`, `reset_token_expiry`, `verification_code`, `verification_expires_at`, `phone`, `country`, `city`, `address`, `postcode`, `dob`, `twofa_code`, `twofa_expires`, `role`, `profile_complete`, `first_name`, `middle_name`, `last_name`, `profile_image`, `last_login`, `createdAt`, `status`, `updated_at`) VALUES
+(3, 'Nikos Georgiou', 'nikos.g@example.com', 'nikosg', '$2y$10$jwEUeKHu2AaY4iOI4ywfb.nwR3GQ17Cynz0ngpdbPDDJ/5CnXIZde', NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '1990-01-01', NULL, NULL, 'user', 0, 'Nikos', NULL, 'Georgiou', NULL, NULL, '2026-01-23 14:00:00', 'active', '2026-01-23 14:00:00'),
+(4, 'Eleni Konstantinou', 'eleni.k@example.com', 'elenik', '$2y$10$jwEUeKHu2AaY4iOI4ywfb.nwR3GQ17Cynz0ngpdbPDDJ/5CnXIZde', NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '1992-05-15', NULL, NULL, 'user', 0, 'Eleni', NULL, 'Konstantinou', NULL, NULL, '2026-01-22 09:00:00', 'active', '2026-01-22 09:00:00'),
+(5, 'Elias Solomonides', 'eliassolomonides0@gmail.com', 'EliasSol100', '$2y$10$a3LeTHaraet42jsOj0KCtexsXlaMzbQ7Mjtkpo7CgsqrWWxhhq4wm', NULL, 1, NULL, NULL, NULL, NULL, '+35799221775', 'Cyprus (Κύπρος)', 'Limassol', 'Darvinou 5', '3041', '2003-11-26', NULL, '2026-03-03 14:18:27', 'admin', 1, 'Elias', NULL, 'Solomonides', 'user_5_1772462886.jpg', '2026-03-02 17:00:39', '2026-03-01 15:59:10', 'active', '2026-03-02 17:00:39');
 
 -- --------------------------------------------------------
 
@@ -556,6 +554,13 @@ CREATE TABLE `user_addresses` (
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `user_addresses`
+--
+
+INSERT INTO `user_addresses` (`id`, `user_id`, `label`, `country`, `city`, `address`, `postcode`, `is_default`, `created_at`, `updated_at`) VALUES
+(4, 5, 'apartment', 'Cyprus (Κύπρος)', 'sdffdg', 'dfgdfg', '23423', 0, '2026-03-02 16:50:19', '2026-03-02 16:50:19');
 
 -- --------------------------------------------------------
 
@@ -922,7 +927,7 @@ ALTER TABLE `users`
 -- AUTO_INCREMENT for table `user_addresses`
 --
 ALTER TABLE `user_addresses`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
 
 --
 -- AUTO_INCREMENT for table `variation_stock`
