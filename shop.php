@@ -16,6 +16,7 @@ if (!file_exists($logo_path)) {
 // --------- User / Profile handling ----------
 $role     = "guest";
 $fullName = "Guest";
+$userId   = null;
 
 if (isset($_SESSION["user"])) {
     $userId   = $_SESSION["user"]["id"];
@@ -62,59 +63,133 @@ $GLOBALS['header_user_full_name'] = $fullName;
 $GLOBALS['header_user_role']      = $role;
 
 // ---------------------------------------------
-// Wishlist handling (session-based, toggle on shop.php)
+// Wishlist handling (DB for logged-in, session for guests)
 // ---------------------------------------------
-if (!isset($_SESSION['wishlist']) || !is_array($_SESSION['wishlist'])) {
-    $_SESSION['wishlist'] = [];
+
+function getOrCreateWishlistID($conn, $uid) {
+    $uid = (int)$uid;
+    $r = $conn->query("SELECT wishlistID FROM wishlists WHERE userID=$uid LIMIT 1");
+    if ($r && $row = $r->fetch_assoc()) {
+        return (int)$row['wishlistID'];
+    }
+    $conn->query("INSERT INTO wishlists (userID) VALUES ($uid)");
+    return (int)$conn->insert_id;
 }
 
-// Valid product keys used in the shop
-$wishlistProductKeys = [
-    'flame_dragon',
-    'electric_mouse',
-    'lilac_turtle',
-    'daisy_bunny',
-    'meadow_bunny',
-    'berry_bunny'
-];
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action     = $_POST['action']      ?? '';
-    $productKey = $_POST['product_key'] ?? '';
-
-    if ($action === 'toggle_wishlist_item' && $productKey && in_array($productKey, $wishlistProductKeys, true)) {
-        // Toggle logic: if in wishlist → remove; if not → add
-        if (in_array($productKey, $_SESSION['wishlist'], true)) {
-            $_SESSION['wishlist'] = array_values(array_filter(
-                $_SESSION['wishlist'],
-                fn($key) => $key !== $productKey
-            ));
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggle_wishlist_item') {
+    $pid = (int)($_POST['product_id'] ?? 0);
+    if ($pid > 0) {
+        if ($userId) {
+            $wid   = getOrCreateWishlistID($conn, (int)$userId);
+            $check = $conn->query("SELECT wishlistItemID FROM wishlist_items WHERE wishlistID=$wid AND productID=$pid LIMIT 1");
+            if ($check && $check->num_rows > 0) {
+                $iid = (int)$check->fetch_assoc()['wishlistItemID'];
+                $conn->query("DELETE FROM wishlist_items WHERE wishlistItemID=$iid");
+            } else {
+                $conn->query("INSERT INTO wishlist_items (wishlistID, productID) VALUES ($wid, $pid)");
+            }
         } else {
-            $_SESSION['wishlist'][] = $productKey;
+            if (!isset($_SESSION['wishlist']) || !is_array($_SESSION['wishlist'])) {
+                $_SESSION['wishlist'] = [];
+            }
+            $idx = array_search($pid, $_SESSION['wishlist'], true);
+            if ($idx !== false) {
+                array_splice($_SESSION['wishlist'], $idx, 1);
+            } else {
+                $_SESSION['wishlist'][] = $pid;
+            }
         }
-
-        // Redirect back to shop.php (same page) to avoid form re-submit on refresh
-        $query  = $_SERVER['QUERY_STRING'] ?? '';
-        $target = 'shop.php';
-        if ($query !== '') {
-            $target .= '?' . $query;
-        }
-
-        // NOTE: removed the #product-... anchor to avoid auto-scrolling down
-        header("Location: {$target}");
+        $query = $_SERVER['QUERY_STRING'] ?? '';
+        header('Location: shop.php' . ($query ? '?' . $query : ''));
         exit();
     }
 }
 
-// Wishlist for current session (simple implementation)
-$wishlist = isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])
-    ? $_SESSION['wishlist']
-    : [];
+// Load wishlisted product IDs
+$wishlistedIDs = [];
+if ($userId) {
+    $uid = (int)$userId;
+    $r   = $conn->query("
+        SELECT wi.productID
+        FROM wishlist_items wi
+        JOIN wishlists w ON w.wishlistID = wi.wishlistID
+        WHERE w.userID = $uid
+    ");
+    if ($r) {
+        while ($row = $r->fetch_assoc()) {
+            $wishlistedIDs[] = (int)$row['productID'];
+        }
+    }
+} else {
+    if (isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])) {
+        $wishlistedIDs = array_map('intval', $_SESSION['wishlist']);
+    }
+}
 
-// Category from query string for initial filter (used to pre-check radios)
+// ---------------------------------------------
+// Load products from DB
+// ---------------------------------------------
+$products = [];
+$res = $conn->query("
+    SELECT p.productID, p.nameEN, p.nameGR, p.basePrice, p.inventory,
+           p.cartStatus, p.category,
+           MIN(ph.imageID) AS imageID
+    FROM products p
+    LEFT JOIN photos ph ON ph.productID = p.productID
+    WHERE p.cartStatus IN ('active', 'made_to_order')
+    GROUP BY p.productID
+    ORDER BY p.productID ASC
+");
+if ($res) {
+    while ($row = $res->fetch_assoc()) {
+        $products[] = $row;
+    }
+}
+
+// Load review summary per product
+$reviewData = [];
+$revRes = $conn->query("
+    SELECT productID, COUNT(*) AS cnt, ROUND(AVG(rating), 1) AS avg_rating
+    FROM reviews
+    GROUP BY productID
+");
+if ($revRes) {
+    while ($row = $revRes->fetch_assoc()) {
+        $reviewData[(int)$row['productID']] = [
+            'cnt' => (int)$row['cnt'],
+            'avg' => (float)$row['avg_rating'],
+        ];
+    }
+}
+
+// Load distinct active categories
+$categories = [];
+$catRes = $conn->query("
+    SELECT DISTINCT category
+    FROM products
+    WHERE category IS NOT NULL AND category != ''
+      AND cartStatus IN ('active', 'made_to_order')
+    ORDER BY category ASC
+");
+if ($catRes) {
+    while ($row = $catRes->fetch_assoc()) {
+        $categories[] = $row['category'];
+    }
+}
+
+// Price range from DB
+$minPrice = 0;
+$maxPrice = 100;
+if (!empty($products)) {
+    $prices   = array_column($products, 'basePrice');
+    $minPrice = (int)floor(min($prices));
+    $maxPrice = (int)ceil(max($prices));
+}
+
+// Selected category from query string
 $selectedCategory = $_GET['category'] ?? 'all';
-$allowedCategories = ['all', 'dragon', 'electric', 'sea', 'bunny'];
-if (!in_array($selectedCategory, $allowedCategories, true)) {
+$validCategories  = array_merge(['all'], $categories);
+if (!in_array($selectedCategory, $validCategories, true)) {
     $selectedCategory = 'all';
 }
 ?>
@@ -172,72 +247,13 @@ if (!in_array($selectedCategory, $allowedCategories, true)) {
                             <span data-translate="allProducts">All Products</span>
                         </label>
 
+                        <?php foreach ($categories as $cat): ?>
                         <label class="filter-option">
-                            <input type="radio" name="category" value="dragon"
-                                   <?php echo $selectedCategory === 'dragon' ? 'checked' : ''; ?>>
-                            <span>Dragon Plushies</span>
+                            <input type="radio" name="category" value="<?= htmlspecialchars($cat) ?>"
+                                   <?php echo $selectedCategory === $cat ? 'checked' : ''; ?>>
+                            <span><?= htmlspecialchars($cat) ?></span>
                         </label>
-
-                        <label class="filter-option">
-                            <input type="radio" name="category" value="electric"
-                                   <?php echo $selectedCategory === 'electric' ? 'checked' : ''; ?>>
-                            <span>Electric Friends</span>
-                        </label>
-
-                        <label class="filter-option">
-                            <input type="radio" name="category" value="sea"
-                                   <?php echo $selectedCategory === 'sea' ? 'checked' : ''; ?>>
-                            <span>Sea Creatures</span>
-                        </label>
-
-                        <label class="filter-option">
-                            <input type="radio" name="category" value="bunny"
-                                   <?php echo $selectedCategory === 'bunny' ? 'checked' : ''; ?>>
-                            <span>Bunny Plushies</span>
-                        </label>
-                    </div>
-
-                    <!-- COLORS -->
-                    <div class="filter-group">
-                        <h4 data-translate="colors">Colors</h4>
-
-                        <div class="color-filter-row">
-                            <!-- Flame Dragon – bright orange -->
-                            <label class="color-swatch">
-                                <input type="checkbox" name="color" value="orange">
-                                <span class="color-dot color-orange"></span>
-                            </label>
-
-                            <!-- Electric Mouse – soft yellow -->
-                            <label class="color-swatch">
-                                <input type="checkbox" name="color" value="yellow">
-                                <span class="color-dot color-yellow"></span>
-                            </label>
-
-                            <!-- Lilac Sea Turtle – lilac / purple -->
-                            <label class="color-swatch">
-                                <input type="checkbox" name="color" value="lilac">
-                                <span class="color-dot color-lilac"></span>
-                            </label>
-
-                            <!-- Daisy Dress Bunny – cream body -->
-                            <label class="color-swatch">
-                                <input type="checkbox" name="color" value="cream">
-                                <span class="color-dot color-cream"></span>
-                            </label>
-
-                            <!-- Meadow Bunny – warm beige -->
-                            <label class="color-swatch">
-                                <input type="checkbox" name="color" value="beige">
-                                <span class="color-dot color-beige"></span>
-                            </label>
-
-                            <!-- Berry Bunny – bright pink -->
-                            <label class="color-swatch">
-                                <input type="checkbox" name="color" value="pink">
-                                <span class="color-dot color-pink"></span>
-                            </label>
-                        </div>
+                        <?php endforeach; ?>
                     </div>
 
                     <!-- PRICE -->
@@ -246,12 +262,12 @@ if (!in_array($selectedCategory, $allowedCategories, true)) {
                         <input id="price-range"
                                class="price-range-input"
                                type="range"
-                               min="30"
-                               max="45"
-                               value="45">
+                               min="<?= $minPrice ?>"
+                               max="<?= $maxPrice ?>"
+                               value="<?= $maxPrice ?>">
                         <div class="price-range-labels">
-                            <span>€30</span>
-                            <span>€45</span>
+                            <span>€<?= $minPrice ?></span>
+                            <span id="price-max-label">€<?= $maxPrice ?></span>
                         </div>
                     </div>
 
@@ -281,179 +297,64 @@ if (!in_array($selectedCategory, $allowedCategories, true)) {
                 <!-- PRODUCTS GRID -->
                 <section class="shop-products-wrap">
                     <div class="shop-grid">
-                        <!-- 1: Flame Dragon -->
-                        <?php $fav = in_array('flame_dragon', $wishlist, true); ?>
-                        <article id="product-flame_dragon"
-                                 class="shop-product-card"
-                                 data-category="dragon"
-                                 data-color="orange"
-                                 data-price="38">
-                            <div class="shop-product-image image-1">
-                                <form method="post" action="shop.php">
-                                    <input type="hidden" name="action" value="toggle_wishlist_item">
-                                    <input type="hidden" name="product_key" value="flame_dragon">
-                                    <button type="submit" class="shop-fav" title="Add to wishlist">
-                                        <i class="<?php echo $fav ? 'fas' : 'far'; ?> fa-heart"></i>
-                                    </button>
-                                </form>
-                            </div>
-                            <div class="shop-product-info">
-                                <h3 class="shop-product-name">Flame Dragon Amigurumi Plush</h3>
-                                <div class="shop-price-row">
-                                    <span class="shop-price">€38</span>
-                                    <span class="shop-stock" data-translate="inStock">In Stock</span>
-                                </div>
-                                <div class="shop-rating">
-                                    &#9733;&#9733;&#9733;&#9733;&#9733;
-                                    <span class="shop-review-count">(19)</span>
-                                </div>
-                            </div>
-                        </article>
 
-                        <!-- 2: Electric Mouse -->
-                        <?php $fav = in_array('electric_mouse', $wishlist, true); ?>
-                        <article id="product-electric_mouse"
-                                 class="shop-product-card"
-                                 data-category="electric"
-                                 data-color="yellow"
-                                 data-price="34">
-                            <div class="shop-product-image image-2">
-                                <form method="post" action="shop.php">
-                                    <input type="hidden" name="action" value="toggle_wishlist_item">
-                                    <input type="hidden" name="product_key" value="electric_mouse">
-                                    <button type="submit" class="shop-fav" title="Add to wishlist">
-                                        <i class="<?php echo $fav ? 'fas' : 'far'; ?> fa-heart"></i>
-                                    </button>
-                                </form>
-                            </div>
-                            <div class="shop-product-info">
-                                <h3 class="shop-product-name">Electric Mouse Buddy Plush</h3>
-                                <div class="shop-price-row">
-                                    <span class="shop-price">€34</span>
-                                    <span class="shop-stock" data-translate="inStock">In Stock</span>
-                                </div>
-                                <div class="shop-rating">
-                                    &#9733;&#9733;&#9733;&#9733;&#9733;
-                                    <span class="shop-review-count">(27)</span>
-                                </div>
-                            </div>
-                        </article>
+                        <?php if (empty($products)): ?>
+                        <p style="grid-column:1/-1;text-align:center;color:#888;padding:40px 0;">
+                            No products available at the moment.
+                        </p>
+                        <?php endif; ?>
 
-                        <!-- 3: Lilac Sea Turtle -->
-                        <?php $fav = in_array('lilac_turtle', $wishlist, true); ?>
-                        <article id="product-lilac_turtle"
+                        <?php foreach ($products as $p):
+                            $pid       = (int)$p['productID'];
+                            $inWishlist = in_array($pid, $wishlistedIDs, true);
+                            $inStock   = (int)$p['inventory'] > 0;
+                            $catName   = $p['category'] ?? '';
+                            $imgStyle  = '';
+                            if ($p['imageID']) {
+                                $imgStyle = 'background-image:url(modules/admin/ajax/product_image.php?id=' . (int)$p['imageID'] . ');background-size:cover;background-position:center;';
+                            }
+                            $rev    = $reviewData[$pid] ?? ['cnt' => 0, 'avg' => 0.0];
+                            $stars  = '';
+                            $filled = (int)round($rev['avg']);
+                            for ($i = 1; $i <= 5; $i++) {
+                                $stars .= $i <= $filled ? '&#9733;' : '&#9734;';
+                            }
+                        ?>
+                        <article id="product-<?= $pid ?>"
                                  class="shop-product-card"
-                                 data-category="sea"
-                                 data-color="lilac"
-                                 data-price="40">
-                            <div class="shop-product-image image-3">
+                                 data-category="<?= htmlspecialchars($catName) ?>"
+                                 data-price="<?= (float)$p['basePrice'] ?>">
+                            <div class="shop-product-image" style="<?= $imgStyle ?>">
                                 <form method="post" action="shop.php">
                                     <input type="hidden" name="action" value="toggle_wishlist_item">
-                                    <input type="hidden" name="product_key" value="lilac_turtle">
+                                    <input type="hidden" name="product_id" value="<?= $pid ?>">
                                     <button type="submit" class="shop-fav" title="Add to wishlist">
-                                        <i class="<?php echo $fav ? 'fas' : 'far'; ?> fa-heart"></i>
+                                        <i class="<?= $inWishlist ? 'fas' : 'far' ?> fa-heart"></i>
                                     </button>
                                 </form>
                             </div>
                             <div class="shop-product-info">
-                                <h3 class="shop-product-name">Lilac Sea Turtle Plush</h3>
+                                <h3 class="shop-product-name"><?= htmlspecialchars($p['nameEN']) ?></h3>
                                 <div class="shop-price-row">
-                                    <span class="shop-price">€40</span>
-                                    <span class="shop-stock" data-translate="inStock">In Stock</span>
+                                    <span class="shop-price">€<?= number_format((float)$p['basePrice'], 0) ?></span>
+                                    <?php if ($p['cartStatus'] === 'made_to_order'): ?>
+                                        <span class="shop-stock" style="color:#a066f0;">Made to Order</span>
+                                    <?php elseif ($inStock): ?>
+                                        <span class="shop-stock" data-translate="inStock">In Stock</span>
+                                    <?php else: ?>
+                                        <span class="shop-stock out" data-translate="outOfStock">Out of Stock</span>
+                                    <?php endif; ?>
                                 </div>
+                                <?php if ($rev['cnt'] > 0): ?>
                                 <div class="shop-rating">
-                                    &#9733;&#9733;&#9733;&#9733;&#9733;
-                                    <span class="shop-review-count">(15)</span>
+                                    <?= $stars ?>
+                                    <span class="shop-review-count">(<?= $rev['cnt'] ?>)</span>
                                 </div>
+                                <?php endif; ?>
                             </div>
                         </article>
+                        <?php endforeach; ?>
 
-                        <!-- 4: Daisy Dress Bunny -->
-                        <?php $fav = in_array('daisy_bunny', $wishlist, true); ?>
-                        <article id="product-daisy_bunny"
-                                 class="shop-product-card"
-                                 data-category="bunny"
-                                 data-color="cream"
-                                 data-price="42">
-                            <div class="shop-product-image image-4">
-                                <form method="post" action="shop.php">
-                                    <input type="hidden" name="action" value="toggle_wishlist_item">
-                                    <input type="hidden" name="product_key" value="daisy_bunny">
-                                    <button type="submit" class="shop-fav" title="Add to wishlist">
-                                        <i class="<?php echo $fav ? 'fas' : 'far'; ?> fa-heart"></i>
-                                    </button>
-                                </form>
-                            </div>
-                            <div class="shop-product-info">
-                                <h3 class="shop-product-name">Daisy Dress Bunny Plush</h3>
-                                <div class="shop-price-row">
-                                    <span class="shop-price">€42</span>
-                                    <span class="shop-stock" data-translate="inStock">In Stock</span>
-                                </div>
-                                <div class="shop-rating">
-                                    &#9733;&#9733;&#9733;&#9733;&#9733;
-                                    <span class="shop-review-count">(21)</span>
-                                </div>
-                            </div>
-                        </article>
-
-                        <!-- 5: Meadow Bunny -->
-                        <?php $fav = in_array('meadow_bunny', $wishlist, true); ?>
-                        <article id="product-meadow_bunny"
-                                 class="shop-product-card"
-                                 data-category="bunny"
-                                 data-color="beige"
-                                 data-price="39">
-                            <div class="shop-product-image image-5">
-                                <form method="post" action="shop.php">
-                                    <input type="hidden" name="action" value="toggle_wishlist_item">
-                                    <input type="hidden" name="product_key" value="meadow_bunny">
-                                    <button type="submit" class="shop-fav" title="Add to wishlist">
-                                        <i class="<?php echo $fav ? 'fas' : 'far'; ?> fa-heart"></i>
-                                    </button>
-                                </form>
-                            </div>
-                            <div class="shop-product-info">
-                                <h3 class="shop-product-name">Meadow Bunny in Pink Dress</h3>
-                                <div class="shop-price-row">
-                                    <span class="shop-price">€39</span>
-                                    <span class="shop-stock" data-translate="inStock">In Stock</span>
-                                </div>
-                                <div class="shop-rating">
-                                    &#9733;&#9733;&#9733;&#9733;&#9734;
-                                    <span class="shop-review-count">(18)</span>
-                                </div>
-                            </div>
-                        </article>
-
-                        <!-- 6: Berry Bunny -->
-                        <?php $fav = in_array('berry_bunny', $wishlist, true); ?>
-                        <article id="product-berry_bunny"
-                                 class="shop-product-card"
-                                 data-category="bunny"
-                                 data-color="pink"
-                                 data-price="35">
-                            <div class="shop-product-image image-6">
-                                <form method="post" action="shop.php">
-                                    <input type="hidden" name="action" value="toggle_wishlist_item">
-                                    <input type="hidden" name="product_key" value="berry_bunny">
-                                    <button type="submit" class="shop-fav" title="Add to wishlist">
-                                        <i class="<?php echo $fav ? 'fas' : 'far'; ?> fa-heart"></i>
-                                    </button>
-                                </form>
-                            </div>
-                            <div class="shop-product-info">
-                                <h3 class="shop-product-name">Berry Bunny with Bow</h3>
-                                <div class="shop-price-row">
-                                    <span class="shop-price">€35</span>
-                                    <span class="shop-stock out" data-translate="outOfStock">Out of Stock</span>
-                                </div>
-                                <div class="shop-rating">
-                                    &#9733;&#9733;&#9733;&#9733;&#9734;
-                                    <span class="shop-review-count">(24)</span>
-                                </div>
-                            </div>
-                        </article>
                     </div>
                 </section>
             </div>
@@ -462,21 +363,16 @@ if (!in_array($selectedCategory, $allowedCategories, true)) {
 
     <?php include __DIR__ . '/include/footer.php'; ?>
 
-    <!-- Combined filtering behaviour (category + color + price + search) -->
+    <!-- Filtering behaviour (category + price + search) -->
     <script>
     function applyFilters() {
-        // SEARCH (by product name)
+        // SEARCH
         const searchInput = document.getElementById('shop-search-input');
         const searchQuery = searchInput ? searchInput.value.trim().toLowerCase() : '';
 
         // CATEGORY
         const categoryInput = document.querySelector('input[name="category"]:checked');
         const selectedCategory = categoryInput ? categoryInput.value : 'all';
-
-        // COLORS
-        const selectedColors = Array.from(
-            document.querySelectorAll('input[type="checkbox"][name="color"]:checked')
-        ).map(cb => cb.value);
 
         // PRICE (max price)
         const range = document.getElementById('price-range');
@@ -486,48 +382,22 @@ if (!in_array($selectedCategory, $allowedCategories, true)) {
 
         cards.forEach(card => {
             const cardCategory = card.dataset.category || '';
-            const cardColorsRaw = card.dataset.color || '';
-            const cardColors = cardColorsRaw
-                .split(',')
-                .map(c => c.trim())
-                .filter(Boolean);
-            const cardPrice = parseFloat(card.dataset.price || '0');
-            const titleEl = card.querySelector('.shop-product-name');
-            const cardTitle = titleEl ? titleEl.textContent.toLowerCase() : '';
+            const cardPrice    = parseFloat(card.dataset.price || '0');
+            const titleEl      = card.querySelector('.shop-product-name');
+            const cardTitle    = titleEl ? titleEl.textContent.toLowerCase() : '';
 
             // Category match
-            let matchesCategory = true;
-            if (selectedCategory !== 'all') {
-                matchesCategory = (cardCategory === selectedCategory);
-            }
+            let matchesCategory = (selectedCategory === 'all') || (cardCategory === selectedCategory);
 
-            // Color match
-            let matchesColor = true;
-            if (selectedColors.length > 0) {
-                matchesColor = cardColors.some(c => selectedColors.includes(c));
-            }
+            // Price match
+            let matchesPrice = isNaN(maxPrice) || cardPrice <= maxPrice;
 
-            // Price match: price <= chosen max
-            let matchesPrice = true;
-            if (!isNaN(maxPrice)) {
-                matchesPrice = cardPrice <= maxPrice;
-            }
+            // Search match
+            let matchesSearch = !searchQuery || cardTitle.includes(searchQuery);
 
-            // Search match: name contains query
-            let matchesSearch = true;
-            if (searchQuery) {
-                matchesSearch = cardTitle.includes(searchQuery);
-            }
-
-            const shouldShow = matchesCategory && matchesColor && matchesPrice && matchesSearch;
-            card.style.display = shouldShow ? "" : "none";
+            card.style.display = (matchesCategory && matchesPrice && matchesSearch) ? '' : 'none';
         });
     }
-
-    // Color checkboxes
-    document.querySelectorAll('input[type="checkbox"][name="color"]').forEach(cb => {
-        cb.addEventListener('change', applyFilters);
-    });
 
     // Category radios
     document.querySelectorAll('input[type="radio"][name="category"]').forEach(radio => {
@@ -536,8 +406,12 @@ if (!in_array($selectedCategory, $allowedCategories, true)) {
 
     // Price range slider
     const priceRange = document.getElementById('price-range');
+    const priceMaxLabel = document.getElementById('price-max-label');
     if (priceRange) {
-        priceRange.addEventListener('input', applyFilters);
+        priceRange.addEventListener('input', function () {
+            if (priceMaxLabel) priceMaxLabel.textContent = '€' + this.value;
+            applyFilters();
+        });
     }
 
     // Search box
@@ -546,26 +420,19 @@ if (!in_array($selectedCategory, $allowedCategories, true)) {
         searchInputEl.addEventListener('input', applyFilters);
     }
 
-    // Clear Filters behaviour (UI reset + show all)
-    document.getElementById("clear-filters-btn")?.addEventListener("click", function () {
-        // Reset search
+    // Clear Filters
+    document.getElementById('clear-filters-btn')?.addEventListener('click', function () {
         const s = document.getElementById('shop-search-input');
         if (s) s.value = '';
 
-        // Reset category
         document.querySelectorAll('input[type="radio"][name="category"]').forEach(function (radio) {
             radio.checked = (radio.value === 'all');
         });
 
-        // Reset colors
-        document.querySelectorAll('input[type="checkbox"][name="color"]').forEach(function (checkbox) {
-            checkbox.checked = false;
-        });
-
-        // Reset price range
-        const range = document.getElementById("price-range");
+        const range = document.getElementById('price-range');
         if (range) {
-            range.value = range.defaultValue;
+            range.value = range.max;
+            if (priceMaxLabel) priceMaxLabel.textContent = '€' + range.max;
         }
 
         applyFilters();

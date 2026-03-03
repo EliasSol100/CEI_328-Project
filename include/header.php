@@ -56,7 +56,7 @@ if ($isLoggedIn && !$initials) {
 
                 <?php if ($isLoggedIn && $isAdmin): ?>
                     <!-- ADMIN DASHBOARD BUTTON (visible only for admin roles) -->
-                    <a href="<?php echo $rootPrefix; ?>modules/admin/admin_dashboard.php"
+                    <a href="<?php echo $rootPrefix; ?>modules/admin/dashboard.php"
                        class="utility-icon admin-icon"
                        aria-label="Admin Dashboard"
                        title="Admin Dashboard">

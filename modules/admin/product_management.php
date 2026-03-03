@@ -49,6 +49,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $category
             );
             mysqli_stmt_execute($stmt);
+            $newProductID = mysqli_insert_id($conn);
+
+            if ($newProductID && isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
+                $photoData  = file_get_contents($_FILES['photo']['tmp_name']);
+                $stmtPhoto  = mysqli_prepare($conn, "INSERT INTO photos (photo, productID) VALUES (?, ?)");
+                mysqli_stmt_bind_param($stmtPhoto, 'si', $photoData, $newProductID);
+                mysqli_stmt_execute($stmtPhoto);
+            }
+
             $flash = 'ok:Product added successfully.';
         } else {
             $id = (int)($_POST['productID'] ?? 0);
@@ -84,16 +93,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $id
             );
             mysqli_stmt_execute($stmt);
+
+            if (isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
+                $photoData = file_get_contents($_FILES['photo']['tmp_name']);
+                $chk = mysqli_query($conn, "SELECT imageID FROM photos WHERE productID=$id LIMIT 1");
+                if ($chk && mysqli_num_rows($chk) > 0) {
+                    $imgRow    = mysqli_fetch_assoc($chk);
+                    $stmtPhoto = mysqli_prepare($conn, "UPDATE photos SET photo=? WHERE imageID=?");
+                    mysqli_stmt_bind_param($stmtPhoto, 'si', $photoData, $imgRow['imageID']);
+                } else {
+                    $stmtPhoto = mysqli_prepare($conn, "INSERT INTO photos (photo, productID) VALUES (?,?)");
+                    mysqli_stmt_bind_param($stmtPhoto, 'si', $photoData, $id);
+                }
+                mysqli_stmt_execute($stmtPhoto);
+            }
+
             $flash = 'ok:Product updated successfully.';
         }
     }
 
     if ($action === 'delete') {
         $id = (int)($_POST['productID'] ?? 0);
-        $stmt = mysqli_prepare($conn, "DELETE FROM products WHERE productID=?");
-        mysqli_stmt_bind_param($stmt, 'i', $id);
-        mysqli_stmt_execute($stmt);
-        $flash = 'ok:Product deleted.';
+
+        // Check if this product appears in any order (must preserve history)
+        $chkOrders = mysqli_query($conn, "SELECT 1 FROM order_items WHERE productID=$id LIMIT 1");
+        $hasOrders = $chkOrders && mysqli_num_rows($chkOrders) > 0;
+
+        if ($hasOrders) {
+            // Soft-delete: mark as discontinued so it disappears from shop
+            $stmt = mysqli_prepare($conn, "UPDATE products SET cartStatus='discontinued' WHERE productID=?");
+            mysqli_stmt_bind_param($stmt, 'i', $id);
+            mysqli_stmt_execute($stmt);
+            $flash = 'warn:Product has existing orders and cannot be fully deleted — it has been marked as Discontinued and hidden from the shop.';
+        } else {
+            // Hard-delete: remove dependent rows first, then the product
+            mysqli_query($conn, "DELETE FROM wishlist_items WHERE productID=$id");
+            mysqli_query($conn, "DELETE FROM reviews WHERE productID=$id");
+            mysqli_query($conn, "DELETE FROM photos WHERE productID=$id");
+            // variation_stock references product_variations, so delete that first
+            $vRes = mysqli_query($conn, "SELECT variationID FROM product_variations WHERE productID=$id");
+            if ($vRes) {
+                while ($vRow = mysqli_fetch_assoc($vRes)) {
+                    $vid = (int)$vRow['variationID'];
+                    mysqli_query($conn, "DELETE FROM variation_stock WHERE variationID=$vid");
+                }
+            }
+            mysqli_query($conn, "DELETE FROM product_variations WHERE productID=$id");
+            mysqli_query($conn, "DELETE FROM products WHERE productID=$id");
+            $flash = 'ok:Product deleted successfully.';
+        }
     }
 
     header('Location: product_management.php?flash=' . urlencode($flash));
@@ -176,7 +224,8 @@ $statuses = [
 
       <?php if ($flash): ?>
         <?php [$type,$msg] = explode(':', $flash, 2); ?>
-        <div class="flash flash-<?= $type === 'ok' ? 'success' : 'error' ?>"><?= htmlspecialchars($msg) ?></div>
+        <?php $flashClass = $type === 'ok' ? 'success' : ($type === 'warn' ? 'warning' : 'error'); ?>
+        <div class="flash flash-<?= $flashClass ?>"><?= htmlspecialchars($msg) ?></div>
       <?php endif; ?>
 
       <div class="card">
@@ -253,8 +302,12 @@ $statuses = [
   <div class="modal-box">
     <h3>Add Product</h3>
     <p class="modal-sub">Fill in the product details below.</p>
-    <form method="POST">
+    <form method="POST" enctype="multipart/form-data">
       <input type="hidden" name="action" value="add">
+      <div class="form-group">
+        <label class="form-label">Product Photo</label>
+        <input type="file" name="photo" class="form-input" accept="image/*">
+      </div>
       <div class="form-grid-2">
         <div class="form-group">
           <label class="form-label">Product Name (EN) *</label>
@@ -327,9 +380,20 @@ $statuses = [
   <div class="modal-box">
     <h3>Edit Product</h3>
     <p class="modal-sub">Update the details for "<?= htmlspecialchars($editProduct['nameEN']) ?>".</p>
-    <form method="POST">
+    <form method="POST" enctype="multipart/form-data">
       <input type="hidden" name="action" value="edit">
       <input type="hidden" name="productID" value="<?= $editProduct['productID'] ?>">
+      <div class="form-group">
+        <label class="form-label">Product Photo</label>
+        <?php if (isset($images[$editProduct['productID']])): ?>
+          <div style="margin-bottom:8px;">
+            <img src="ajax/product_image.php?id=<?= $images[$editProduct['productID']] ?>"
+                 style="height:80px;border-radius:8px;object-fit:cover;border:1px solid #e5e7eb;" alt="Current photo">
+            <span class="text-muted" style="display:block;font-size:12px;margin-top:4px;">Current photo — upload a new one to replace it</span>
+          </div>
+        <?php endif; ?>
+        <input type="file" name="photo" class="form-input" accept="image/*">
+      </div>
       <div class="form-grid-2">
         <div class="form-group">
           <label class="form-label">Product Name (EN) *</label>
