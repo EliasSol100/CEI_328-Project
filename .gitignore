@@ -1,0 +1,6 @@
+# Sensitive credentials — never commit these
+authentication/twilio_config.php
+
+# XAMPP / local environment
+/vendor/
+*.log
