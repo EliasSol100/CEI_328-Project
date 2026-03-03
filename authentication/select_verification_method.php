@@ -45,9 +45,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["select_method"])) {
     $verification_code = random_int(100000, 999999);
 
     if ($method === "email") {
-        // Store code on the user
-        $stmt = $conn->prepare("UPDATE users SET verification_code = ? WHERE userID = ?");
-        $stmt->bind_param("si", $verification_code, $userId);
+        // Store code + 20-min expiry on the user
+        $expiresAt = date('Y-m-d H:i:s', time() + 20 * 60);
+        $stmt = $conn->prepare("UPDATE users SET verification_code = ?, verification_expires_at = ? WHERE userID = ?");
+        $stmt->bind_param("ssi", $verification_code, $expiresAt, $userId);
         $stmt->execute();
         $stmt->close();
 

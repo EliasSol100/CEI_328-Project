@@ -1,77 +1,75 @@
-﻿<?php
-session_start(); // ADDED so $_SESSION["phone"] actually works
+<?php
+/**
+ * SMS helper — defines sendVerificationSms() for use by other files.
+ * Do NOT call this file directly as an endpoint.
+ *
+ * Credentials are loaded from twilio_config.php (gitignored).
+ */
 
-// Database connection
-require_once "database.php";
+require_once __DIR__ . '/twilio_config.php';
 
-// Twilio credentials
-$accountSid = 'ACed50809afda0163369b2505abc4354f7'; // Your Twilio Account SID
-$authToken = 'a0e8ced97d0ab07db55e20f99fa7121e';   // Your Twilio Auth Token
-$twilioPhoneNumber = '+12182616825';               // Your Twilio phone number
+/**
+ * Send a verification SMS via Twilio and save the code + expiry to the DB.
+ *
+ * @param mysqli $conn             Active DB connection
+ * @param string $email            User's email (used to look up the record)
+ * @param string $phone            Destination phone number (E.164 format, e.g. +35799123456)
+ * @param string $code             6-digit verification code
+ * @param string $body             Full SMS message body
+ * @return array ['success' => bool, 'message' => string]
+ */
+function sendVerificationSms(mysqli $conn, string $email, string $phone, string $code, string $body): array
+{
+    global $TWILIO_ACCOUNT_SID, $TWILIO_AUTH_TOKEN, $TWILIO_PHONE_NUMBER;
 
-// Get data from the AJAX request
-$email = $_POST['email'];             // Get email from the request
-$phone = $_POST['phone'];             // Get phone number from the request
-$body  = $_POST['message'];           // Get the SMS message body
-$verification_code = $_POST['verification_code']; // Get the verification code
- 
-$_SESSION["phone"] = $phone;
- 
-// Update user data in the database (only phone and verification_code)
-$sql = "UPDATE users SET phone = ?, verification_code = ? WHERE email = ?";
-$stmt = mysqli_stmt_init($conn);
-if (mysqli_stmt_prepare($stmt, $sql)) {
-    mysqli_stmt_bind_param($stmt, "sss", $phone, $verification_code, $email);
-    mysqli_stmt_execute($stmt);
+    // Save code + expiry (20 min) to the users table
+    $expiresAt = date('Y-m-d H:i:s', time() + 20 * 60);
+    $stmt = $conn->prepare("
+        UPDATE users
+        SET verification_code = ?, verification_expires_at = ?
+        WHERE email = ?
+    ");
+    if (!$stmt) {
+        return ['success' => false, 'message' => 'DB prepare failed: ' . $conn->error];
+    }
+    $stmt->bind_param('sss', $code, $expiresAt, $email);
+    $stmt->execute();
+    $stmt->close();
 
-    // Prepare the POST data for Twilio
+    // Send via Twilio REST API
     $postData = http_build_query([
-        'From' => $twilioPhoneNumber,
+        'From' => $TWILIO_PHONE_NUMBER,
         'To'   => $phone,
         'Body' => $body,
     ]);
 
-    // Initialize cURL
     $curl = curl_init();
-
     curl_setopt_array($curl, [
-        CURLOPT_URL => "https://api.twilio.com/2010-04-01/Accounts/$accountSid/Messages.json",
+        CURLOPT_URL            => "https://api.twilio.com/2010-04-01/Accounts/{$TWILIO_ACCOUNT_SID}/Messages.json",
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_ENCODING => '',
-        CURLOPT_MAXREDIRS => 10,
-        CURLOPT_TIMEOUT => 0,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-        CURLOPT_CUSTOMREQUEST => 'POST',
-        CURLOPT_POSTFIELDS => $postData,
-        CURLOPT_HTTPHEADER => [
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_CUSTOMREQUEST  => 'POST',
+        CURLOPT_POSTFIELDS     => $postData,
+        CURLOPT_HTTPHEADER     => [
             'Content-Type: application/x-www-form-urlencoded',
-            'Authorization: Basic ' . base64_encode("$accountSid:$authToken"),
+            'Authorization: Basic ' . base64_encode("{$TWILIO_ACCOUNT_SID}:{$TWILIO_AUTH_TOKEN}"),
         ],
-        CURLOPT_SSL_VERIFYPEER => false, // Disable SSL verification (not recommended)
-        CURLOPT_SSL_VERIFYHOST => false, // Disable SSL host verification (not recommended)
     ]);
 
-    // Execute the request
     $response = curl_exec($curl);
+    $curlErr  = curl_errno($curl);
+    $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+    curl_close($curl);
 
-    // Check for errors
-    if (curl_errno($curl)) {
-        echo json_encode(['success' => false, 'message' => 'Failed to send SMS: ' . curl_error($curl)]);
-    } else {
-        $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-        if ($httpCode === 201) {
-            echo json_encode(['success' => true, 'message' => 'SMS sent successfully!', 'verification_code' => $verification_code]);
-        } else {
-            $responseData = json_decode($response, true);
-            $errorMessage = $responseData['message'] ?? 'Failed to send SMS.';
-            echo json_encode(['success' => true, 'message' => $errorMessage, 'verification_code' => $verification_code]);
-        }
+    if ($curlErr) {
+        return ['success' => false, 'message' => 'cURL error: ' . curl_error($curl)];
     }
 
-    // Close cURL
-    curl_close($curl);
-} else {
-    die("Something went wrong with the database query.");
+    if ($httpCode === 201) {
+        return ['success' => true, 'message' => 'SMS sent successfully.'];
+    }
+
+    $data = json_decode($response, true);
+    $msg  = $data['message'] ?? "Twilio returned HTTP $httpCode.";
+    return ['success' => false, 'message' => $msg];
 }
-?>
