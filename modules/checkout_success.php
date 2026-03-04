@@ -13,14 +13,15 @@ unset($_SESSION['checkout_result']);
 $tempPassword = $_SESSION['temp_password'] ?? null;
 unset($_SESSION['temp_password']);
 
+// Correct relative path for includes
 require_once __DIR__ . '/../authentication/database.php';
 
 $configPath = __DIR__ . '/../authentication/get_config.php';
 if (file_exists($configPath)) {
     require_once $configPath;
-    $system_title = function_exists('getSystemConfig') ? getSystemConfig('site_title') : 'Athina E-Shop';
+    $system_title = function_exists('getSystemConfig') ? getSystemConfig('site_title') : 'Creations by Athina';
 } else {
-    $system_title = 'Athina E-Shop';
+    $system_title = 'Creations by Athina';
 }
 
 if (!$conn) die("Database connection failed");
@@ -28,14 +29,13 @@ if (!$conn) die("Database connection failed");
 $root = $_SERVER['DOCUMENT_ROOT'];
 $project = '/CEI_328-Project';
 
-$header = __DIR__ . '/../include/header.php';
-if (file_exists($header)) {
+$headerPath = __DIR__ . '/../include/header.php';
+if (file_exists($headerPath)) {
     $activePage = 'checkout-success';
-    include $header;
+    include $headerPath;
 } else {
     ?><!DOCTYPE html><html><head><title>Order Confirmed</title></head><body><?php
 }
-
 
 $orderDetails = null;
 if (isset($result['order_id'])) {
@@ -53,7 +53,7 @@ if (isset($result['order_id'])) {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Order Confirmed - Creations by Athina</title>
+    <title>Order Confirmed - <?= htmlspecialchars($system_title) ?></title>
     <link rel="stylesheet" href="<?= $project ?>/assets/styling/styles.css">
     <link rel="stylesheet" href="<?= $project ?>/assets/styling/header.css">
     <style>
@@ -119,9 +119,9 @@ if (isset($result['order_id'])) {
     </div>
 </div>
 <?php
-$footer = $root . $project . '/include/footer.php';
-if (file_exists($footer)) {
-    include $footer;
+$footerPath = __DIR__ . '/../include/footer.php';
+if (file_exists($footerPath)) {
+    include $footerPath;
 } else {
     echo "</body></html>";
 }
