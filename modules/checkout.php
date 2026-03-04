@@ -1,27 +1,37 @@
 <?php
-// checkout.php 
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 session_start();
 
-// ----- ABSOLUTE PATHS -----
-$root = $_SERVER['DOCUMENT_ROOT'];          
-$project = '/CEI_328-Project';              // project folder
+// Include database using correct relative path
+require_once __DIR__ . '/../authentication/database.php';
 
-// Include database
-require_once $root . $project . '/authentication/database.php';
+// Optional: include get_config.php 
+$configPath = __DIR__ . '/../authentication/get_config.php';
+if (file_exists($configPath)) {
+    require_once $configPath;
+    $system_title = function_exists('getSystemConfig') ? getSystemConfig('site_title') : 'Athina E-Shop';
+} else {
+    $system_title = 'Athina E-Shop'; // fallback
+}
+
 if (!$conn || $conn->connect_error) {
     die("Database connection failed: " . ($conn->connect_error ?? 'Unknown error'));
 }
 
-// Include header (with fallback)
-$header = $root . $project . '/include/header.php';
+// Define project root for asset URLs (adjust if needed)
+$root = $_SERVER['DOCUMENT_ROOT'];
+$project = '/CEI_328-Project'; // change if your URL path differs
+
+// Include header with fallback
+$header = __DIR__ . '/../include/header.php';
 if (file_exists($header)) {
     $activePage = 'checkout';
     include $header;
 } else {
     ?><!DOCTYPE html><html><head><title>Checkout</title></head><body><?php
 }
+
 
 // ----- CSRF TOKEN -----
 if (empty($_SESSION['csrf_token'])) {

@@ -13,20 +13,29 @@ unset($_SESSION['checkout_result']);
 $tempPassword = $_SESSION['temp_password'] ?? null;
 unset($_SESSION['temp_password']);
 
+require_once __DIR__ . '/../authentication/database.php';
+
+$configPath = __DIR__ . '/../authentication/get_config.php';
+if (file_exists($configPath)) {
+    require_once $configPath;
+    $system_title = function_exists('getSystemConfig') ? getSystemConfig('site_title') : 'Athina E-Shop';
+} else {
+    $system_title = 'Athina E-Shop';
+}
+
+if (!$conn) die("Database connection failed");
+
 $root = $_SERVER['DOCUMENT_ROOT'];
 $project = '/CEI_328-Project';
 
-require_once $root . $project . '/authentication/database.php';
-if (!$conn) die("Database connection failed");
-
-// Include header
-$header = $root . $project . '/include/header.php';
+$header = __DIR__ . '/../include/header.php';
 if (file_exists($header)) {
     $activePage = 'checkout-success';
     include $header;
 } else {
     ?><!DOCTYPE html><html><head><title>Order Confirmed</title></head><body><?php
 }
+
 
 $orderDetails = null;
 if (isset($result['order_id'])) {
