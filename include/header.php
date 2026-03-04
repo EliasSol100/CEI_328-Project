@@ -100,8 +100,10 @@ if ($isLoggedIn && !$initials) {
                 <?php endif; ?>
 
                 <!-- Cart icon -->
-                <a href="#" class="utility-icon cart-icon" aria-label="Shopping cart">
-                    <i class="fas fa-shopping-cart"></i>
+                <!-- Cart icon -->
+                  <a href="<?php echo $rootPrefix; ?>cart.php" class="utility-icon cart-icon" aria-label="Shopping cart">
+                  <i class="fas fa-shopping-cart"></i>
+                  </a>
                 </a>
             </div>
         </div>
