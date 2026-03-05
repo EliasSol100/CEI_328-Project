@@ -64,7 +64,7 @@ $statusOptions = [
     'made_to_order'=> 'Made to Order',
 ];
 $statusBadge = [
-    'active'        => 'badge-dark',
+    'active'        => 'badge-green',
     'low_stock'     => 'badge-warning',
     'out_of_stock'  => 'badge-red',
     'made_to_order' => 'badge-muted',
@@ -184,7 +184,7 @@ $statusBadge = [
               <td><?= (int)$c['globalInventoryAvailable'] ?></td>
               <td>
                 <?php if ($c['isActive']): ?>
-                  <span class="badge badge-dark">Available</span>
+                  <span class="badge badge-green">Available</span>
                 <?php else: ?>
                   <span class="badge badge-red">Unavailable</span>
                 <?php endif; ?>

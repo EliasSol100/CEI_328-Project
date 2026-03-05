@@ -117,7 +117,7 @@ $statusOptions = [
 ];
 $statusBadge = [
     'pending'       => 'badge-muted',
-    'accepted'      => 'badge-blue',
+    'accepted'      => 'badge-green',
     'in_production' => 'badge-orange',
     'shipped'       => 'badge-purple',
     'completed'     => 'badge-dark',

@@ -124,7 +124,7 @@ foreach ($categories as $cat) {
               <td><?= (int)$col['globalInventoryAvailable'] ?> units</td>
               <td>
                 <?php if ($col['isActive']): ?>
-                  <span class="badge badge-dark">Available</span>
+                  <span class="badge badge-green">Available</span>
                 <?php else: ?>
                   <span class="badge badge-red">Unavailable</span>
                 <?php endif; ?>
@@ -195,7 +195,7 @@ foreach ($categories as $cat) {
                 $globalOk = $col['isActive'];
               ?>
               <?php if ($globalOk && $enabled): ?>
-                <span class="badge badge-dark"><i class="fas fa-check" style="font-size:10px;margin-right:4px"></i> Available</span>
+                <span class="badge badge-green"><i class="fas fa-check" style="font-size:10px;margin-right:4px"></i> Available</span>
               <?php elseif (!$globalOk): ?>
                 <span class="badge badge-red">Globally Disabled</span>
               <?php else: ?>
