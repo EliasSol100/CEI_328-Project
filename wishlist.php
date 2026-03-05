@@ -116,6 +116,7 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
     <link rel="stylesheet" href="assets/styling/styles.css">
     <link rel="stylesheet" href="assets/styling/header.css?v=5">
     <link rel="stylesheet" href="assets/styling/wishlist.css">
+    <script src="assets/js/translations.js" defer></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body class="site-page">
@@ -127,8 +128,8 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
     <main class="wishlist-page">
         <div class="wishlist-wrap">
             <div class="wishlist-head">
-                <h1>My Wishlist</h1>
-                <p>All your favorites in one place.</p>
+                <h1 data-translate="wishlistTitle">My Wishlist</h1>
+                <p data-translate="wishlistSubtitle">All your favorites in one place.</p>
             </div>
 
             <?php if ($message): ?>
@@ -136,7 +137,7 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
             <?php endif; ?>
 
             <?php if (empty($sessionItems) && empty($dbItems)): ?>
-                <p class="wishlist-empty">Your wishlist is empty.</p>
+                <p class="wishlist-empty" data-translate="wishlistPageEmpty">Your wishlist is empty.</p>
             <?php else: ?>
                 <ul class="wishlist-list">
                                         <?php foreach ($sessionItems as $item): ?>

@@ -268,7 +268,7 @@ body {
 .status-select {
   border:1px solid var(--border); border-radius:8px;
   padding:6px 10px; font-size:13px; background:var(--white);
-  color:var(--green); cursor:pointer; outline:none; min-width:140px;
+  color:var(--text); cursor:pointer; outline:none; min-width:140px;
   font-family:inherit;
 }
 .status-select:focus { border-color:#111827; }
