@@ -5,6 +5,12 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 $isLoggedIn = isset($_SESSION["user"]);
+$wishlistCount = 0;
+if (isset($_SESSION["wishlist_count"])) {
+    $wishlistCount = (int)$_SESSION["wishlist_count"];
+} elseif (isset($_SESSION["wishlist"]) && is_array($_SESSION["wishlist"])) {
+    $wishlistCount = count($_SESSION["wishlist"]);
+}
 
 // Detect if we're in a subdirectory (profile/, authentication/, etc.)
 $scriptName = $_SERVER['PHP_SELF'] ?? '';
@@ -100,10 +106,16 @@ if ($isLoggedIn && !$initials) {
                 <?php endif; ?>
 
                 <!-- Cart icon -->
-                <!-- Cart icon -->
-                  <a href="<?php echo $rootPrefix; ?>cart.php" class="utility-icon cart-icon" aria-label="Shopping cart">
-                  <i class="fas fa-shopping-cart"></i>
-                  </a>
+                <a href="<?php echo $rootPrefix; ?>cart.php" class="utility-icon cart-icon" aria-label="Shopping cart">
+                    <i class="fas fa-shopping-cart"></i>
+                </a>
+
+                <!-- Wishlist icon -->
+                <a href="<?php echo $rootPrefix; ?>wishlist.php" class="utility-icon wishlist-icon" aria-label="Wishlist">
+                    <i class="fas fa-heart"></i>
+                    <?php if ($wishlistCount > 0): ?>
+                        <span class="wishlist-count"><?= $wishlistCount ?></span>
+                    <?php endif; ?>
                 </a>
             </div>
         </div>

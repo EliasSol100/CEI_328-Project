@@ -303,16 +303,56 @@ body.account-page .footer {
     justify-content: center;
     cursor: pointer;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    transition: background-color 0.3s;
+    transition: background-color 0.2s ease, transform 0.2s ease;
 }
 
 .wishlist-btn:hover {
-    background-color: var(--pink-light);
+    transform: scale(1.06);
 }
 
 .wishlist-btn i {
-    color: var(--text-dark);
+    color: var(--pink);
     font-size: 16px;
+}
+
+.wishlist-btn.is-active {
+    background-color: var(--pink);
+}
+
+.wishlist-btn.is-active i {
+    color: #fff;
+}
+
+.wishlist-feedback {
+    position: fixed;
+    top: 90px;
+    right: 18px;
+    z-index: 2000;
+    min-width: 220px;
+    max-width: 360px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    opacity: 0;
+    transform: translateY(-8px);
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.wishlist-feedback.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.wishlist-feedback.is-success {
+    background: #2f9e44;
+}
+
+.wishlist-feedback.is-error {
+    background: #e03131;
 }
 
 .product-info {
