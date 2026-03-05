@@ -74,9 +74,9 @@ if ($r) { while ($row = mysqli_fetch_assoc($r)) $recentOrders[] = $row; }
 
 $statusLabel = [
     'pending'       => ['label'=>'pending',       'badge'=>'badge-muted'],
-    'accepted'      => ['label'=>'accepted',      'badge'=>'badge-blue'],
-    'in_production' => ['label'=>'in-production', 'badge'=>'badge-orange'],
-    'shipped'       => ['label'=>'shipped',       'badge'=>'badge-purple'],
+    'accepted'      => ['label'=>'accepted',      'badge'=>'badge-accepted'],
+    'in_production' => ['label'=>'in-production', 'badge'=>'badge-in_production'],
+    'shipped'       => ['label'=>'shipped',       'badge'=>'badge-shipped'],
     'completed'     => ['label'=>'completed',     'badge'=>'badge-dark'],
 ];
 

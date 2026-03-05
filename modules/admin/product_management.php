@@ -172,7 +172,7 @@ if (isset($_GET['edit'])) {
 }
 
 $availStatus = [
-    'active'        => ['label' => 'in stock',      'badge' => 'badge-dark'],
+    'active'        => ['label' => 'in stock',      'badge' => 'badge-green'],
     'low_stock'     => ['label' => 'low stock',     'badge' => 'badge-warning'],
     'out_of_stock'  => ['label' => 'out of stock',  'badge' => 'badge-red'],
     'made_to_order' => ['label' => 'made to order', 'badge' => 'badge-muted'],
