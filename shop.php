@@ -78,16 +78,33 @@ function getOrCreateWishlistID($conn, $uid) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggle_wishlist_item') {
     $pid = (int)($_POST['product_id'] ?? 0);
+    $acceptHeader = $_SERVER["HTTP_ACCEPT"] ?? "";
+    $isAjax = (
+        (isset($_SERVER["HTTP_X_REQUESTED_WITH"]) && strtolower($_SERVER["HTTP_X_REQUESTED_WITH"]) === "xmlhttprequest")
+        || (strpos($acceptHeader, "application/json") !== false)
+    );
+
     if ($pid > 0) {
+        $inWishlist = false;
+        $wishlistCount = 0;
+
         if ($userId) {
             $wid   = getOrCreateWishlistID($conn, (int)$userId);
             $check = $conn->query("SELECT wishlistItemID FROM wishlist_items WHERE wishlistID=$wid AND productID=$pid LIMIT 1");
             if ($check && $check->num_rows > 0) {
                 $iid = (int)$check->fetch_assoc()['wishlistItemID'];
                 $conn->query("DELETE FROM wishlist_items WHERE wishlistItemID=$iid");
+                $inWishlist = false;
             } else {
                 $conn->query("INSERT INTO wishlist_items (wishlistID, productID) VALUES ($wid, $pid)");
+                $inWishlist = true;
             }
+
+            $countRes = $conn->query("SELECT COUNT(*) AS c FROM wishlist_items WHERE wishlistID=$wid");
+            $wishlistCount = ($countRes && ($cRow = $countRes->fetch_assoc()))
+                ? (int)$cRow['c']
+                : 0;
+            $_SESSION['wishlist_count'] = $wishlistCount;
         } else {
             if (!isset($_SESSION['wishlist']) || !is_array($_SESSION['wishlist'])) {
                 $_SESSION['wishlist'] = [];
@@ -95,12 +112,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggl
             $idx = array_search($pid, $_SESSION['wishlist'], true);
             if ($idx !== false) {
                 array_splice($_SESSION['wishlist'], $idx, 1);
+                $inWishlist = false;
             } else {
                 $_SESSION['wishlist'][] = $pid;
+                $inWishlist = true;
             }
+            $wishlistCount = count($_SESSION['wishlist']);
+            $_SESSION['wishlist_count'] = $wishlistCount;
         }
+
+        if ($isAjax) {
+            header("Content-Type: application/json; charset=utf-8");
+            echo json_encode([
+                "success" => true,
+                "message" => $inWishlist ? "Item added to your wishlist." : "Item removed from your wishlist.",
+                "productId" => $pid,
+                "inWishlist" => $inWishlist,
+                "wishlistCount" => $wishlistCount,
+            ]);
+            exit();
+        }
+
         $query = $_SERVER['QUERY_STRING'] ?? '';
         header('Location: shop.php' . ($query ? '?' . $query : ''));
+        exit();
+    }
+
+    if ($isAjax) {
+        header("Content-Type: application/json; charset=utf-8");
+        echo json_encode([
+            "success" => false,
+            "message" => "Invalid product.",
+        ]);
         exit();
     }
 }
@@ -125,6 +168,9 @@ if ($userId) {
         $wishlistedIDs = array_map('intval', $_SESSION['wishlist']);
     }
 }
+
+// Keep header wishlist counter in sync on this request.
+$_SESSION['wishlist_count'] = count($wishlistedIDs);
 
 // ---------------------------------------------
 // Load products from DB
@@ -328,7 +374,7 @@ if (!in_array($selectedCategory, $validCategories, true)) {
                                 <form method="post" action="shop.php">
                                     <input type="hidden" name="action" value="toggle_wishlist_item">
                                     <input type="hidden" name="product_id" value="<?= $pid ?>">
-                                    <button type="submit" class="shop-fav" title="Add to wishlist">
+                                    <button type="submit" class="shop-fav <?= $inWishlist ? 'is-active' : '' ?>" title="<?= $inWishlist ? 'Remove from wishlist' : 'Add to wishlist' ?>">
                                         <i class="<?= $inWishlist ? 'fas' : 'far' ?> fa-heart"></i>
                                     </button>
                                 </form>
@@ -441,5 +487,6 @@ if (!in_array($selectedCategory, $validCategories, true)) {
     // Initial state
     applyFilters();
     </script>
+    <script src="assets/js/wishlist-live.js" defer></script>
 </body>
 </html>

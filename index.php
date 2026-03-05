@@ -175,8 +175,8 @@ $wishlist = isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])
                 <div class="product-card">
                     <div class="product-image-wrapper">
                         <div class="product-image img-product-1"></div>
-                        <form method="post" action="profile/account.php?tab=wishlist">
-                            <input type="hidden" name="action" value="add_wishlist_item">
+                        <form method="post" action="wishlist_action.php">
+                            <input type="hidden" name="action" value="<?php echo $fav ? 'remove_wishlist_item' : 'add_wishlist_item'; ?>">
                             <input type="hidden" name="product_key" value="flame_dragon">
                             <button class="wishlist-btn" type="submit" title="Add to wishlist">
                                 <i class="<?php echo $fav ? 'fas' : 'far'; ?> fa-heart"></i>
@@ -207,8 +207,8 @@ $wishlist = isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])
                 <div class="product-card">
                     <div class="product-image-wrapper">
                         <div class="product-image img-product-2"></div>
-                        <form method="post" action="profile/account.php?tab=wishlist">
-                            <input type="hidden" name="action" value="add_wishlist_item">
+                        <form method="post" action="wishlist_action.php">
+                            <input type="hidden" name="action" value="<?php echo $fav ? 'remove_wishlist_item' : 'add_wishlist_item'; ?>">
                             <input type="hidden" name="product_key" value="electric_mouse">
                             <button class="wishlist-btn" type="submit" title="Add to wishlist">
                                 <i class="<?php echo $fav ? 'fas' : 'far'; ?> fa-heart"></i>
@@ -239,8 +239,8 @@ $wishlist = isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])
                 <div class="product-card">
                     <div class="product-image-wrapper">
                         <div class="product-image img-product-3"></div>
-                        <form method="post" action="profile/account.php?tab=wishlist">
-                            <input type="hidden" name="action" value="add_wishlist_item">
+                        <form method="post" action="wishlist_action.php">
+                            <input type="hidden" name="action" value="<?php echo $fav ? 'remove_wishlist_item' : 'add_wishlist_item'; ?>">
                             <input type="hidden" name="product_key" value="lilac_turtle">
                             <button class="wishlist-btn" type="submit" title="Add to wishlist">
                                 <i class="<?php echo $fav ? 'fas' : 'far'; ?> fa-heart"></i>
@@ -271,8 +271,8 @@ $wishlist = isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])
                 <div class="product-card">
                     <div class="product-image-wrapper">
                         <div class="product-image img-product-4"></div>
-                        <form method="post" action="profile/account.php?tab=wishlist">
-                            <input type="hidden" name="action" value="add_wishlist_item">
+                        <form method="post" action="wishlist_action.php">
+                            <input type="hidden" name="action" value="<?php echo $fav ? 'remove_wishlist_item' : 'add_wishlist_item'; ?>">
                             <input type="hidden" name="product_key" value="daisy_bunny">
                             <button class="wishlist-btn" type="submit" title="Add to wishlist">
                                 <i class="<?php echo $fav ? 'fas' : 'far'; ?> fa-heart"></i>
@@ -359,5 +359,6 @@ $wishlist = isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])
     </section>
 
     <?php include __DIR__ . '/include/footer.php'; ?>
+    <script src="assets/js/wishlist-live.js" defer></script>
 </body>
 </html>

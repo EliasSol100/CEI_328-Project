@@ -290,6 +290,17 @@
     border: none;
     background: rgba(255, 255, 255, 0.95);
     color: var(--pink);
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.2s ease, color 0.2s ease;
+}
+
+.shop-fav:hover {
+    transform: scale(1.06);
+}
+
+.shop-fav.is-active {
+    background: var(--pink);
+    color: #fff;
 }
 
 .shop-product-info {

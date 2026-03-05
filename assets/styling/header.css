@@ -127,6 +127,28 @@ header.header .utility-icon {
     padding: 0 10px;
 }
 
+/* Wishlist counter badge */
+header.header .wishlist-icon {
+    position: relative;
+}
+
+header.header .wishlist-count {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #e63946;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
 /* IMPORTANT: only affect the direct <i> child, not nested dropdown icons */
 header.header .utility-icon > i {
     font-size: 22px !important;
