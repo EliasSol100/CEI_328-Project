@@ -77,7 +77,7 @@ $statusLabel = [
     'accepted'      => ['label'=>'accepted',      'badge'=>'badge-accepted'],
     'in_production' => ['label'=>'in-production', 'badge'=>'badge-in_production'],
     'shipped'       => ['label'=>'shipped',       'badge'=>'badge-shipped'],
-    'completed'     => ['label'=>'completed',     'badge'=>'badge-dark'],
+    'completed'     => ['label'=>'completed',     'badge'=>'badge-completed'],
 ];
 
 /* ── JSON for charts ── */

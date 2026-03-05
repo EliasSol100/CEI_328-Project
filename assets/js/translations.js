@@ -95,6 +95,10 @@ const translations = {
 
         wishlistTitle: "My Wishlist",
         wishlistEmpty: "Your wishlist is empty. Add some favorites from the shop!",
+        wishlistSubtitle: "All your favorites in one place.",
+        wishlistPageEmpty: "Your wishlist is empty.",
+        removeItem: "Remove item",
+
 
         addressesTitle: "Saved Addresses",
         addressesAddNew: "Add New",
@@ -225,6 +229,10 @@ const translations = {
 
         wishlistTitle: "Η Λίστα Επιθυμιών μου",
         wishlistEmpty: "Η λίστα επιθυμιών σου είναι άδεια. Πρόσθεσε μερικά αγαπημένα από το κατάστημα!",
+        wishlistSubtitle: "Όλα τα αγαπημένα σου σε ένα μέρος.",
+        wishlistPageEmpty: "Η λίστα επιθυμιών σου είναι άδεια.",
+        removeItem: "Αφαίρεση προϊόντος",
+
 
         addressesTitle: "Αποθηκευμένες Διευθύνσεις",
         addressesAddNew: "Προσθήκη",
