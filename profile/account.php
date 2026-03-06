@@ -84,6 +84,79 @@ function formatDateTime(?string $value): string {
     return date("d/m/Y H:i", $ts);
 }
 
+/**
+ * Ensure cart session structure exists and return it by reference.
+ */
+function &accountGetOrInitCart(): array {
+    if (!isset($_SESSION["cart"]) || !is_array($_SESSION["cart"])) {
+        $_SESSION["cart"] = [
+            "items" => [],
+            "totals" => [
+                "items_count"  => 0,
+                "subtotal"     => 0.0,
+                "addons_total" => 0.0,
+                "grand_total"  => 0.0,
+            ],
+            "created_at" => gmdate("c"),
+            "updated_at" => gmdate("c"),
+        ];
+    }
+    return $_SESSION["cart"];
+}
+
+/**
+ * Match cart line by product + variation + gift options.
+ */
+function accountFindExistingLineIndex(array $items, int $productId, ?int $variationId, array $addons): ?int {
+    foreach ($items as $index => $item) {
+        if ((int)($item["product"]["id"] ?? 0) !== $productId) {
+            continue;
+        }
+        $existingVariationId = isset($item["variation"]["variationID"]) ? (int)$item["variation"]["variationID"] : null;
+        if ($existingVariationId !== $variationId) {
+            continue;
+        }
+
+        $lineAddons = $item["addons"] ?? [];
+        if ((bool)($lineAddons["giftWrapping"] ?? false) !== (bool)$addons["gift_wrapping"]) {
+            continue;
+        }
+        if ((bool)($lineAddons["giftBagFlag"] ?? false) !== (bool)$addons["gift_bag"]) {
+            continue;
+        }
+        if ((string)($lineAddons["giftMessage"] ?? "") !== (string)$addons["message"]) {
+            continue;
+        }
+
+        return (int)$index;
+    }
+
+    return null;
+}
+
+/**
+ * Recalculate cart totals.
+ */
+function accountRecalcCartTotals(array $items): array {
+    $itemsCount = 0;
+    $subtotal = 0.0;
+    $addonsTotal = 0.0;
+
+    foreach ($items as $item) {
+        $quantity = (int)($item["quantity"] ?? 0);
+        $itemsCount += $quantity;
+        $subtotal += (float)($item["product"]["basePrice"] ?? 0.0) * $quantity;
+        $addonsTotal += (float)($item["addons"]["addonsCost"] ?? 0.0) * $quantity;
+    }
+
+    return [
+        "items_count"  => $itemsCount,
+        "subtotal"     => round($subtotal, 2),
+        "addons_total" => round($addonsTotal, 2),
+        "grand_total"  => round($subtotal + $addonsTotal, 2),
+    ];
+}
+
 // --------- Simple product catalog (for wishlist display) ----------
 $catalogProducts = [
     'flame_dragon' => [
@@ -115,6 +188,10 @@ $catalogProducts = [
 // Messages
 $successMessage = "";
 $errorMessage   = "";
+
+if (empty($_SESSION["account_reorder_token"])) {
+    $_SESSION["account_reorder_token"] = bin2hex(random_bytes(32));
+}
 
 /**
  * ---------------------------
@@ -163,6 +240,200 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
 
         $activeTab = "wishlist";
+    }
+
+    /**
+     * Reorder: add all items from a previous order back to cart.
+     */
+    if ($action === "reorder_order") {
+        $activeTab = "orders";
+        $orderId = (int)($_POST["order_id"] ?? 0);
+        $token = $_POST["reorder_token"] ?? "";
+
+        if (!hash_equals($_SESSION["account_reorder_token"], (string)$token)) {
+            $errorMessage = "Invalid request token. Please refresh the page and try again.";
+        } elseif ($orderId <= 0) {
+            $errorMessage = "Invalid order selected for reorder.";
+        } else {
+            $ownerStmt = $conn->prepare("SELECT orderID FROM orders WHERE orderID = ? AND userID = ? LIMIT 1");
+            if (!$ownerStmt) {
+                $errorMessage = "Could not validate the selected order.";
+            } else {
+                $ownerStmt->bind_param("ii", $orderId, $userId);
+                $ownerStmt->execute();
+                $orderExists = $ownerStmt->get_result()->fetch_assoc();
+                $ownerStmt->close();
+
+                if (!$orderExists) {
+                    $errorMessage = "Order not found or access denied.";
+                } else {
+                    $itemsSql = "
+                        SELECT
+                            oi.productID,
+                            oi.variationID,
+                            oi.quantity,
+                            oi.unitPrice,
+                            oi.giftWrapping,
+                            oi.giftBagFlag,
+                            oi.giftMessage,
+                            p.sku,
+                            p.nameGR,
+                            p.nameEN,
+                            p.basePrice,
+                            p.cartStatus,
+                            p.hasVariants,
+                            p.inventory,
+                            pv.size,
+                            pv.yarnType,
+                            pv.colorID,
+                            c.colorName,
+                            vs.quantityAvailable
+                        FROM order_items oi
+                        INNER JOIN orders o ON o.orderID = oi.orderID
+                        LEFT JOIN products p ON p.productID = oi.productID
+                        LEFT JOIN product_variations pv ON pv.variationID = oi.variationID
+                        LEFT JOIN colors c ON c.colorID = pv.colorID
+                        LEFT JOIN variation_stock vs ON vs.variationID = oi.variationID
+                        WHERE o.orderID = ? AND o.userID = ?
+                        ORDER BY oi.orderItemID ASC
+                    ";
+
+                    $itemsStmt = $conn->prepare($itemsSql);
+                    if (!$itemsStmt) {
+                        $errorMessage = "Could not load order items for reorder.";
+                    } else {
+                        $itemsStmt->bind_param("ii", $orderId, $userId);
+                        $itemsStmt->execute();
+                        $itemsRes = $itemsStmt->get_result();
+
+                        $rows = [];
+                        while ($row = $itemsRes->fetch_assoc()) {
+                            $rows[] = $row;
+                        }
+                        $itemsStmt->close();
+
+                        if (empty($rows)) {
+                            $errorMessage = "This order has no items to reorder.";
+                        } else {
+                            $cart = &accountGetOrInitCart();
+                            $addedLineCount = 0;
+                            $skippedCount = 0;
+
+                            foreach ($rows as $row) {
+                                $productId = (int)($row["productID"] ?? 0);
+                                $variationId = isset($row["variationID"]) ? (int)$row["variationID"] : null;
+                                if ($variationId !== null && $variationId <= 0) {
+                                    $variationId = null;
+                                }
+
+                                $cartStatus = (string)($row["cartStatus"] ?? "");
+                                if ($productId <= 0 || ($cartStatus !== "active" && $cartStatus !== "made_to_order")) {
+                                    $skippedCount++;
+                                    continue;
+                                }
+
+                                $requestedQty = max(1, (int)($row["quantity"] ?? 1));
+                                $hasVariants = ((int)($row["hasVariants"] ?? 0) === 1);
+
+                                $addonsPayload = [
+                                    "gift_wrapping" => ((int)($row["giftWrapping"] ?? 0) === 1),
+                                    "gift_bag"      => ((int)($row["giftBagFlag"] ?? 0) === 1),
+                                    "message"       => trim((string)($row["giftMessage"] ?? "")),
+                                ];
+
+                                $existingIndex = accountFindExistingLineIndex(
+                                    $cart["items"],
+                                    $productId,
+                                    $variationId,
+                                    $addonsPayload
+                                );
+                                $existingQty = $existingIndex === null
+                                    ? 0
+                                    : (int)($cart["items"][$existingIndex]["quantity"] ?? 0);
+
+                                $targetQty = $existingQty + $requestedQty;
+                                if ($cartStatus !== "made_to_order") {
+                                    if ($hasVariants && $variationId !== null) {
+                                        $availableStock = (int)($row["quantityAvailable"] ?? 0);
+                                    } else {
+                                        $availableStock = (int)($row["inventory"] ?? 0);
+                                    }
+
+                                    if ($availableStock <= 0) {
+                                        $skippedCount++;
+                                        continue;
+                                    }
+
+                                    if ($targetQty > $availableStock) {
+                                        $targetQty = $availableStock;
+                                    }
+                                }
+
+                                if ($targetQty <= $existingQty) {
+                                    $skippedCount++;
+                                    continue;
+                                }
+
+                                $unitPrice = (float)($row["basePrice"] ?? 0);
+                                if ($unitPrice <= 0) {
+                                    $unitPrice = (float)($row["unitPrice"] ?? 0);
+                                }
+
+                                $lineItem = [
+                                    "product" => [
+                                        "id"         => $productId,
+                                        "sku"        => (string)($row["sku"] ?? ""),
+                                        "nameGR"     => (string)($row["nameGR"] ?? ""),
+                                        "nameEN"     => (string)($row["nameEN"] ?? ""),
+                                        "basePrice"  => round($unitPrice, 2),
+                                        "cartStatus" => $cartStatus,
+                                        "hasVariants"=> $hasVariants,
+                                    ],
+                                    "variation" => $variationId === null ? null : [
+                                        "variationID" => $variationId,
+                                        "size"        => (string)($row["size"] ?? ""),
+                                        "yarnType"    => (string)($row["yarnType"] ?? ""),
+                                        "colorID"     => (int)($row["colorID"] ?? 0),
+                                        "colorName"   => (string)($row["colorName"] ?? ""),
+                                    ],
+                                    "quantity" => $targetQty,
+                                    "addons" => [
+                                        "giftWrapping" => $addonsPayload["gift_wrapping"],
+                                        "giftBagFlag"  => $addonsPayload["gift_bag"],
+                                        "giftMessage"  => $addonsPayload["message"],
+                                        "addonsCost"   => 0.0,
+                                    ],
+                                    "pricing" => [
+                                        "unitTotal" => round($unitPrice, 2),
+                                        "lineTotal" => round($unitPrice * $targetQty, 2),
+                                    ],
+                                    "updated_at" => gmdate("c"),
+                                ];
+
+                                if ($existingIndex === null) {
+                                    $cart["items"][] = $lineItem;
+                                } else {
+                                    $cart["items"][$existingIndex] = $lineItem;
+                                }
+
+                                $addedLineCount++;
+                            }
+
+                            if ($addedLineCount > 0) {
+                                $cart["totals"] = accountRecalcCartTotals($cart["items"]);
+                                $cart["updated_at"] = gmdate("c");
+                                $successMessage = "Reorder added to your cart.";
+                                if ($skippedCount > 0) {
+                                    $successMessage .= " {$skippedCount} item(s) were skipped due to availability changes.";
+                                }
+                            } else {
+                                $errorMessage = "No items could be reordered. Items may no longer be available.";
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -609,6 +880,113 @@ while ($row = $addrRes->fetch_assoc()) {
 }
 $addrStmt->close();
 
+/**
+ * Load order history for Orders tab.
+ */
+$orderHistory = [];
+$orderItemPreviews = [];
+
+$ordersSql = "
+    SELECT
+        o.orderID,
+        o.orderNumber,
+        o.status,
+        o.totalAmount,
+        o.createdAt,
+        COUNT(oi.orderItemID) AS itemCount,
+        lp.paymentStatus,
+        lp.provider,
+        lp.transactionID,
+        lp.timestamp AS paymentTimestamp
+    FROM orders o
+    LEFT JOIN order_items oi ON oi.orderID = o.orderID
+    LEFT JOIN (
+        SELECT
+            p.orderID,
+            p.paymentStatus,
+            p.provider,
+            p.transactionID,
+            p.timestamp
+        FROM payments p
+        INNER JOIN (
+            SELECT orderID, MAX(timestamp) AS maxTimestamp
+            FROM payments
+            GROUP BY orderID
+        ) latest
+            ON latest.orderID = p.orderID
+            AND latest.maxTimestamp = p.timestamp
+    ) lp ON lp.orderID = o.orderID
+    WHERE o.userID = ?
+    GROUP BY
+        o.orderID, o.orderNumber, o.status, o.totalAmount, o.createdAt,
+        lp.paymentStatus, lp.provider, lp.transactionID, lp.timestamp
+    ORDER BY o.createdAt DESC
+";
+
+$ordersStmt = $conn->prepare($ordersSql);
+if ($ordersStmt) {
+    $ordersStmt->bind_param("i", $userId);
+    $ordersStmt->execute();
+    $ordersRes = $ordersStmt->get_result();
+    while ($row = $ordersRes->fetch_assoc()) {
+        $orderHistory[] = $row;
+    }
+    $ordersStmt->close();
+}
+
+$previewSql = "
+    SELECT
+        oi.orderID,
+        oi.quantity,
+        COALESCE(NULLIF(p.nameEN, ''), NULLIF(p.nameGR, ''), CONCAT('Product #', oi.productID)) AS productName
+    FROM order_items oi
+    INNER JOIN orders o ON o.orderID = oi.orderID
+    LEFT JOIN products p ON p.productID = oi.productID
+    WHERE o.userID = ?
+    ORDER BY oi.orderID DESC, oi.orderItemID ASC
+";
+
+$previewStmt = $conn->prepare($previewSql);
+if ($previewStmt) {
+    $previewStmt->bind_param("i", $userId);
+    $previewStmt->execute();
+    $previewRes = $previewStmt->get_result();
+    while ($row = $previewRes->fetch_assoc()) {
+        $oid = (int)$row["orderID"];
+        if (!isset($orderItemPreviews[$oid])) {
+            $orderItemPreviews[$oid] = [];
+        }
+        $orderItemPreviews[$oid][] = ((int)$row["quantity"]) . " x " . (string)$row["productName"];
+    }
+    $previewStmt->close();
+}
+
+$orderStatusLabels = [
+    "pending" => "Pending",
+    "accepted" => "Accepted",
+    "in_production" => "In production",
+    "shipped" => "Shipped",
+    "completed" => "Completed",
+    "cancelled" => "Cancelled",
+];
+$orderStatusClasses = [
+    "pending" => "bg-secondary",
+    "accepted" => "bg-success",
+    "in_production" => "bg-warning text-dark",
+    "shipped" => "bg-info text-dark",
+    "completed" => "bg-dark",
+    "cancelled" => "bg-danger",
+];
+
+$paymentStatusClasses = [
+    "paid" => "bg-success",
+    "pending" => "bg-warning text-dark",
+    "failed" => "bg-danger",
+    "refunded" => "bg-secondary",
+    "unpaid" => "bg-secondary",
+];
+$receiptPaymentStatuses = ["paid", "completed", "captured", "succeeded"];
+
 $avatarFilename = !empty($user["profile_image"]) ? $user["profile_image"] : null;
 $avatarUrl = $avatarFilename
     ? "../uploads/avatars/" . htmlspecialchars($avatarFilename)
@@ -742,11 +1120,100 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                         <?php if ($activeTab === "orders"): ?>
                             <!-- ORDERS TAB -->
                             <h4 class="mb-4" data-translate="ordersTitle">Order History</h4>
-                            <p class="text-muted mb-0" data-translate="ordersEmpty">
-                                You haven’t placed any orders yet.
-                                Once you purchase something from the shop, it will appear here.
-                            </p>
+                            <?php if (empty($orderHistory)): ?>
+                                <p class="text-muted mb-0" data-translate="ordersEmpty">
+                                    You havenâ€™t placed any orders yet.
+                                    Once you purchase something from the shop, it will appear here.
+                                </p>
+                            <?php else: ?>
+                                <div class="d-grid gap-3">
+                                    <?php foreach ($orderHistory as $order): ?>
+                                        <?php
+                                        $orderId = (int)$order["orderID"];
+                                        $statusKey = strtolower((string)($order["status"] ?? "pending"));
+                                        $paymentKey = strtolower((string)($order["paymentStatus"] ?? "unpaid"));
+                                        $statusLabel = $orderStatusLabels[$statusKey] ?? ucfirst($statusKey);
+                                        $statusClass = $orderStatusClasses[$statusKey] ?? "bg-secondary";
+                                        $paymentClass = $paymentStatusClasses[$paymentKey] ?? "bg-secondary";
+                                        $canGenerateReceipt = in_array($paymentKey, $receiptPaymentStatuses, true);
+                                        $itemsPreview = $orderItemPreviews[$orderId] ?? [];
+                                        ?>
+                                        <div class="card border-0 shadow-sm rounded-4">
+                                            <div class="card-body">
+                                                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+                                                    <div>
+                                                        <h5 class="mb-1">
+                                                            <?= htmlspecialchars($order["orderNumber"] ?: ("ORD-" . $orderId)) ?>
+                                                        </h5>
+                                                        <div class="text-muted small">
+                                                            Placed on <?= htmlspecialchars(formatDateTime($order["createdAt"] ?? null)) ?>
+                                                        </div>
+                                                        <div class="mt-2 d-flex gap-2 flex-wrap">
+                                                            <span class="badge <?= $statusClass ?>">
+                                                                <?= htmlspecialchars($statusLabel) ?>
+                                                            </span>
+                                                            <span class="badge <?= $paymentClass ?>">
+                                                                Payment: <?= htmlspecialchars($paymentKey) ?>
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <div class="text-end">
+                                                        <div class="text-muted small">Total</div>
+                                                        <div class="fw-semibold fs-5">
+                                                            EUR <?= number_format((float)$order["totalAmount"], 2) ?>
+                                                        </div>
+                                                        <div class="text-muted small">
+                                                            <?= (int)$order["itemCount"] ?> item(s)
+                                                        </div>
+                                                    </div>
+                                                </div>
 
+                                                <?php if (!empty($itemsPreview)): ?>
+                                                    <div class="mt-3">
+                                                        <div class="small text-muted mb-1">Items</div>
+                                                        <div class="small">
+                                                            <?php
+                                                            $previewList = array_slice($itemsPreview, 0, 3);
+                                                            echo htmlspecialchars(implode(" | ", $previewList));
+                                                            if (count($itemsPreview) > 3) {
+                                                                echo " ...";
+                                                            }
+                                                            ?>
+                                                        </div>
+                                                    </div>
+                                                <?php endif; ?>
+
+                                                <div class="mt-3 d-flex flex-wrap gap-2">
+                                                    <?php if ($canGenerateReceipt): ?>
+                                                        <a href="../modules/receipt.php?order_id=<?= $orderId ?>"
+                                                           class="btn btn-outline-secondary btn-sm"
+                                                           target="_blank" rel="noopener">
+                                                            <i class="bi bi-receipt"></i> Generate Receipt
+                                                        </a>
+                                                    <?php else: ?>
+                                                        <button type="button" class="btn btn-outline-secondary btn-sm" disabled>
+                                                            <i class="bi bi-receipt"></i> Receipt Unavailable
+                                                        </button>
+                                                    <?php endif; ?>
+
+                                                    <form method="post" class="d-inline">
+                                                        <input type="hidden" name="action" value="reorder_order">
+                                                        <input type="hidden" name="order_id" value="<?= $orderId ?>">
+                                                        <input type="hidden" name="reorder_token" value="<?= htmlspecialchars($_SESSION["account_reorder_token"]) ?>">
+                                                        <button type="submit" class="btn btn-primary btn-sm">
+                                                            <i class="bi bi-cart-plus"></i> Reorder
+                                                        </button>
+                                                    </form>
+
+                                                    <a href="../cart.php" class="btn btn-outline-primary btn-sm">
+                                                        <i class="bi bi-bag"></i> View Cart
+                                                    </a>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
                         <?php elseif ($activeTab === "wishlist"): ?>
                             <!-- WISHLIST TAB -->
                             <h4 class="mb-4" id="wishlist" data-translate="wishlistTitle">My Wishlist</h4>
