@@ -106,8 +106,12 @@ if ($isLoggedIn && !$initials) {
                 <?php endif; ?>
 
                 <!-- Cart icon -->
+                <?php $cartCount = (int)($_SESSION["cart"]["totals"]["items_count"] ?? 0); ?>
                 <a href="<?php echo $rootPrefix; ?>cart.php" class="utility-icon cart-icon" aria-label="Shopping cart">
                     <i class="fas fa-shopping-cart"></i>
+                    <?php if ($cartCount > 0): ?>
+                        <span class="cart-count"><?= $cartCount > 99 ? '99+' : $cartCount ?></span>
+                    <?php endif; ?>
                 </a>
 
                 <!-- Wishlist icon -->

@@ -6,9 +6,23 @@ require_once "authentication/database.php";
 header('Content-Type: application/json; charset=utf-8');
 
 /* =========================
-   GET: Return cart
+   GET: Return cart  OR  variations for a product
    ========================= */
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
+
+    // GET ?action=variations&product_id=N
+    if (($_GET['action'] ?? '') === 'variations') {
+        $pid = (int)($_GET['product_id'] ?? 0);
+        if ($pid <= 0 || !isset($conn) || !($conn instanceof mysqli)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'message' => 'Invalid request.']);
+            exit;
+        }
+        echo json_encode(['success' => true, 'variations' => fetchAllVariations($conn, $pid)], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    // Default: return cart
     if (!isset($_SESSION['cart']) || !is_array($_SESSION['cart'])) {
         $_SESSION['cart'] = [
             'items' => [],
@@ -70,11 +84,11 @@ try {
     if ($hasVariants) {
         if ($variationId !== null && $variationId > 0) {
             $variation = fetchVariationById($conn, $variationId, $productId);
-        } else {
-            if ($colorId === null || $colorId <= 0) {
-                badRequest('Missing variation: send variation_id OR send (color_id + size + yarn_type).');
-            }
+        } elseif ($colorId !== null && $colorId > 0) {
             $variation = fetchVariationByFields($conn, $productId, $size, $yarnType, $colorId);
+        } else {
+            // No variation specified — pick the first available one automatically
+            $variation = fetchFirstVariation($conn, $productId);
         }
         if ($variation === null) badRequest('Selected variation not found for this product.');
     }
@@ -270,6 +284,47 @@ function fetchVariationByFields(mysqli $conn, int $productId, string $size, stri
     $row = $st->get_result()->fetch_assoc();
     $st->close();
     return $row ?: null;
+}
+function fetchFirstVariation(mysqli $conn, int $productId): ?array {
+    $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, c.colorName
+            FROM product_variations pv
+            LEFT JOIN colors c ON c.colorID = pv.colorID
+            WHERE pv.productID = ?
+            ORDER BY pv.variationID ASC LIMIT 1";
+    $st = $conn->prepare($sql);
+    if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
+    $st->bind_param("i", $productId);
+    $st->execute();
+    $row = $st->get_result()->fetch_assoc();
+    $st->close();
+    return $row ?: null;
+}
+function fetchAllVariations(mysqli $conn, int $productId): array {
+    $sql = "SELECT pv.variationID, pv.size, pv.yarnType, pv.colorID, c.colorName,
+                   COALESCE(vs.quantityAvailable, 0) AS stock
+            FROM product_variations pv
+            LEFT JOIN colors c ON c.colorID = pv.colorID
+            LEFT JOIN variation_stock vs ON vs.variationID = pv.variationID
+            WHERE pv.productID = ?
+            ORDER BY pv.variationID ASC";
+    $st = $conn->prepare($sql);
+    if (!$st) throw new RuntimeException("SQL prepare failed: " . $conn->error);
+    $st->bind_param("i", $productId);
+    $st->execute();
+    $res  = $st->get_result();
+    $rows = [];
+    while ($row = $res->fetch_assoc()) {
+        $rows[] = [
+            'variationID' => (int)$row['variationID'],
+            'size'        => (string)$row['size'],
+            'yarnType'    => (string)$row['yarnType'],
+            'colorID'     => (int)$row['colorID'],
+            'colorName'   => (string)($row['colorName'] ?? ''),
+            'stock'       => (int)$row['stock'],
+        ];
+    }
+    $st->close();
+    return $rows;
 }
 function fetchVariationStock(mysqli $conn, int $variationId): int {
     $sql = "SELECT quantityAvailable FROM variation_stock WHERE variationID = ? LIMIT 1";

@@ -178,7 +178,7 @@ $_SESSION['wishlist_count'] = count($wishlistedIDs);
 $products = [];
 $res = $conn->query("
     SELECT p.productID, p.nameEN, p.nameGR, p.basePrice, p.inventory,
-           p.cartStatus, p.category,
+           p.cartStatus, p.category, p.hasVariants,
            MIN(ph.imageID) AS imageID
     FROM products p
     LEFT JOIN photos ph ON ph.productID = p.productID
@@ -397,6 +397,11 @@ if (!in_array($selectedCategory, $validCategories, true)) {
                                     <span class="shop-review-count">(<?= $rev['cnt'] ?>)</span>
                                 </div>
                                 <?php endif; ?>
+                                <button class="shop-atc-btn"
+                                        data-product-id="<?= $pid ?>"
+                                        data-has-variants="<?= (int)$p['hasVariants'] ?>">
+                                    <i class="fas fa-cart-plus"></i> Add to Cart
+                                </button>
                             </div>
                         </article>
                         <?php endforeach; ?>
@@ -488,5 +493,178 @@ if (!in_array($selectedCategory, $validCategories, true)) {
     applyFilters();
     </script>
     <script src="assets/js/wishlist-live.js" defer></script>
+
+    <!-- Toast element -->
+    <div id="cart-toast" class="cart-toast"></div>
+
+    <script>
+    function showToast(msg, isError) {
+        const t = document.getElementById('cart-toast');
+        t.textContent = msg;
+        t.classList.toggle('cart-toast-error', !!isError);
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), 2500);
+    }
+
+    function updateCartBadge(count) {
+        let badge = document.querySelector('a.cart-icon .cart-count');
+        if (count > 0) {
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'cart-count';
+                document.querySelector('a.cart-icon').appendChild(badge);
+            }
+            badge.textContent = count > 99 ? '99+' : count;
+        } else if (badge) {
+            badge.remove();
+        }
+    }
+
+    function addToCart(productId, variationId) {
+        const body = { product_id: productId, quantity: 1 };
+        if (variationId) body.variation_id = variationId;
+
+        return fetch('cart_api.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const count = data.cart?.totals?.items_count ?? 0;
+                updateCartBadge(count);
+                showToast('Added to cart!');
+            } else {
+                showToast(data.message || 'Could not add to cart.', true);
+            }
+            return data;
+        })
+        .catch(() => showToast('Network error.', true));
+    }
+
+    document.querySelectorAll('.shop-atc-btn').forEach(btn => {
+        btn.addEventListener('click', function () {
+            const pid = parseInt(this.dataset.productId);
+            const hasVariants = parseInt(this.dataset.hasVariants);
+            const btn = this;
+
+            if (hasVariants) {
+                // Fetch variations first
+                fetch('cart_api.php?action=variations&product_id=' + pid)
+                .then(r => r.json())
+                .then(data => {
+                    const vars = data.variations || [];
+                    if (vars.length === 0) {
+                        // No rows in product_variations — add without variation
+                        addToCart(pid, null).then(d => {
+                            if (d && d.success) {
+                                btn.classList.add('atc-added');
+                                btn.innerHTML = '<i class="fas fa-check"></i> Added!';
+                                setTimeout(() => {
+                                    btn.classList.remove('atc-added');
+                                    btn.innerHTML = '<i class="fas fa-cart-plus"></i> Add to Cart';
+                                }, 1800);
+                            }
+                        });
+                    } else {
+                        varModal.open(pid, vars, btn);
+                    }
+                })
+                .catch(() => showToast('Network error.', true));
+            } else {
+                addToCart(pid, null).then(d => {
+                    if (d && d.success) {
+                        btn.classList.add('atc-added');
+                        btn.innerHTML = '<i class="fas fa-check"></i> Added!';
+                        setTimeout(() => {
+                            btn.classList.remove('atc-added');
+                            btn.innerHTML = '<i class="fas fa-cart-plus"></i> Add to Cart';
+                        }, 1800);
+                    }
+                });
+            }
+        });
+    });
+
+    const varModal = {
+        overlay: null,
+        _pid: null,
+        _btn: null,
+        _selectedVarId: null,
+
+        open(pid, variations, btn) {
+            this._pid = pid;
+            this._btn = btn;
+            this._selectedVarId = null;
+
+            if (!this.overlay) this._build();
+
+            const list = this.overlay.querySelector('.var-options-list');
+            list.innerHTML = '';
+
+            variations.forEach(v => {
+                const parts = [v.colorName, v.size, v.yarnType].filter(Boolean);
+                const label = parts.join(' · ') || 'Default';
+                const row = document.createElement('div');
+                row.className = 'var-option';
+                row.dataset.varId = v.variationID;
+                row.innerHTML = `<span class="var-option-label">${label}</span><span class="var-option-stock">${v.stock > 0 ? v.stock + ' in stock' : 'Out of stock'}</span>`;
+                if (v.stock <= 0) row.classList.add('var-option-disabled');
+                row.addEventListener('click', () => {
+                    if (v.stock <= 0) return;
+                    list.querySelectorAll('.var-option').forEach(r => r.classList.remove('var-option-selected'));
+                    row.classList.add('var-option-selected');
+                    this._selectedVarId = v.variationID;
+                    this.overlay.querySelector('.var-modal-add-btn').disabled = false;
+                });
+                list.appendChild(row);
+            });
+
+            this.overlay.querySelector('.var-modal-add-btn').disabled = true;
+            this.overlay.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        },
+
+        close() {
+            if (this.overlay) this.overlay.style.display = 'none';
+            document.body.style.overflow = '';
+        },
+
+        _build() {
+            this.overlay = document.createElement('div');
+            this.overlay.className = 'var-modal-overlay';
+            this.overlay.innerHTML = `
+                <div class="var-modal">
+                    <div class="var-modal-header">
+                        <span>Choose an option</span>
+                        <button class="var-modal-close">&times;</button>
+                    </div>
+                    <div class="var-options-list"></div>
+                    <button class="var-modal-add-btn" disabled>Add to Cart</button>
+                </div>`;
+            document.body.appendChild(this.overlay);
+
+            this.overlay.querySelector('.var-modal-close').addEventListener('click', () => this.close());
+            this.overlay.addEventListener('click', e => { if (e.target === this.overlay) this.close(); });
+            this.overlay.querySelector('.var-modal-add-btn').addEventListener('click', () => {
+                if (!this._selectedVarId) return;
+                addToCart(this._pid, this._selectedVarId).then(d => {
+                    if (d && d.success) {
+                        this.close();
+                        if (this._btn) {
+                            this._btn.classList.add('atc-added');
+                            this._btn.innerHTML = '<i class="fas fa-check"></i> Added!';
+                            setTimeout(() => {
+                                this._btn.classList.remove('atc-added');
+                                this._btn.innerHTML = '<i class="fas fa-cart-plus"></i> Add to Cart';
+                            }, 1800);
+                        }
+                    }
+                });
+            });
+        }
+    };
+    </script>
 </body>
 </html>
