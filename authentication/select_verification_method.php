@@ -63,6 +63,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["select_method"])) {
             $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
             $mail->Port       = 587;
 
+            $mail->SMTPOptions = [
+                'ssl' => [
+                    'verify_peer'       => false,
+                    'verify_peer_name'  => false,
+                    'allow_self_signed' => true,
+                ]
+            ];
+
             $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
             $mail->addAddress($email, $userRow["full_name"]);
             $mail->isHTML(true);
@@ -74,7 +82,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["select_method"])) {
             header("Location: verify.php");
             exit();
         } catch (Exception $e) {
-            $feedbackMessage = "We couldn't send the verification email. Please try again.";
+            $feedbackMessage = "Email error: " . $mail->ErrorInfo;
             $feedbackClass   = "danger";
         }
 

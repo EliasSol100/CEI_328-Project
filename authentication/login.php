@@ -78,52 +78,47 @@ require_once "database.php";
                     if ($user = mysqli_fetch_assoc($result)) {
                         if (password_verify($password, $user["password"])) {
 
-                            $now = new DateTime();
+                            // --- 2FA DISABLED (commented out) ---
+                            // $now = new DateTime();
+                            // $twofaValid =
+                            //     !empty($user["twofa_expires"]) &&
+                            //     (new DateTime($user["twofa_expires"])) > $now;
+                            // if (!$twofaValid) {
+                            //     $_SESSION['temp_user_id'] = $user['id'];
+                            //     header("Location: twofa_verify.php");
+                            //     exit();
+                            // }
 
-                            // Check if previous 2FA is still valid (within 48 hours)
-                            $twofaValid =
-                                !empty($user["twofa_expires"]) &&
-                                (new DateTime($user["twofa_expires"])) > $now;
-
-                            if ($twofaValid) {
-                                // 2FA still valid → direct login
-
-                                // get previous last_login for session display
-                                $prevLogin = null;
-                                $getLogin  = $conn->prepare("SELECT last_login FROM users WHERE userID = ?");
-                                $getLogin->bind_param("i", $user['id']);
-                                $getLogin->execute();
-                                $loginResult = $getLogin->get_result();
-                                if ($row = $loginResult->fetch_assoc()) {
-                                    $prevLogin = $row['last_login'];
-                                }
-                                $getLogin->close();
-
-                                // update last_login to now
-                                $updateLogin = $conn->prepare("UPDATE users SET last_login = NOW() WHERE userID = ?");
-                                $updateLogin->bind_param("i", $user['id']);
-                                $updateLogin->execute();
-                                $updateLogin->close();
-
-                                // create full user session
-                                $_SESSION["user"] = [
-                                    "id"         => $user["id"],
-                                    "email"      => $user["email"],
-                                    "full_name"  => $user["full_name"],
-                                    "role"       => $user["role"],
-                                    "last_login" => $prevLogin
-                                ];
-                                $_SESSION['user_id'] = $user['id'];
-                                $_SESSION['role']    = $user['role'];
-
-                                header("Location: ../index.php");
-                                exit();
-                            } else {
-                                // 2FA required (first time or expired > 48h)
-                                $_SESSION['temp_user_id'] = $user['id'];
-                                header("Location: twofa_verify.php");
-                                exit();
+                            // get previous last_login for session display
+                            $prevLogin = null;
+                            $getLogin  = $conn->prepare("SELECT last_login FROM users WHERE userID = ?");
+                            $getLogin->bind_param("i", $user['id']);
+                            $getLogin->execute();
+                            $loginResult = $getLogin->get_result();
+                            if ($row = $loginResult->fetch_assoc()) {
+                                $prevLogin = $row['last_login'];
                             }
+                            $getLogin->close();
+
+                            // update last_login to now
+                            $updateLogin = $conn->prepare("UPDATE users SET last_login = NOW() WHERE userID = ?");
+                            $updateLogin->bind_param("i", $user['id']);
+                            $updateLogin->execute();
+                            $updateLogin->close();
+
+                            // create full user session
+                            $_SESSION["user"] = [
+                                "id"         => $user["id"],
+                                "email"      => $user["email"],
+                                "full_name"  => $user["full_name"],
+                                "role"       => $user["role"],
+                                "last_login" => $prevLogin
+                            ];
+                            $_SESSION['user_id'] = $user['id'];
+                            $_SESSION['role']    = $user['role'];
+
+                            header("Location: ../index.php");
+                            exit();
                         } else {
                             echo "<div class='alert alert-danger'>Incorrect password.</div>";
                         }

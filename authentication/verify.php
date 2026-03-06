@@ -2,6 +2,12 @@
 session_start();
 require_once "database.php";
 
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
+require '../PHPMailer-master/src/Exception.php';
+require '../PHPMailer-master/src/PHPMailer.php';
+require '../PHPMailer-master/src/SMTP.php';
+
 $feedbackMessage = '';
 $feedbackClass   = 'danger';
 $userRow         = null;
@@ -62,16 +68,36 @@ function generateEmailVerificationCode(mysqli $conn, int $userId, string $email)
         return false;
     }
 
-    // Send verification email (basic PHP mail; replace with your own mailer if needed)
-    $subject = "Athina E-Shop Email Verification Code";
-    $message = "Hello,\n\nYour Athina E-Shop email verification code is: {$newCode}\n\n"
-             . "This code is valid for 20 minutes.\n\n"
-             . "If you did not request this, please ignore this email.";
-    $headers = "From: no-reply@athina-eshop.local\r\n";
+    // Send via PHPMailer (same SMTP as twofa_verify.php)
+    try {
+        $mail = new PHPMailer(true);
+        $mail->isSMTP();
+        $mail->Host       = 'premium245.web-hosting.com';
+        $mail->SMTPAuth   = true;
+        $mail->Username   = 'admin@festival-web.com';
+        $mail->Password   = '!g3$~8tYju*D';
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+        $mail->Port       = 587;
 
-    @mail($email, $subject, $message, $headers);
+        $mail->SMTPOptions = [
+            'ssl' => [
+                'verify_peer'       => false,
+                'verify_peer_name'  => false,
+                'allow_self_signed' => true,
+            ]
+        ];
 
-    return true;
+        $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
+        $mail->addAddress($email);
+        $mail->isHTML(false);
+        $mail->Subject = 'Athina E-Shop Email Verification Code';
+        $mail->Body    = "Hello,\n\nYour verification code is: {$newCode}\n\nThis code is valid for 20 minutes.\n\nIf you did not request this, please ignore this email.";
+
+        $mail->send();
+        return true;
+    } catch (Exception $e) {
+        return false;
+    }
 }
 
 // ------------------------------------
