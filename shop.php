@@ -249,7 +249,7 @@ if (!in_array($selectedCategory, $validCategories, true)) {
     <link rel="stylesheet" href="assets/styling/header.css?v=5">
     <link rel="stylesheet" href="assets/styling/shopstyle.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="assets/js/translations.js" defer></script>
+    <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/translations.js') ?>" defer></script>
 </head>
 <body class="site-page">
     <?php
@@ -400,7 +400,7 @@ if (!in_array($selectedCategory, $validCategories, true)) {
                                 <button class="shop-atc-btn"
                                         data-product-id="<?= $pid ?>"
                                         data-has-variants="<?= (int)$p['hasVariants'] ?>">
-                                    <i class="fas fa-cart-plus"></i> Add to Cart
+                                    <i class="fas fa-cart-plus"></i> <span data-translate="addToCart">Add to Cart</span>
                                 </button>
                             </div>
                         </article>
@@ -498,6 +498,14 @@ if (!in_array($selectedCategory, $validCategories, true)) {
     <div id="cart-toast" class="cart-toast"></div>
 
     <script>
+    function currentLang() {
+        return localStorage.getItem('language') || 'en';
+    }
+
+    function t(en, el) {
+        return currentLang() === 'el' ? el : en;
+    }
+
     function showToast(msg, isError) {
         const t = document.getElementById('cart-toast');
         t.textContent = msg;
@@ -534,7 +542,7 @@ if (!in_array($selectedCategory, $validCategories, true)) {
             if (data.success) {
                 const count = data.cart?.totals?.items_count ?? 0;
                 updateCartBadge(count);
-                showToast('Added to cart!');
+                showToast(t('Added to cart!', 'Προστέθηκε στο καλάθι!'));
             } else {
                 showToast(data.message || 'Could not add to cart.', true);
             }
@@ -560,10 +568,10 @@ if (!in_array($selectedCategory, $validCategories, true)) {
                         addToCart(pid, null).then(d => {
                             if (d && d.success) {
                                 btn.classList.add('atc-added');
-                                btn.innerHTML = '<i class="fas fa-check"></i> Added!';
+                                btn.innerHTML = '<i class="fas fa-check"></i> ' + t('Added!', 'Προστέθηκε!');
                                 setTimeout(() => {
                                     btn.classList.remove('atc-added');
-                                    btn.innerHTML = '<i class="fas fa-cart-plus"></i> Add to Cart';
+                                    btn.innerHTML = '<i class="fas fa-cart-plus"></i> ' + t('Add to Cart', 'Προσθήκη στο Καλάθι');
                                 }, 1800);
                             }
                         });
@@ -576,10 +584,10 @@ if (!in_array($selectedCategory, $validCategories, true)) {
                 addToCart(pid, null).then(d => {
                     if (d && d.success) {
                         btn.classList.add('atc-added');
-                        btn.innerHTML = '<i class="fas fa-check"></i> Added!';
+                        btn.innerHTML = '<i class="fas fa-check"></i> ' + t('Added!', 'Προστέθηκε!');
                         setTimeout(() => {
                             btn.classList.remove('atc-added');
-                            btn.innerHTML = '<i class="fas fa-cart-plus"></i> Add to Cart';
+                            btn.innerHTML = '<i class="fas fa-cart-plus"></i> ' + t('Add to Cart', 'Προσθήκη στο Καλάθι');
                         }, 1800);
                     }
                 });
@@ -641,7 +649,7 @@ if (!in_array($selectedCategory, $validCategories, true)) {
                         <button class="var-modal-close">&times;</button>
                     </div>
                     <div class="var-options-list"></div>
-                    <button class="var-modal-add-btn" disabled>Add to Cart</button>
+                    <button class="var-modal-add-btn" disabled>${t('Add to Cart', 'Προσθήκη στο Καλάθι')}</button>
                 </div>`;
             document.body.appendChild(this.overlay);
 
@@ -654,10 +662,10 @@ if (!in_array($selectedCategory, $validCategories, true)) {
                         this.close();
                         if (this._btn) {
                             this._btn.classList.add('atc-added');
-                            this._btn.innerHTML = '<i class="fas fa-check"></i> Added!';
+                            this._btn.innerHTML = '<i class="fas fa-check"></i> ' + t('Added!', 'Προστέθηκε!');
                             setTimeout(() => {
                                 this._btn.classList.remove('atc-added');
-                                this._btn.innerHTML = '<i class="fas fa-cart-plus"></i> Add to Cart';
+                                this._btn.innerHTML = '<i class="fas fa-cart-plus"></i> ' + t('Add to Cart', 'Προσθήκη στο Καλάθι');
                             }, 1800);
                         }
                     }

@@ -72,7 +72,7 @@ $activePage = '';
     <link rel="stylesheet" href="assets/styling/header.css">
     <link rel="stylesheet" href="cart.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="assets/js/translations.js" defer></script>
+    <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/translations.js') ?>" defer></script>
 </head>
 <body class="site-page">
 
@@ -82,15 +82,20 @@ $activePage = '';
     <div class="container">
         <h1 class="cart-title">
             <i class="fas fa-shopping-cart"></i>
-            Shopping Cart
-            <span class="cart-title-count"><?= count($items) ?> item<?= count($items) !== 1 ? 's' : '' ?></span>
+            <span data-translate="shoppingCart">Shopping Cart</span>
+            <span class="cart-title-count">
+                <?= count($items) ?>
+                <span data-translate="<?= count($items) !== 1 ? 'cartItems' : 'cartItem' ?>">
+                    <?= count($items) !== 1 ? 'items' : 'item' ?>
+                </span>
+            </span>
         </h1>
 
         <?php if (empty($items)): ?>
         <div class="cart-empty">
             <i class="fas fa-shopping-cart"></i>
-            <p>Your cart is empty.</p>
-            <a href="shop.php" class="btn-shop-now">Browse Shop</a>
+            <p data-translate="cartEmpty">Your cart is empty.</p>
+            <a href="shop.php" class="btn-shop-now" data-translate="browseShop">Browse Shop</a>
         </div>
 
         <?php else: ?>
@@ -113,7 +118,7 @@ $activePage = '';
                             ?>
                         </div>
                         <?php endif; ?>
-                        <div class="cart-item-unit-price">€<?= number_format((float)($item['product']['basePrice'] ?? 0), 2) ?> each</div>
+                        <div class="cart-item-unit-price">€<?= number_format((float)($item['product']['basePrice'] ?? 0), 2) ?> <span data-translate="each">each</span></div>
                     </div>
 
                     <div class="cart-item-controls">
@@ -135,7 +140,7 @@ $activePage = '';
                         <form method="post" action="cart.php">
                             <input type="hidden" name="action"     value="remove">
                             <input type="hidden" name="item_index" value="<?= $idx ?>">
-                            <button class="cart-remove-btn" type="submit" title="Remove item">
+                            <button class="cart-remove-btn" type="submit" title="Remove item" data-translate-title="removeItem">
                                 <i class="fas fa-trash-alt"></i>
                             </button>
                         </form>
@@ -146,32 +151,32 @@ $activePage = '';
 
             <!-- Order summary -->
             <div class="cart-summary">
-                <h3>Order Summary</h3>
+                <h3 data-translate="orderSummary">Order Summary</h3>
 
                 <div class="summary-row">
-                    <span>Subtotal</span>
+                    <span data-translate="subtotal">Subtotal</span>
                     <span>€<?= number_format($totals['subtotal'], 2) ?></span>
                 </div>
 
                 <?php if ($totals['addons_total'] > 0): ?>
                 <div class="summary-row">
-                    <span>Gift add-ons</span>
+                    <span data-translate="giftAddons">Gift add-ons</span>
                     <span>€<?= number_format($totals['addons_total'], 2) ?></span>
                 </div>
                 <?php endif; ?>
 
                 <div class="summary-row">
-                    <span>Shipping</span>
-                    <span style="color:#16a34a;font-weight:600;">Calculated at checkout</span>
+                    <span data-translate="shipping">Shipping</span>
+                    <span style="color:#16a34a;font-weight:600;" data-translate="calculatedAtCheckout">Calculated at checkout</span>
                 </div>
 
                 <div class="summary-row summary-total">
-                    <span>Total</span>
+                    <span data-translate="total">Total</span>
                     <span>€<?= number_format($totals['grand_total'], 2) ?></span>
                 </div>
 
-                <a href="modules/checkout.php" class="btn-checkout">Proceed to Checkout</a>
-                <a href="shop.php" class="btn-continue">Continue Shopping</a>
+                <a href="modules/checkout.php" class="btn-checkout" data-translate="proceedToCheckout">Proceed to Checkout</a>
+                <a href="shop.php" class="btn-continue" data-translate="continueShopping">Continue Shopping</a>
             </div>
 
         </div>

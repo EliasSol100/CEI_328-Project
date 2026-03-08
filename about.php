@@ -103,7 +103,7 @@ $GLOBALS['header_user_role']      = $role;
     <link rel="stylesheet" href="assets/styling/header.css?v=5">
     <link rel="stylesheet" href="assets/styling/about.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="assets/js/translations.js" defer></script>
+    <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/translations.js') ?>" defer></script>
 </head>
 <body class="site-page">
     <?php
@@ -137,9 +137,9 @@ $GLOBALS['header_user_role']      = $role;
             <div class="about-card">
                 <h2 data-translate="ourValuesTitle">Our Values</h2>
                 <ul>
-                    <li data-translate="handmadeQuality"><strong>Handmade Quality</strong> — Each item is carefully crafted by hand with attention to detail</li>
-                    <li data-translate="perfectGiftsAbout"><strong>Perfect Gifts</strong> — Unique presents that show you care, with gift wrapping available</li>
-                    <li data-translate="ecoFriendly"><strong>Eco-Friendly</strong> — Made with sustainable and high-quality materials</li>
+                    <li><strong data-translate="handmadeQuality">Handmade Quality</strong> - <span data-translate="handmadeQualityAboutDesc">Each item is carefully crafted by hand with attention to detail</span></li>
+                    <li><strong data-translate="perfectGiftsAbout">Perfect Gifts</strong> - <span data-translate="perfectGiftsDesc">Unique presents that show you care, with gift wrapping available</span></li>
+                    <li><strong data-translate="ecoFriendly">Eco-Friendly</strong> - <span data-translate="ecoFriendlyAboutDesc">Made with sustainable and high-quality materials</span></li>
                 </ul>
             </div>
         </div>
@@ -155,3 +155,4 @@ $GLOBALS['header_user_role']      = $role;
     <?php include __DIR__ . '/include/footer.php'; ?>
 </body>
 </html>
+

@@ -288,6 +288,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link rel="stylesheet" href="<?= $project ?>/assets/styling/styles.css">
     <link rel="stylesheet" href="<?= $project ?>/assets/styling/header.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="<?= $project ?>/assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/translations.js') ?>" defer></script>
     <style>
         .checkout-container { max-width: 1200px; margin: 40px auto; padding: 0 20px; }
         .checkout-grid { display: grid; grid-template-columns: 1fr 380px; gap: 40px; }
@@ -308,9 +309,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </head>
 <body>
 <div class="checkout-container">
-    <h1>Checkout</h1>
+    <h1 data-translate="checkoutTitle">Checkout</h1>
     <?php if ($shippingDifference > 0): ?>
-        <div class="free-shipping-notice">Add €<?= number_format($shippingDifference,2) ?> more for FREE Delivery!</div>
+        <div class="free-shipping-notice"><span data-translate="checkoutAdd">Add</span> €<?= number_format($shippingDifference,2) ?> <span data-translate="checkoutMoreForFreeDelivery">more for FREE Delivery!</span></div>
     <?php endif; ?>
     <?php if ($error): ?>
         <div style="background:#f8d7da;color:#721c24;padding:15px;border-radius:8px;"><?= htmlspecialchars($error) ?></div>
@@ -318,16 +319,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="checkout-grid">
         <div class="checkout-form">
             <?php if (!$isLoggedIn): ?>
-                <div class="guest-notice"><strong>Guest checkout</strong> – <a href="<?= $project ?>/authentication/login.php">Login</a> for faster checkout.</div>
+                <div class="guest-notice"><strong data-translate="checkoutGuestCheckout">Guest checkout</strong> – <a href="<?= $project ?>/authentication/login.php" data-translate="checkoutLogin">Login</a> <span data-translate="checkoutForFasterCheckout">for faster checkout.</span></div>
             <?php endif; ?>
             <form method="post">
                 <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
 
                 <?php if (!$isLoggedIn): ?>
                 <fieldset>
-                    <legend>Contact</legend>
+                    <legend data-translate="checkoutContact">Contact</legend>
                     <div class="form-group">
-                        <label>Full Name *</label>
+                        <label><span data-translate="checkoutFullName">Full Name</span> *</label>
                         <input type="text" name="full_name" value="<?= htmlspecialchars($formData['full_name']??'') ?>" class="<?= isset($errors['full_name'])?'error-field':'' ?>" required>
                         <?php if (isset($errors['full_name'])): ?><span class="error"><?= $errors['full_name'] ?></span><?php endif; ?>
                     </div>
@@ -337,7 +338,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php if (isset($errors['email'])): ?><span class="error"><?= $errors['email'] ?></span><?php endif; ?>
                     </div>
                     <div class="form-group">
-                        <label>Phone *</label>
+                        <label><span data-translate="checkoutPhone">Phone</span> *</label>
                         <input type="tel" name="phone" value="<?= htmlspecialchars($formData['phone']??'') ?>" class="<?= isset($errors['phone'])?'error-field':'' ?>" required>
                         <?php if (isset($errors['phone'])): ?><span class="error"><?= $errors['phone'] ?></span><?php endif; ?>
                     </div>
@@ -345,28 +346,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <?php endif; ?>
 
                 <fieldset>
-                    <legend>Shipping</legend>
+                    <legend data-translate="checkoutShipping">Shipping</legend>
                     <div class="form-group">
-                        <label>Address *</label>
+                        <label><span data-translate="checkoutAddress">Address</span> *</label>
                         <input type="text" name="shipping_address" value="<?= htmlspecialchars($formData['shipping_address']??'') ?>" class="<?= isset($errors['shipping_address'])?'error-field':'' ?>" required>
                         <?php if (isset($errors['shipping_address'])): ?><span class="error"><?= $errors['shipping_address'] ?></span><?php endif; ?>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label>City *</label>
+                            <label><span data-translate="checkoutCity">City</span> *</label>
                             <input type="text" name="shipping_city" value="<?= htmlspecialchars($formData['shipping_city']??'') ?>" class="<?= isset($errors['shipping_city'])?'error-field':'' ?>" required>
                             <?php if (isset($errors['shipping_city'])): ?><span class="error"><?= $errors['shipping_city'] ?></span><?php endif; ?>
                         </div>
                         <div class="form-group">
-                            <label>Postal Code *</label>
+                            <label><span data-translate="checkoutPostalCode">Postal Code</span> *</label>
                             <input type="text" name="shipping_postal_code" value="<?= htmlspecialchars($formData['shipping_postal_code']??'') ?>" class="<?= isset($errors['shipping_postal_code'])?'error-field':'' ?>" required>
                             <?php if (isset($errors['shipping_postal_code'])): ?><span class="error"><?= $errors['shipping_postal_code'] ?></span><?php endif; ?>
                         </div>
                     </div>
                     <div class="form-group">
-                        <label>Country *</label>
+                        <label><span data-translate="checkoutCountry">Country</span> *</label>
                         <select name="shipping_country" class="<?= isset($errors['shipping_country'])?'error-field':'' ?>" required>
-                            <option value="">Select</option>
+                            <option value="" data-translate="checkoutSelect">Select</option>
                             <option value="Greece" <?= ($formData['shipping_country']??'')=='Greece'?'selected':'' ?>>Greece</option>
                             <option value="Cyprus" <?= ($formData['shipping_country']??'')=='Cyprus'?'selected':'' ?>>Cyprus</option>
                             <option value="Other" <?= ($formData['shipping_country']??'')=='Other'?'selected':'' ?>>Other EU</option>
@@ -376,11 +377,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </fieldset>
 
                 <fieldset>
-                    <legend>Shipping Method</legend>
+                    <legend data-translate="checkoutShippingMethod">Shipping Method</legend>
                     <div class="form-group">
-                        <label>Courier *</label>
+                        <label><span data-translate="checkoutCourier">Courier</span> *</label>
                         <select name="courier" class="<?= isset($errors['courier'])?'error-field':'' ?>" required>
-                            <option value="">Select</option>
+                            <option value="" data-translate="checkoutSelect">Select</option>
                             <option value="akis_express" <?= ($formData['courier']??'')=='akis_express'?'selected':'' ?>>Akis Express</option>
                             <option value="boxnow" <?= ($formData['courier']??'')=='boxnow'?'selected':'' ?>>BoxNow</option>
                             <option value="acs" <?= ($formData['courier']??'')=='acs'?'selected':'' ?>>ACS</option>
@@ -388,16 +389,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php if (isset($errors['courier'])): ?><span class="error"><?= $errors['courier'] ?></span><?php endif; ?>
                     </div>
                     <div class="form-group">
-                        <label>Speed</label>
+                        <label data-translate="checkoutSpeed">Speed</label>
                         <div style="display:flex; gap:20px;">
-                            <label><input type="radio" name="shipping_speed" value="standard" <?= ($formData['shipping_speed']??'standard')=='standard'?'checked':'' ?>> Standard</label>
-                            <label><input type="radio" name="shipping_speed" value="express" <?= ($formData['shipping_speed']??'')=='express'?'checked':'' ?>> Express (+€2)</label>
+                            <label><input type="radio" name="shipping_speed" value="standard" <?= ($formData['shipping_speed']??'standard')=='standard'?'checked':'' ?>> <span data-translate="checkoutStandard">Standard</span></label>
+                            <label><input type="radio" name="shipping_speed" value="express" <?= ($formData['shipping_speed']??'')=='express'?'checked':'' ?>> <span data-translate="checkoutExpress">Express</span> (+€2)</label>
                         </div>
                     </div>
                 </fieldset>
 
                 <fieldset>
-                    <legend>Payment</legend>
+                    <legend data-translate="checkoutPayment">Payment</legend>
                     <div style="display:flex; flex-direction:column; gap:10px;">
                         <label><input type="radio" name="payment_method" value="stripe" <?= ($formData['payment_method']??'stripe')=='stripe'?'checked':'' ?> required> Credit Card (Stripe)</label>
                         <label><input type="radio" name="payment_method" value="paypal" <?= ($formData['payment_method']??'')=='paypal'?'checked':'' ?>> PayPal</label>
@@ -409,22 +410,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 <?php if (!$isLoggedIn): ?>
                 <fieldset>
-                    <legend>Optional</legend>
-                    <label><input type="checkbox" name="create_account" value="yes" <?= isset($formData['create_account'])?'checked':'' ?>> Create an account with these details</label>
+                    <legend data-translate="checkoutOptional">Optional</legend>
+                    <label><input type="checkbox" name="create_account" value="yes" <?= isset($formData['create_account'])?'checked':'' ?>> <span data-translate="checkoutCreateAccount">Create an account with these details</span></label>
                 </fieldset>
                 <?php endif; ?>
 
                 <div style="margin:20px 0;">
-                    <label><input type="checkbox" name="accept_terms" value="yes" <?= isset($formData['accept_terms'])?'checked':'' ?> class="<?= isset($errors['accept_terms'])?'error-field':'' ?>" required> I accept Terms & Privacy</label>
+                    <label><input type="checkbox" name="accept_terms" value="yes" <?= isset($formData['accept_terms'])?'checked':'' ?> class="<?= isset($errors['accept_terms'])?'error-field':'' ?>" required> <span data-translate="checkoutAcceptTermsPrivacy">I accept Terms & Privacy</span></label>
                     <?php if (isset($errors['accept_terms'])): ?><span class="error"><?= $errors['accept_terms'] ?></span><?php endif; ?>
                 </div>
 
-                <button type="submit" class="btn-primary">Place Order • €<?= number_format($cartTotal,2) ?></button>
+                <button type="submit" class="btn-primary"><span data-translate="checkoutPlaceOrder">Place Order</span> • €<?= number_format($cartTotal,2) ?></button>
             </form>
         </div>
 
         <div class="order-summary">
-            <h2>Your Order (<?= $cartCount ?>)</h2>
+            <h2><span data-translate="checkoutYourOrder">Your Order</span> (<?= $cartCount ?>)</h2>
             <?php foreach ($cartItems as $item): 
                 $name = $item['name'] ?? 'Product';
                 $price = (float)($item['price'] ?? 0);
@@ -438,9 +439,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
             <?php endforeach; ?>
             <hr>
-            <div style="display:flex; justify-content:space-between;">Subtotal: <span>€<?= number_format($cartTotal,2) ?></span></div>
-            <div style="display:flex; justify-content:space-between;">Shipping: <span><?= $freeShippingEligible?'FREE':'Calculated' ?></span></div>
-            <div style="display:flex; justify-content:space-between; font-weight:bold; margin-top:15px;">Total: <span>€<?= number_format($cartTotal,2) ?></span></div>
+            <div style="display:flex; justify-content:space-between;"><span data-translate="subtotal">Subtotal</span>: <span>€<?= number_format($cartTotal,2) ?></span></div>
+            <div style="display:flex; justify-content:space-between;"><span data-translate="shipping">Shipping</span>: <span data-translate="<?= $freeShippingEligible ? 'checkoutFree' : 'checkoutCalculated' ?>"><?= $freeShippingEligible ? 'FREE' : 'Calculated' ?></span></div>
+            <div style="display:flex; justify-content:space-between; font-weight:bold; margin-top:15px;"><span data-translate="total">Total</span>: <span>€<?= number_format($cartTotal,2) ?></span></div>
         </div>
     </div>
 </div>

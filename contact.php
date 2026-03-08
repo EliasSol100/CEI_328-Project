@@ -72,7 +72,7 @@ $GLOBALS['header_user_role']      = $role;
     <link rel="stylesheet" href="assets/styling/header.css?v=5">
     <link rel="stylesheet" href="assets/styling/contact.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="assets/js/translations.js" defer></script>
+    <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/translations.js') ?>" defer></script>
 </head>
 <body class="site-page">
     <?php
@@ -107,7 +107,7 @@ $GLOBALS['header_user_role']      = $role;
                                        data-translate-placeholder="yourEmail" placeholder="Your Email" required>
                             </div>
                             <div class="contact-field">
-                                <label for="contact_message" data-translate="yourMessage">Message</label>
+                                <label for="contact_message" data-translate="messageLabel">Message</label>
                                 <textarea id="contact_message" name="contact_message"
                                           data-translate-placeholder="yourMessage" placeholder="Your message..." required></textarea>
                             </div>

@@ -5,6 +5,17 @@ const translations = {
         shop: "Shop",
         about: "About",
         contact: "Contact",
+        contactUs: "Contact Us",
+        contactSubtitle: "We'd love to hear from you. Send us a message and we'll get back to you shortly.",
+        sendMessage: "Send a Message",
+        yourName: "Your Name",
+        messageLabel: "Message",
+        yourMessage: "Your message...",
+        sendBtn: "Send",
+        getInTouch: "Get in Touch",
+        emailLabel: "Email",
+        responseTime: "Response Time",
+        responseTimeDesc: "We typically reply within 24-48 hours.",
         registerLogin: "Register / Login",
 
         // Hero Section
@@ -29,6 +40,15 @@ const translations = {
 
         // Shop Page
         shopPageSubtitle: "Find your favorite handmade crochet creations",
+        aboutPageTitle: "About Us",
+        aboutPageSubtitle: "The story behind every stitch",
+        ourStoryTitle: "Our Story",
+        ourStoryP1: "Creations by Athina was born out of a deep passion for crochet and the joy of creating something beautiful with your own hands. What started as a hobby quickly grew into a small business dedicated to bringing handmade warmth into people's lives.",
+        ourStoryP2: "Every item in our shop is carefully crafted with love, attention to detail, and the finest quality yarns. No two pieces are exactly alike - that's the beauty of handmade.",
+        ourValuesTitle: "Our Values",
+        handmadeQualityAboutDesc: "Each item is carefully crafted by hand with attention to detail",
+        perfectGiftsAbout: "Perfect Gifts",
+        ecoFriendlyAboutDesc: "Made with sustainable and high-quality materials",
         shopSearchPlaceholder: "Search products...",
         filters: "Filters",
         category: "Category",
@@ -40,6 +60,53 @@ const translations = {
         babySafe: "Baby-safe",
         pastelTag: "Pastel",
         limitedTag: "Limited",
+
+        // Cart Page
+        cartItem: "item",
+        cartItems: "items",
+        cartEmpty: "Your cart is empty.",
+        browseShop: "Browse Shop",
+        each: "each",
+        orderSummary: "Order Summary",
+        subtotal: "Subtotal",
+        giftAddons: "Gift add-ons",
+        shipping: "Shipping",
+        calculatedAtCheckout: "Calculated at checkout",
+        total: "Total",
+        proceedToCheckout: "Proceed to Checkout",
+        continueShopping: "Continue Shopping",
+        addToCart: "Add to Cart",
+        added: "Added!",
+
+        // Checkout Page
+        checkoutTitle: "Checkout",
+        checkoutAdd: "Add",
+        checkoutMoreForFreeDelivery: "more for FREE Delivery!",
+        checkoutGuestCheckout: "Guest checkout",
+        checkoutLogin: "Login",
+        checkoutForFasterCheckout: "for faster checkout.",
+        checkoutContact: "Contact",
+        checkoutFullName: "Full Name",
+        checkoutPhone: "Phone",
+        checkoutShipping: "Shipping",
+        checkoutAddress: "Address",
+        checkoutCity: "City",
+        checkoutPostalCode: "Postal Code",
+        checkoutCountry: "Country",
+        checkoutSelect: "Select",
+        checkoutShippingMethod: "Shipping Method",
+        checkoutCourier: "Courier",
+        checkoutSpeed: "Speed",
+        checkoutStandard: "Standard",
+        checkoutExpress: "Express",
+        checkoutPayment: "Payment",
+        checkoutOptional: "Optional",
+        checkoutCreateAccount: "Create an account with these details",
+        checkoutAcceptTermsPrivacy: "I accept Terms & Privacy",
+        checkoutPlaceOrder: "Place Order",
+        checkoutYourOrder: "Your Order",
+        checkoutCalculated: "Calculated",
+        checkoutFree: "FREE",
 
         // Products
         crochetBunny: "Crochet Bunny Amigurumi",
@@ -139,6 +206,17 @@ const translations = {
         shop: "Κατάστημα",
         about: "Σχετικά",
         contact: "Επικοινωνία",
+        contactUs: "Επικοινωνήστε Μαζί Μας",
+        contactSubtitle: "Θα χαρούμε να επικοινωνήσετε μαζί μας. Στείλτε μας μήνυμα και θα σας απαντήσουμε σύντομα.",
+        sendMessage: "Στείλτε Μήνυμα",
+        yourName: "Το όνομά σου",
+        messageLabel: "Μήνυμα",
+        yourMessage: "Το μήνυμά σου...",
+        sendBtn: "Αποστολή",
+        getInTouch: "Επικοινωνία",
+        emailLabel: "Email",
+        responseTime: "Χρόνος Απόκρισης",
+        responseTimeDesc: "Συνήθως απαντάμε μέσα σε 24-48 ώρες.",
         registerLogin: "Σύνδεση / Εγγραφή",
 
         // Hero Section
@@ -163,6 +241,15 @@ const translations = {
 
         // Shop Page
         shopPageSubtitle: "Βρες τις αγαπημένες σου χειροποίητες πλεκτές δημιουργίες",
+        aboutPageTitle: "Σχετικά με Εμάς",
+        aboutPageSubtitle: "Η ιστορία πίσω από κάθε βελονιά",
+        ourStoryTitle: "Η Ιστορία Μας",
+        ourStoryP1: "Το Creations by Athina γεννήθηκε από βαθύ πάθος για το πλέξιμο και τη χαρά της δημιουργίας κάτι όμορφου με τα χέρια σου. Αυτό που ξεκίνησε ως χόμπι, εξελίχθηκε γρήγορα σε μια μικρή επιχείρηση αφιερωμένη στο να φέρνει χειροποίητη ζεστασιά στη ζωή των ανθρώπων.",
+        ourStoryP2: "Κάθε αντικείμενο στο κατάστημά μας φτιάχνεται προσεκτικά με αγάπη, προσοχή στη λεπτομέρεια και νήματα εξαιρετικής ποιότητας. Κανένα κομμάτι δεν είναι ακριβώς ίδιο - κι αυτή είναι η ομορφιά του χειροποίητου.",
+        ourValuesTitle: "Οι Αξίες Μας",
+        handmadeQualityAboutDesc: "Κάθε αντικείμενο είναι προσεκτικά φτιαγμένο στο χέρι με προσοχή στη λεπτομέρεια",
+        perfectGiftsAbout: "Ιδανικά Δώρα",
+        ecoFriendlyAboutDesc: "Φτιαγμένα με βιώσιμα και υψηλής ποιότητας υλικά",
         shopSearchPlaceholder: "Αναζήτηση προϊόντων...",
         filters: "Φίλτρα",
         category: "Κατηγορία",
@@ -174,6 +261,53 @@ const translations = {
         babySafe: "Ασφαλές για μωρά",
         pastelTag: "Παστέλ",
         limitedTag: "Περιορισμένο",
+
+        // Cart Page
+        cartItem: "προϊόν",
+        cartItems: "προϊόντα",
+        cartEmpty: "Το καλάθι σου είναι άδειο.",
+        browseShop: "Περιήγηση Καταστήματος",
+        each: "τεμάχιο",
+        orderSummary: "Σύνοψη Παραγγελίας",
+        subtotal: "Υποσύνολο",
+        giftAddons: "Επιπλέον δώρων",
+        shipping: "Αποστολή",
+        calculatedAtCheckout: "Υπολογίζεται στο checkout",
+        total: "Σύνολο",
+        proceedToCheckout: "Ολοκλήρωση Παραγγελίας",
+        continueShopping: "Συνέχεια Αγορών",
+        addToCart: "Προσθήκη στο Καλάθι",
+        added: "Προστέθηκε!",
+
+        // Checkout Page
+        checkoutTitle: "Ολοκλήρωση Παραγγελίας",
+        checkoutAdd: "Πρόσθεσε",
+        checkoutMoreForFreeDelivery: "ακόμα για ΔΩΡΕΑΝ Παράδοση!",
+        checkoutGuestCheckout: "Αγορά ως επισκέπτης",
+        checkoutLogin: "Σύνδεση",
+        checkoutForFasterCheckout: "για ταχύτερη ολοκλήρωση.",
+        checkoutContact: "Στοιχεία Επικοινωνίας",
+        checkoutFullName: "Ονοματεπώνυμο",
+        checkoutPhone: "Τηλέφωνο",
+        checkoutShipping: "Αποστολή",
+        checkoutAddress: "Διεύθυνση",
+        checkoutCity: "Πόλη",
+        checkoutPostalCode: "Τ.Κ.",
+        checkoutCountry: "Χώρα",
+        checkoutSelect: "Επιλογή",
+        checkoutShippingMethod: "Τρόπος Αποστολής",
+        checkoutCourier: "Courier",
+        checkoutSpeed: "Ταχύτητα",
+        checkoutStandard: "Κανονική",
+        checkoutExpress: "Express",
+        checkoutPayment: "Πληρωμή",
+        checkoutOptional: "Προαιρετικό",
+        checkoutCreateAccount: "Δημιουργία λογαριασμού με αυτά τα στοιχεία",
+        checkoutAcceptTermsPrivacy: "Αποδέχομαι Όρους & Απόρρητο",
+        checkoutPlaceOrder: "Καταχώριση Παραγγελίας",
+        checkoutYourOrder: "Η Παραγγελία Σου",
+        checkoutCalculated: "Υπολογίζεται",
+        checkoutFree: "ΔΩΡΕΑΝ",
 
         // Products
         crochetBunny: "Πλεκτό Κουνελάκι Amigurumi",
@@ -286,6 +420,22 @@ function setLanguage(lang) {
         const key = element.getAttribute("data-translate-placeholder");
         if (translations[lang] && translations[lang][key]) {
             element.placeholder = translations[lang][key];
+        }
+    });
+
+    document.querySelectorAll("[data-translate-title]").forEach((element) => {
+        const key = element.getAttribute("data-translate-title");
+        if (translations[lang] && translations[lang][key]) {
+            element.setAttribute("title", translations[lang][key]);
+        }
+    });
+
+    document.querySelectorAll("[data-product-name]").forEach((element) => {
+        const value = lang === "el"
+            ? element.getAttribute("data-name-el")
+            : element.getAttribute("data-name-en");
+        if (value) {
+            element.textContent = value;
         }
     });
 
