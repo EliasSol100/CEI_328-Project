@@ -218,6 +218,12 @@ if (isset($_GET['edit'])) {
               </thead>
               <tbody>
               <?php foreach ($customers as $c): ?>
+                <?php
+                  $historyQuery = http_build_query([
+                    'customer_id' => (int)$c['userID'],
+                    'q' => (string)($c['email'] ?? ''),
+                  ]);
+                ?>
                 <tr>
                   <td class="font-600"><?= htmlspecialchars($c['full_name'] ?? '—') ?></td>
                   <td><?= htmlspecialchars($c['email'] ?? '—') ?></td>
@@ -236,6 +242,9 @@ if (isset($_GET['edit'])) {
                     <?= htmlspecialchars($c['country'] ?? '') ?>
                   </td>
                   <td style="text-align:right">
+                    <a href="customer_order_history.php?<?= htmlspecialchars($historyQuery) ?>" class="btn-secondary btn-sm">
+                      <i class="fas fa-clock-rotate-left"></i> View Order History
+                    </a>
                     <a href="?edit=<?= (int)$c['userID'] ?>" class="btn-edit">
                       <i class="fas fa-pen"></i> Edit
                     </a>
