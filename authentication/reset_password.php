@@ -137,8 +137,6 @@ if (!empty($expiresAt)) {
         $remainingSeconds = max(0, $expiresTs - time());
     }
 }
-
-$tokenValid = ($token !== "") && ($emailDisplay !== "");
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -207,7 +205,7 @@ $tokenValid = ($token !== "") && ($emailDisplay !== "");
                 <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
             <?php endif; ?>
 
-            <?php if ($tokenValid): ?>
+            <?php if (empty($error) || $token !== ""): ?>
                 <?php if ($remainingSeconds > 0): ?>
                     <p id="reset-timer" class="mb-2 text-center text-muted-small">
                         Link expires in <span id="reset-countdown"></span>
