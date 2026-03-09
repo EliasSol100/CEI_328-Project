@@ -223,10 +223,19 @@ function placeOrder(mysqli $conn, array $input): array {
     deductStockAfterOrderCompletion($orderID, $conn);
 
     // 6) Notify admin about the new order.
-    notifyAdminNewOrder(
-        $conn,
-        "New order placed: {$orderNumber} | Total: â‚¬" . number_format($totalAmount, 2)
-    );
+    $adminNotificationMessage = "New order placed: {$orderNumber} | Total: €" . number_format($totalAmount, 2);
+    notifyAdminNewOrder($conn, $adminNotificationMessage);
+
+    // 7) Email all admins about the new order.
+    sendAdminOrderNotificationEmail($conn, [
+        'order_id' => $orderID,
+        'order_number' => $orderNumber,
+        'total' => $totalAmount,
+        'customer_email' => $email,
+        'shipping_cost' => $shippingCost,
+        'courier' => $courier,
+        'shipping_priority' => $shippingPriority,
+    ]);
 
     return [
         'order_id' => $orderID,
@@ -338,4 +347,103 @@ function sendOrderConfirmationEmail(array $payload): array {
     }
     error_log('Order confirmation email failed: ' . $finalError);
     return ['sent' => false, 'error' => $finalError];
+}
+
+/**
+ * Send new-order notification email to admin users.
+ *
+ * @param mysqli $conn
+ * @param array $payload
+ * @return array ['sent' => int, 'failed' => int]
+ */
+function sendAdminOrderNotificationEmail(mysqli $conn, array $payload): array {
+    $orderNumber = trim((string)($payload['order_number'] ?? ''));
+    $orderId = (int)($payload['order_id'] ?? 0);
+    $total = (float)($payload['total'] ?? 0);
+    $customerEmail = trim((string)($payload['customer_email'] ?? ''));
+    $shippingCost = (float)($payload['shipping_cost'] ?? 0);
+    $courier = trim((string)($payload['courier'] ?? ''));
+    $shippingPriority = trim((string)($payload['shipping_priority'] ?? 'standard'));
+
+    $admins = [];
+    $res = $conn->query("
+        SELECT full_name, email
+        FROM users
+        WHERE LOWER(role) IN ('admin','administrator','superadmin')
+          AND email IS NOT NULL AND email <> ''
+    ");
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $admins[] = [
+                'name' => trim((string)($row['full_name'] ?? 'Admin')),
+                'email' => trim((string)($row['email'] ?? '')),
+            ];
+        }
+    }
+    if (empty($admins)) {
+        return ['sent' => 0, 'failed' => 0];
+    }
+
+    require_once __DIR__ . '/../PHPMailer-master/src/Exception.php';
+    require_once __DIR__ . '/../PHPMailer-master/src/PHPMailer.php';
+    require_once __DIR__ . '/../PHPMailer-master/src/SMTP.php';
+
+    $body =
+        "New order received.\n\n" .
+        "Order Number: " . ($orderNumber !== '' ? $orderNumber : ('#' . $orderId)) . "\n" .
+        "Total: €" . number_format($total, 2) . "\n" .
+        "Shipping: €" . number_format($shippingCost, 2) . "\n" .
+        "Courier: " . ($courier !== '' ? "{$courier} ({$shippingPriority})" : 'Not specified') . "\n" .
+        "Customer email: " . ($customerEmail !== '' ? $customerEmail : 'Guest checkout') . "\n\n" .
+        "Open the admin dashboard to process this order.";
+
+    $sent = 0;
+    $failed = 0;
+    $transports = [
+        ['port' => 587, 'secure' => \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS, 'label' => '587/STARTTLS'],
+        ['port' => 465, 'secure' => \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS, 'label' => '465/SMTPS'],
+    ];
+
+    foreach ($admins as $admin) {
+        $delivered = false;
+        foreach ($transports as $transport) {
+            $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+            try {
+                $mail->SMTPDebug = 0;
+                $mail->isSMTP();
+                $mail->Host = 'premium245.web-hosting.com';
+                $mail->SMTPAuth = true;
+                $mail->Username = 'admin@festival-web.com';
+                $mail->Password = '!g3$~8tYju*D';
+                $mail->SMTPSecure = $transport['secure'];
+                $mail->Port = (int)$transport['port'];
+                $mail->Timeout = 20;
+                $mail->SMTPOptions = [
+                    'ssl' => [
+                        'verify_peer' => false,
+                        'verify_peer_name' => false,
+                        'allow_self_signed' => true,
+                    ],
+                ];
+
+                $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
+                $mail->addAddress($admin['email'], $admin['name'] !== '' ? $admin['name'] : 'Admin');
+                $mail->CharSet = 'UTF-8';
+                $mail->isHTML(false);
+                $mail->Subject = 'New order alert: ' . ($orderNumber !== '' ? $orderNumber : ('#' . $orderId));
+                $mail->Body = $body;
+                $mail->send();
+                $delivered = true;
+                break;
+            } catch (\Throwable $e) {
+                $detail = trim((string)($mail->ErrorInfo ?? ''));
+                $msg = $detail !== '' ? $detail : trim((string)$e->getMessage());
+                error_log('Admin order email failed for ' . $admin['email'] . ' on ' . $transport['label'] . ': ' . $msg);
+            }
+        }
+        if ($delivered) $sent++;
+        else $failed++;
+    }
+
+    return ['sent' => $sent, 'failed' => $failed];
 }

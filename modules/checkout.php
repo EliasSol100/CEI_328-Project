@@ -47,7 +47,13 @@ $cartItems = (is_array($sessionCart) && isset($sessionCart['items']) && is_array
 $cartTotal = 0;
 $cartCount = 0;
 foreach ($cartItems as $item) {
-    $price = (float)($item['price'] ?? $item['pricing']['unitTotal'] ?? $item['product']['basePrice'] ?? 0);
+    $basePrice = (float)($item['product']['basePrice'] ?? 0);
+    $addonsCost = (float)($item['addons']['addonsCost'] ?? 0);
+    if ($addonsCost <= 0) {
+        if (!empty($item['addons']['giftWrapping'])) $addonsCost += 2.0;
+        if (!empty($item['addons']['giftBagFlag'])) $addonsCost += 1.5;
+    }
+    $price = (float)($item['price'] ?? $item['pricing']['unitTotal'] ?? ($basePrice + $addonsCost));
     $qty = (int)($item['quantity'] ?? 1);
     $cartTotal += $price * $qty;
     $cartCount += $qty;
@@ -414,7 +420,13 @@ if (file_exists($headerPath)) {
             <h2><span data-translate="checkoutYourOrder">Your Order</span> (<?= $cartCount ?>)</h2>
             <?php foreach ($cartItems as $item): 
                 $name = $item['name'] ?? $item['product']['nameEN'] ?? $item['product']['nameGR'] ?? 'Product';
-                $price = (float)($item['price'] ?? $item['pricing']['unitTotal'] ?? $item['product']['basePrice'] ?? 0);
+                $basePrice = (float)($item['product']['basePrice'] ?? 0);
+                $addonsCost = (float)($item['addons']['addonsCost'] ?? 0);
+                if ($addonsCost <= 0) {
+                    if (!empty($item['addons']['giftWrapping'])) $addonsCost += 2.0;
+                    if (!empty($item['addons']['giftBagFlag'])) $addonsCost += 1.5;
+                }
+                $price = (float)($item['price'] ?? $item['pricing']['unitTotal'] ?? ($basePrice + $addonsCost));
                 $qty = (int)($item['quantity'] ?? 1);
                 $giftBits = [];
                 if (!empty($item['addons']['giftWrapping'])) $giftBits[] = 'Gift Wrapping (+€2.00)';

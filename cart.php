@@ -2,6 +2,39 @@
 session_start();
 require_once "authentication/database.php";
 
+function getCartLineAvailableStock(mysqli $conn, array $item): int {
+    $productId = (int)($item['product']['id'] ?? $item['productID'] ?? 0);
+    if ($productId <= 0) return 0;
+
+    $st = $conn->prepare("SELECT inventory, cartStatus FROM products WHERE productID = ? LIMIT 1");
+    if (!$st) return 0;
+    $st->bind_param("i", $productId);
+    $st->execute();
+    $res = $st->get_result();
+    $product = $res ? $res->fetch_assoc() : null;
+    $st->close();
+    if (!$product) return 0;
+
+    if (($product['cartStatus'] ?? '') === 'made_to_order') {
+        return PHP_INT_MAX;
+    }
+
+    $variationId = (int)($item['variation']['variationID'] ?? $item['variation_id'] ?? 0);
+    if ($variationId > 0) {
+        $sv = $conn->prepare("SELECT quantityAvailable FROM variation_stock WHERE variationID = ? LIMIT 1");
+        if ($sv) {
+            $sv->bind_param("i", $variationId);
+            $sv->execute();
+            $vr = $sv->get_result();
+            $row = $vr ? $vr->fetch_assoc() : null;
+            $sv->close();
+            if ($row) return max(0, (int)$row['quantityAvailable']);
+        }
+    }
+
+    return max(0, (int)($product['inventory'] ?? 0));
+}
+
 // ---- POST: remove item or update quantity ----
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
@@ -25,6 +58,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'update_qty' && $idx >= 0 && isset($_SESSION['cart']['items'][$idx])) {
         $qty  = max(1, (int)($_POST['qty'] ?? 1));
         $unit = (float)($_SESSION['cart']['items'][$idx]['pricing']['unitTotal'] ?? 0);
+        $availableStock = getCartLineAvailableStock($conn, $_SESSION['cart']['items'][$idx]);
+        if ($qty > $availableStock) {
+            $_SESSION['cart_notice'] = [
+                'type' => 'error',
+                'message' => 'Not enough stock for requested quantity.'
+            ];
+            header('Location: cart.php');
+            exit();
+        }
+        if ($unit <= 0) {
+            $itemRef = $_SESSION['cart']['items'][$idx];
+            $base = (float)($itemRef['product']['basePrice'] ?? 0);
+            $addonsCost = (float)($itemRef['addons']['addonsCost'] ?? 0);
+            if ($addonsCost <= 0) {
+                if (!empty($itemRef['addons']['giftWrapping'])) $addonsCost += 2.0;
+                if (!empty($itemRef['addons']['giftBagFlag'])) $addonsCost += 1.5;
+            }
+            $unit = $base + $addonsCost;
+            $_SESSION['cart']['items'][$idx]['pricing']['unitTotal'] = round($unit, 2);
+        }
         $_SESSION['cart']['items'][$idx]['quantity']             = $qty;
         $_SESSION['cart']['items'][$idx]['pricing']['lineTotal'] = round($unit * $qty, 2);
         $_SESSION['cart']['totals']     = cartRecalc($_SESSION['cart']['items']);
@@ -41,7 +94,12 @@ function cartRecalc(array $items): array {
         $q      = (int)($item['quantity'] ?? 0);
         $count += $q;
         $sub   += (float)($item['product']['basePrice'] ?? 0) * $q;
-        $add   += (float)($item['addons']['addonsCost']  ?? 0) * $q;
+        $addonsCost = (float)($item['addons']['addonsCost'] ?? 0);
+        if ($addonsCost <= 0) {
+            if (!empty($item['addons']['giftWrapping'])) $addonsCost += 2.0;
+            if (!empty($item['addons']['giftBagFlag'])) $addonsCost += 1.5;
+        }
+        $add += $addonsCost * $q;
     }
     return [
         'items_count'  => $count,
@@ -55,12 +113,48 @@ function cartRecalc(array $items): array {
 $cart   = $_SESSION['cart'] ?? null;
 $items  = $cart['items']  ?? [];
 $totals = $cart['totals'] ?? ['items_count' => 0, 'subtotal' => 0.0, 'addons_total' => 0.0, 'grand_total' => 0.0];
+if (!empty($items)) {
+    $totals = cartRecalc($items);
+    $_SESSION['cart']['totals'] = $totals;
+}
+
+// Load one image per cart product (same style as wishlist/shop usage).
+$productImageMap = [];
+if (!empty($items)) {
+    $productIds = [];
+    foreach ($items as $it) {
+        $pid = (int)($it['product']['id'] ?? $it['productID'] ?? 0);
+        if ($pid > 0) $productIds[] = $pid;
+    }
+    $productIds = array_values(array_unique($productIds));
+    if (!empty($productIds)) {
+        $idList = implode(',', array_map('intval', $productIds));
+        $imgRes = $conn->query("
+            SELECT p.productID, MIN(ph.imageID) AS imageID
+            FROM products p
+            LEFT JOIN photos ph ON ph.productID = p.productID
+            WHERE p.productID IN ($idList)
+            GROUP BY p.productID
+        ");
+        if ($imgRes) {
+            while ($row = $imgRes->fetch_assoc()) {
+                $pid = (int)$row['productID'];
+                $imgId = (int)($row['imageID'] ?? 0);
+                $productImageMap[$pid] = $imgId > 0
+                    ? "modules/admin/ajax/product_image.php?id={$imgId}"
+                    : "assets/images/athina-eshop-logo.png";
+            }
+        }
+    }
+}
 
 // ---- Header globals ----
 $GLOBALS['header_user_full_name'] = $_SESSION['user']['full_name'] ?? 'Guest';
 $GLOBALS['header_user_role']      = $_SESSION['user']['role']      ?? 'guest';
 
 $activePage = '';
+$cartNotice = $_SESSION['cart_notice'] ?? null;
+unset($_SESSION['cart_notice']);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -90,6 +184,11 @@ $activePage = '';
                 </span>
             </span>
         </h1>
+        <?php if (!empty($cartNotice['message'])): ?>
+        <div style="margin:-16px 0 18px;padding:10px 12px;border-radius:10px;background:#ffe8e8;color:#8f1f1f;border:1px solid #f3c8c8;">
+            <?= htmlspecialchars((string)$cartNotice['message']) ?>
+        </div>
+        <?php endif; ?>
 
         <?php if (empty($items)): ?>
         <div class="cart-empty">
@@ -104,9 +203,19 @@ $activePage = '';
             <!-- Items list -->
             <div class="cart-items">
                 <?php foreach ($items as $idx => $item): ?>
+                <?php
+                    $pid = (int)($item['product']['id'] ?? $item['productID'] ?? 0);
+                    $productUrl = $pid > 0 ? ('product.php?id=' . $pid) : '#';
+                    $imageSrc = $productImageMap[$pid] ?? 'assets/images/athina-eshop-logo.png';
+                ?>
                 <div class="cart-item">
+                    <a href="<?= htmlspecialchars($productUrl) ?>" class="cart-item-image-link" title="View product details">
+                        <img src="<?= htmlspecialchars($imageSrc) ?>" alt="<?= htmlspecialchars($item['product']['nameEN'] ?? 'Product') ?>" class="cart-item-image">
+                    </a>
                     <div class="cart-item-info">
-                        <div class="cart-item-name"><?= htmlspecialchars($item['product']['nameEN'] ?? '') ?></div>
+                        <div class="cart-item-name">
+                            <a href="<?= htmlspecialchars($productUrl) ?>"><?= htmlspecialchars($item['product']['nameEN'] ?? '') ?></a>
+                        </div>
                         <?php if (!empty($item['variation'])): ?>
                         <div class="cart-item-variant">
                             <?php

@@ -93,6 +93,15 @@ if ($tableCheck && mysqli_num_rows($tableCheck) > 0) {
     }
 }
 
+// Clean known mojibake sequences for notification messages only.
+function normalizeAdminNotifText(string $text): string {
+    return str_replace(
+        ['â‚¬', 'â€¢', 'Â·', 'Â'],
+        ['€', '•', '·', ''],
+        $text
+    );
+}
+
 $statusLabel = [
     'pending'       => ['label'=>'pending',       'badge'=>'badge-muted'],
     'accepted'      => ['label'=>'accepted',      'badge'=>'badge-accepted'],
@@ -139,7 +148,7 @@ $jsonValues = json_encode($trendValues);
         <div class="text-sm">
           <?php foreach ($adminNotifications as $n): ?>
             <div style="padding:6px 0;border-bottom:1px solid #dbeafe;">
-              <?= htmlspecialchars((string)$n['message']) ?>
+              <?= htmlspecialchars(normalizeAdminNotifText((string)$n['message'])) ?>
               <span class="text-muted" style="margin-left:6px;">
                 (<?= htmlspecialchars(date('m/d H:i', strtotime((string)$n['created_at']))) ?>)
               </span>
