@@ -473,6 +473,10 @@ select.form-input { cursor:pointer; }
 .search-input {
   padding-left:34px;
 }
+.search-status-select {
+  min-width:170px;
+  max-width:210px;
+}
 .customer-history-grid {
   display:grid;
   grid-template-columns:1.15fr 1.85fr;

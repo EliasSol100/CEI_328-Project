@@ -103,9 +103,6 @@ $jsonValues = json_encode($trendValues);
         <h1>Dashboard Overview</h1>
         <p>Welcome back! Here's what's happening with your shop.</p>
       </div>
-      <a href="customer_order_history.php" class="btn-secondary">
-        <i class="fas fa-clock-rotate-left"></i> Customer Order History
-      </a>
     </div>
 
     <div class="content-body">
