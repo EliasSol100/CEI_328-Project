@@ -501,7 +501,10 @@ CREATE TABLE `users` (
   `email` varchar(255) NOT NULL,
   `username` varchar(100) NOT NULL,
   `password` varchar(255) NOT NULL,
+  `verification_token` varchar(255) DEFAULT NULL,
   `is_verified` tinyint(1) NOT NULL DEFAULT 0,
+  `reset_token` varchar(255) DEFAULT NULL,
+  `reset_token_expiry` datetime DEFAULT NULL,
   `verification_code` varchar(200) DEFAULT NULL,
   `verification_expires_at` datetime DEFAULT NULL,
   `phone` varchar(200) DEFAULT NULL,
@@ -528,24 +531,10 @@ CREATE TABLE `users` (
 -- Dumping data for table `users`
 --
 
-INSERT INTO `users` (`userID`, `full_name`, `email`, `username`, `password`, `is_verified`, `verification_code`, `verification_expires_at`, `phone`, `country`, `city`, `address`, `postcode`, `dob`, `twofa_code`, `twofa_expires`, `role`, `profile_complete`, `first_name`, `middle_name`, `last_name`, `profile_image`, `last_login`, `createdAt`, `status`, `updated_at`) VALUES
-(3, 'Nikos Georgiou', 'nikos.g@example.com', 'nikosg', '$2y$10$jwEUeKHu2AaY4iOI4ywfb.nwR3GQ17Cynz0ngpdbPDDJ/5CnXIZde', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '1990-01-01', NULL, NULL, 'user', 0, 'Nikos', NULL, 'Georgiou', NULL, NULL, '2026-01-23 14:00:00', 'active', '2026-01-23 14:00:00'),
-(4, 'Eleni Konstantinou', 'eleni.k@example.com', 'elenik', '$2y$10$jwEUeKHu2AaY4iOI4ywfb.nwR3GQ17Cynz0ngpdbPDDJ/5CnXIZde', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '1992-05-15', NULL, NULL, 'user', 0, 'Eleni', NULL, 'Konstantinou', NULL, NULL, '2026-01-22 09:00:00', 'active', '2026-01-22 09:00:00'),
-(5, 'Elias Solomonides', 'eliassolomonides0@gmail.com', 'EliasSol100', '$2y$10$a3LeTHaraet42jsOj0KCtexsXlaMzbQ7Mjtkpo7CgsqrWWxhhq4wm', 1, NULL, NULL, '+35799221775', 'Cyprus (Κύπρος)', 'Limassol', 'Darvinou 5', '3041', '2003-11-26', NULL, '2026-03-03 14:18:27', 'admin', 1, 'Elias', NULL, 'Solomonides', 'user_5_1772462886.jpg', '2026-03-02 17:00:39', '2026-03-01 15:59:10', 'active', '2026-03-02 17:00:39');
-
--- --------------------------------------------------------
-
---
--- Table structure for table `password_resets`
---
-
-CREATE TABLE `password_resets` (
-  `id` bigint(20) NOT NULL,
-  `email` varchar(255) NOT NULL,
-  `token_hash` varchar(64) NOT NULL,
-  `expires_at` datetime NOT NULL,
-  `created_at` datetime NOT NULL DEFAULT current_timestamp()
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+INSERT INTO `users` (`userID`, `full_name`, `email`, `username`, `password`, `verification_token`, `is_verified`, `reset_token`, `reset_token_expiry`, `verification_code`, `verification_expires_at`, `phone`, `country`, `city`, `address`, `postcode`, `dob`, `twofa_code`, `twofa_expires`, `role`, `profile_complete`, `first_name`, `middle_name`, `last_name`, `profile_image`, `last_login`, `createdAt`, `status`, `updated_at`) VALUES
+(3, 'Nikos Georgiou', 'nikos.g@example.com', 'nikosg', '$2y$10$jwEUeKHu2AaY4iOI4ywfb.nwR3GQ17Cynz0ngpdbPDDJ/5CnXIZde', NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '1990-01-01', NULL, NULL, 'user', 0, 'Nikos', NULL, 'Georgiou', NULL, NULL, '2026-01-23 14:00:00', 'active', '2026-01-23 14:00:00'),
+(4, 'Eleni Konstantinou', 'eleni.k@example.com', 'elenik', '$2y$10$jwEUeKHu2AaY4iOI4ywfb.nwR3GQ17Cynz0ngpdbPDDJ/5CnXIZde', NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '1992-05-15', NULL, NULL, 'user', 0, 'Eleni', NULL, 'Konstantinou', NULL, NULL, '2026-01-22 09:00:00', 'active', '2026-01-22 09:00:00'),
+(5, 'Elias Solomonides', 'eliassolomonides0@gmail.com', 'EliasSol100', '$2y$10$a3LeTHaraet42jsOj0KCtexsXlaMzbQ7Mjtkpo7CgsqrWWxhhq4wm', NULL, 1, NULL, NULL, NULL, NULL, '+35799221775', 'Cyprus (Κύπρος)', 'Limassol', 'Darvinou 5', '3041', '2003-11-26', NULL, '2026-03-03 14:18:27', 'admin', 1, 'Elias', NULL, 'Solomonides', 'user_5_1772462886.jpg', '2026-03-02 17:00:39', '2026-03-01 15:59:10', 'active', '2026-03-02 17:00:39');
 
 -- --------------------------------------------------------
 
@@ -720,15 +709,6 @@ ALTER TABLE `order_items`
   ADD KEY `idx_order_items_variationID` (`variationID`);
 
 --
--- Indexes for table `password_resets`
---
-ALTER TABLE `password_resets`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `uq_password_resets_token_hash` (`token_hash`),
-  ADD KEY `idx_password_resets_email` (`email`),
-  ADD KEY `idx_password_resets_expires_at` (`expires_at`);
-
---
 -- Indexes for table `payments`
 --
 ALTER TABLE `payments`
@@ -894,12 +874,6 @@ ALTER TABLE `orders`
 --
 ALTER TABLE `order_items`
   MODIFY `orderItemID` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
-
---
--- AUTO_INCREMENT for table `password_resets`
---
-ALTER TABLE `password_resets`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `payments`
