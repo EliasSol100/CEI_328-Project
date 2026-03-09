@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 session_start();
 require_once __DIR__ . "/database.php";
 
@@ -50,10 +50,22 @@ if (isset($_POST["submit"])) {
                 // 2) Create token + hashed token
                 $resetToken = bin2hex(random_bytes(32));
                 $tokenHash  = hash('sha256', $resetToken);
-                // 🔁 20-minute validity instead of 1 hour
+                // ðŸ” 20-minute validity instead of 1 hour
                 $expiresAt  = date('Y-m-d H:i:s', time() + 20 * 60); // valid for 20 minutes
 
                 // 3) Store token in password_resets table
+                // Ensure table exists in local/dev databases before using it.
+                $conn->query("
+                    CREATE TABLE IF NOT EXISTS password_resets (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        email VARCHAR(255) NOT NULL,
+                        token_hash VARCHAR(255) NOT NULL,
+                        expires_at DATETIME NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        KEY idx_password_resets_email (email),
+                        KEY idx_password_resets_token_hash (token_hash)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                ");
                 // Optional: delete any existing reset records for this email
                 $del = $conn->prepare("DELETE FROM password_resets WHERE email = ?");
                 if ($del) {
@@ -100,7 +112,7 @@ if (isset($_POST["submit"])) {
                         $mail->isHTML(false);
                         $mail->Subject = 'Athina E-Shop - Password Reset';
 
-                        // 🔁 Email text mentions 20 minutes
+                        // ðŸ” Email text mentions 20 minutes
                         $mail->Body =
                             "Dear {$recipientName},\n\n" .
                             "We received a request to reset the password for your Athina E-Shop account.\n\n" .
@@ -153,7 +165,7 @@ if (isset($_POST["submit"])) {
             </div>
             <h3 class="mt-2">Password Recovery</h3>
             <p class="wizard-subtitle mb-0">
-                Enter your email and we’ll send you a reset link (valid for 20 minutes).
+                Enter your email and weâ€™ll send you a reset link (valid for 20 minutes).
             </p>
         </div>
 

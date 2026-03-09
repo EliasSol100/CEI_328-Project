@@ -81,6 +81,7 @@ try {
     }
 
     $variation = null;
+    $effectiveHasVariants = $hasVariants;
     if ($hasVariants) {
         if ($variationId !== null && $variationId > 0) {
             $variation = fetchVariationById($conn, $variationId, $productId);
@@ -90,13 +91,17 @@ try {
             // No variation specified — pick the first available one automatically
             $variation = fetchFirstVariation($conn, $productId);
         }
-        if ($variation === null) badRequest('Selected variation not found for this product.');
+        // Fallback for inconsistent catalog data:
+        // if hasVariants=1 but no variation row exists, treat as non-variant item.
+        if ($variation === null) {
+            $effectiveHasVariants = false;
+        }
     }
 
     if ($cartStatus === 'made_to_order') {
         $availableStock = PHP_INT_MAX;
     } else {
-        $availableStock = $hasVariants
+        $availableStock = $effectiveHasVariants
             ? fetchVariationStock($conn, (int)$variation['variationID'])
             : (int)$product['inventory'];
 
@@ -108,7 +113,7 @@ try {
     $existingIndex = findExistingLineIndex(
         $cart['items'],
         $productId,
-        $hasVariants ? (int)$variation['variationID'] : null,
+        $effectiveHasVariants ? (int)$variation['variationID'] : null,
         $addons
     );
 
@@ -118,7 +123,10 @@ try {
     }
     if ($newQty > $availableStock) badRequest('Not enough stock for requested quantity.');
 
-    $addonsCost = 0.0; // TODO: prices later
+    // Gift add-on pricing
+    $addonsCost = 0.0;
+    if (!empty($addons['gift_wrapping'])) $addonsCost += 2.0;
+    if (!empty($addons['gift_bag'])) $addonsCost += 1.5;
 
     $unitPrice = (float)$product['basePrice'];
     $unitTotal = $unitPrice + $addonsCost;
@@ -132,9 +140,9 @@ try {
             'nameEN' => (string)$product['nameEN'],
             'basePrice' => round($unitPrice, 2),
             'cartStatus' => $cartStatus,
-            'hasVariants' => $hasVariants,
+            'hasVariants' => $effectiveHasVariants,
         ],
-        'variation' => $hasVariants ? [
+        'variation' => $effectiveHasVariants ? [
             'variationID' => (int)$variation['variationID'],
             'size' => (string)$variation['size'],
             'yarnType' => (string)$variation['yarnType'],

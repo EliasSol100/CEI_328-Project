@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 session_start();
@@ -39,7 +39,8 @@ if (file_exists($headerPath)) {
 
 $orderDetails = null;
 if (isset($result['order_id'])) {
-    $stmt = $conn->prepare("SELECT o.*, (SELECT COUNT(*) FROM order_items WHERE order_id = o.order_id) as item_count FROM orders o WHERE o.order_id = ?");
+    // Schema-aligned read query: orderID/order_items.orderID.
+    $stmt = $conn->prepare("SELECT o.*, (SELECT COUNT(*) FROM order_items WHERE orderID = o.orderID) AS item_count FROM orders o WHERE o.orderID = ?");
     if ($stmt) {
         $stmt->bind_param("i", $result['order_id']);
         $stmt->execute();
@@ -79,7 +80,7 @@ if (isset($result['order_id'])) {
         <div class="success-icon"><i class="fas fa-check"></i></div>
         <h1>Thank You!</h1>
         <p style="color:#666; font-size:18px;">Your order has been placed successfully.</p>
-        <div class="order-number">Order #<?= $result['order_id'] ?></div>
+        <div class="order-number">Order #<?= htmlspecialchars((string)($result['order_number'] ?? $result['order_id'])) ?></div>
 
         <?php if (!empty($result['shipping_message'])): ?>
             <div class="shipping-message"><?= htmlspecialchars($result['shipping_message']) ?></div>
@@ -98,16 +99,31 @@ if (isset($result['order_id'])) {
         <?php if ($orderDetails): ?>
         <div class="order-details">
             <h3>Order Summary</h3>
-            <div class="detail-row"><span class="detail-label">Date:</span> <span><?= date('F j, Y, g:i a', strtotime($orderDetails['created_at'])) ?></span></div>
-            <div class="detail-row"><span class="detail-label">Payment:</span> <span><?= ucfirst(str_replace('_',' ',$orderDetails['payment_method'])) ?></span></div>
-            <div class="detail-row"><span class="detail-label">Shipping:</span> <span><?= ucfirst(str_replace('_',' ',$orderDetails['courier'])) ?> (<?= $orderDetails['shipping_speed'] ?>)</span></div>
-            <div class="detail-row"><span class="detail-label">Address:</span> <span><?= htmlspecialchars($orderDetails['shipping_address']) ?>, <?= $orderDetails['shipping_city'] ?> <?= $orderDetails['shipping_postal_code'] ?>, <?= $orderDetails['shipping_country'] ?></span></div>
+            <div class="detail-row"><span class="detail-label">Date:</span> <span><?= date('F j, Y, g:i a', strtotime((string)$orderDetails['createdAt'])) ?></span></div>
+            <div class="detail-row"><span class="detail-label">Status:</span> <span><?= htmlspecialchars((string)$orderDetails['status']) ?></span></div>
             <div class="detail-row"><span class="detail-label">Items:</span> <span><?= $orderDetails['item_count'] ?> items</span></div>
-            <div class="detail-row" style="font-size:18px; font-weight:bold; color:#28a745;"><span class="detail-label">Total Paid:</span> <span>€<?= number_format($orderDetails['total_amount'],2) ?></span></div>
+            <div class="detail-row"><span class="detail-label">Subtotal:</span> <span>&euro;<?= number_format((float)$orderDetails['subtotal'], 2) ?></span></div>
+            <div class="detail-row"><span class="detail-label">Shipping:</span> <span>&euro;<?= number_format((float)$orderDetails['shippingCost'], 2) ?></span></div>
+            <div class="detail-row" style="font-size:18px; font-weight:bold; color:#28a745;"><span class="detail-label">Total Paid:</span> <span>&euro;<?= number_format((float)$orderDetails['totalAmount'],2) ?></span></div>
         </div>
         <?php endif; ?>
 
-        <div class="email-note"><i class="fas fa-envelope"></i> Confirmation sent to <strong><?= htmlspecialchars($orderDetails['guest_email'] ?? ($_SESSION['user']['email'] ?? 'your email')) ?></strong></div>
+        <?php
+        $confirmationTo = (string)($result['confirmation_email_to'] ?? ($orderDetails['email'] ?? ($_SESSION['user']['email'] ?? 'your email')));
+        $confirmationSent = !empty($result['confirmation_email_sent']);
+        $confirmationError = trim((string)($result['confirmation_email_error'] ?? ''));
+        ?>
+        <?php if ($confirmationSent): ?>
+            <div class="email-note"><i class="fas fa-envelope"></i> Confirmation sent to <strong><?= htmlspecialchars($confirmationTo) ?></strong></div>
+        <?php else: ?>
+            <div class="email-note" style="background:#f8d7da;color:#721c24;">
+                <i class="fas fa-triangle-exclamation"></i>
+                We could not send confirmation email to <strong><?= htmlspecialchars($confirmationTo) ?></strong>.
+                <?php if ($confirmationError !== ''): ?>
+                    <span style="display:block; margin-top:6px; font-size:13px;">Reason: <?= htmlspecialchars($confirmationError) ?></span>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
 
         <div>
             <a href="<?= $project ?>/shop.php" class="btn btn-primary">Continue Shopping</a>

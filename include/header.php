@@ -16,7 +16,8 @@ if (isset($_SESSION["wishlist_count"])) {
 $scriptName = $_SERVER['PHP_SELF'] ?? '';
 $rootPrefix = (
     strpos($scriptName, '/profile/') !== false ||
-    strpos($scriptName, '/authentication/') !== false
+    strpos($scriptName, '/authentication/') !== false ||
+    strpos($scriptName, '/modules/') !== false
 ) ? '../' : '';
 
 // Pull data passed from each page if available, otherwise fall back to session

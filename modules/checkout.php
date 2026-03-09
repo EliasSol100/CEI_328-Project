@@ -1,10 +1,12 @@
-<?php
+﻿<?php
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 session_start();
+define('INCLUDE_CHECK', true);
 
 // Correct relative path: go up one level from 'modules' to project root, then into 'authentication'
 require_once __DIR__ . '/../authentication/database.php';
+require_once __DIR__ . '/place_order.php';
 
 // Optional: include get_config.php if it exists (to avoid errors if missing)
 $configPath = __DIR__ . '/../authentication/get_config.php';
@@ -21,72 +23,31 @@ if (!$conn || $conn->connect_error) {
 }
 
 // Define project root for asset URLs (used in HTML)
-$root = $_SERVER['DOCUMENT_ROOT'];
 $project = '/CEI_328-Project';
-
-// Include header with fallback
-$headerPath = __DIR__ . '/../include/header.php';
-if (file_exists($headerPath)) {
-    $activePage = 'checkout';
-    include $headerPath;
-} else {
-    ?><!DOCTYPE html><html><head><title>Checkout</title></head><body><?php
-}
 
 // ----- CSRF TOKEN -----
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
-// ----- ENSURE TABLES EXIST -----
-$conn->query("CREATE TABLE IF NOT EXISTS orders (
-    order_id INT PRIMARY KEY AUTO_INCREMENT,
-    user_id INT NULL,
-    guest_email VARCHAR(255),
-    guest_name VARCHAR(255),
-    guest_phone VARCHAR(20),
-    shipping_address TEXT NOT NULL,
-    shipping_city VARCHAR(100) NOT NULL,
-    shipping_postal_code VARCHAR(20) NOT NULL,
-    shipping_country VARCHAR(100) NOT NULL,
-    courier VARCHAR(50) NOT NULL,
-    shipping_speed VARCHAR(20) DEFAULT 'standard',
-    shipping_cost DECIMAL(10,2) DEFAULT 0,
-    free_shipping BOOLEAN DEFAULT FALSE,
-    payment_method VARCHAR(50) NOT NULL,
-    transaction_id VARCHAR(255),
-    subtotal DECIMAL(10,2) NOT NULL,
-    total_amount DECIMAL(10,2) NOT NULL,
-    status ENUM('pending','confirmed','processing','shipped','delivered','cancelled') DEFAULT 'pending',
-    payment_status ENUM('pending','paid','failed','refunded') DEFAULT 'pending',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)");
-
-$conn->query("CREATE TABLE IF NOT EXISTS order_items (
-    item_id INT PRIMARY KEY AUTO_INCREMENT,
-    order_id INT NOT NULL,
-    product_id INT,
-    product_name VARCHAR(255) NOT NULL,
-    variation_id INT,
-    variation_details TEXT,
-    quantity INT NOT NULL,
-    price DECIMAL(10,2) NOT NULL,
-    addons TEXT,
-    FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE
-)");
-
 // ----- USER INFO -----
 $isLoggedIn = isset($_SESSION["user"]);
-$userId = $isLoggedIn ? ($_SESSION["user"]["id"] ?? null) : null;
+$userId = $isLoggedIn ? (int)($_SESSION["user"]["id"] ?? $_SESSION["user"]["userID"] ?? 0) : 0;
 $userEmail = $isLoggedIn ? ($_SESSION["user"]["email"] ?? null) : null;
 $userFullName = $isLoggedIn ? ($_SESSION["user"]["full_name"] ?? 'User') : null;
 
 // ----- CART -----
-$cartItems = $_SESSION['cart'] ?? [];
+// Support both cart shapes:
+// 1) New shape from cart_api.php: $_SESSION['cart']['items']
+// 2) Legacy shape: $_SESSION['cart'] as plain item list
+$sessionCart = $_SESSION['cart'] ?? [];
+$cartItems = (is_array($sessionCart) && isset($sessionCart['items']) && is_array($sessionCart['items']))
+    ? $sessionCart['items']
+    : (is_array($sessionCart) ? $sessionCart : []);
 $cartTotal = 0;
 $cartCount = 0;
 foreach ($cartItems as $item) {
-    $price = (float)($item['price'] ?? 0);
+    $price = (float)($item['price'] ?? $item['pricing']['unitTotal'] ?? $item['product']['basePrice'] ?? 0);
     $qty = (int)($item['quantity'] ?? 1);
     $cartTotal += $price * $qty;
     $cartCount += $qty;
@@ -105,6 +66,15 @@ $shippingRates = [
     'boxnow'       => ['standard' => 2.50, 'express' => 4.50],
     'acs'          => ['standard' => 3.00, 'express' => 5.00]
 ];
+
+// Initial shipping/total shown on page (before submit).
+$selectedCourier = (string)($_POST['courier'] ?? '');
+$selectedSpeed = (string)($_POST['shipping_speed'] ?? 'standard');
+$displayShippingCost = 0.0;
+if (!$freeShippingEligible && isset($shippingRates[$selectedCourier][$selectedSpeed])) {
+    $displayShippingCost = (float)$shippingRates[$selectedCourier][$selectedSpeed];
+}
+$displayTotal = $cartTotal + $displayShippingCost;
 
 // ----- FORM HANDLING -----
 $errors = [];
@@ -175,59 +145,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $totalAmount = $cartTotal + $shippingCost;
-            $transactionId = 'TXN_' . uniqid() . '_' . date('Ymd');
 
-            $guestEmail = !$isLoggedIn ? $_POST['email'] : null;
-            $guestName = !$isLoggedIn ? $_POST['full_name'] : null;
-            $guestPhone = !$isLoggedIn ? $_POST['phone'] : null;
-
-            $stmt = $conn->prepare("INSERT INTO orders (
-                user_id, guest_email, guest_name, guest_phone,
-                shipping_address, shipping_city, shipping_postal_code, shipping_country,
-                courier, shipping_speed, shipping_cost, free_shipping,
-                payment_method, transaction_id, subtotal, total_amount,
-                status, payment_status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', 'paid')");
-            if (!$stmt) throw new Exception($conn->error);
-
-            $stmt->bind_param(
-                "isssssssssssssss",
-                $userId,
-                $guestEmail,
-                $guestName,
-                $guestPhone,
-                $_POST['shipping_address'],
-                $_POST['shipping_city'],
-                $_POST['shipping_postal_code'],
-                $_POST['shipping_country'],
-                $_POST['courier'],
-                $_POST['shipping_speed'] ?? 'standard',
-                $shippingCost,
-                $freeShippingFlag,
-                $_POST['payment_method'],
-                $transactionId,
-                $cartTotal,
-                $totalAmount
-            );
-            if (!$stmt->execute()) throw new Exception($stmt->error);
-            $orderId = $stmt->insert_id;
-            $stmt->close();
-
-            foreach ($cartItems as $item) {
-                $productId = (int)($item['product_id'] ?? 0);
-                $productName = $item['name'] ?? 'Product';
-                $variationId = $item['variation_id'] ?? null;
-                $quantity = (int)($item['quantity'] ?? 1);
-                $price = (float)($item['price'] ?? 0);
-                $addons = isset($item['addons']) ? json_encode($item['addons']) : null;
-                $variationDetails = isset($item['variation']) ? json_encode($item['variation']) : null;
-
-                $istmt = $conn->prepare("INSERT INTO order_items (order_id, product_id, product_name, variation_id, variation_details, quantity, price, addons) VALUES (?,?,?,?,?,?,?,?)");
-                if (!$istmt) throw new Exception($conn->error);
-                $istmt->bind_param("iissiids", $orderId, $productId, $productName, $variationId, $variationDetails, $quantity, $price, $addons);
-                if (!$istmt->execute()) throw new Exception($istmt->error);
-                $istmt->close();
-            }
+            // Centralized Place Order module call:
+            // creates order header, order lines, payment row and shipment summary.
+            $placed = placeOrder($conn, [
+                'payment_confirmed' => true,
+                'items' => $cartItems,
+                'user_id' => $userId > 0 ? $userId : null,
+                'is_guest' => $isLoggedIn ? 0 : 1,
+                'email' => $isLoggedIn ? $userEmail : trim((string)($_POST['email'] ?? '')),
+                'order_status' => 'accepted',
+                'payment_status' => 'paid',
+                'payment_provider' => trim((string)($_POST['payment_method'] ?? 'manual')),
+                'subtotal' => $cartTotal,
+                'discount_total' => 0.0,
+                'shipping_cost' => $shippingCost,
+                'total_amount' => $totalAmount,
+                'courier' => trim((string)($_POST['courier'] ?? '')),
+                'shipping_priority' => trim((string)($_POST['shipping_speed'] ?? 'standard')),
+            ]);
+            $orderId = (int)$placed['order_id'];
+            $orderNumber = (string)$placed['order_number'];
 
             $accountCreated = false;
             if (!$isLoggedIn && !empty($_POST['create_account']) && $_POST['create_account'] === 'yes') {
@@ -237,16 +175,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $first = $nameParts[0];
                 $last = $nameParts[1] ?? '';
 
-                $check = $conn->prepare("SELECT id FROM users WHERE email = ?");
+                        $check = $conn->prepare("SELECT userID FROM users WHERE email = ?");
                 $check->bind_param("s", $_POST['email']);
                 $check->execute();
                 $check->store_result();
                 if ($check->num_rows == 0) {
-                    $insert = $conn->prepare("INSERT INTO users (email, password, first_name, last_name, phone, role) VALUES (?,?,?,?,?,'user')");
-                    $insert->bind_param("sssss", $_POST['email'], $hash, $first, $last, $_POST['phone']);
+                    // Keep new-account creation aligned with the current users table constraints.
+                    $username = strtolower(preg_replace('/[^a-z0-9]/', '', strstr($_POST['email'], '@', true) ?: 'user')) . rand(100, 999);
+                    $fullName = trim($first . ' ' . $last);
+                    $insert = $conn->prepare("INSERT INTO users (full_name, email, username, password, phone, role) VALUES (?,?,?,?,?,'user')");
+                    $insert->bind_param("sssss", $fullName, $_POST['email'], $username, $hash, $_POST['phone']);
                     if ($insert->execute()) {
                         $newUserId = $insert->insert_id;
-                        $upd = $conn->prepare("UPDATE orders SET user_id = ? WHERE order_id = ?");
+                        $upd = $conn->prepare("UPDATE orders SET userID = ?, isGuestFlag = 0 WHERE orderID = ?");
                         $upd->bind_param("ii", $newUserId, $orderId);
                         $upd->execute();
                         $upd->close();
@@ -259,17 +200,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $conn->commit();
+
+            // Send customer confirmation email only after DB commit succeeds.
+            // If email fails, order is still valid and stored.
+            $confirmationEmailTo = $isLoggedIn ? (string)$userEmail : trim((string)($_POST['email'] ?? ''));
+            $confirmationName = $isLoggedIn ? (string)$userFullName : trim((string)($_POST['full_name'] ?? 'Customer'));
+            $emailResult = sendOrderConfirmationEmail([
+                'to_email' => $confirmationEmailTo,
+                'customer_name' => $confirmationName,
+                'order_id' => $orderId,
+                'order_number' => $orderNumber,
+                'total' => $totalAmount,
+                'shipping_cost' => $shippingCost,
+                'courier' => trim((string)($_POST['courier'] ?? '')),
+                'shipping_priority' => trim((string)($_POST['shipping_speed'] ?? 'standard')),
+                'items' => $cartItems,
+            ]);
+
             unset($_SESSION['cart']);
 
             $_SESSION['checkout_result'] = [
                 'order_id'         => $orderId,
+                'order_number'     => $orderNumber,
                 'total'            => $totalAmount,
                 'shipping_message' => $shippingMessage,
                 'free_shipping'    => $freeShippingEligible,
-                'account_created'  => $accountCreated
+                'account_created'  => $accountCreated,
+                'confirmation_email_to' => $confirmationEmailTo,
+                'confirmation_email_sent' => (bool)($emailResult['sent'] ?? false),
+                'confirmation_email_error' => (string)($emailResult['error'] ?? '')
             ];
 
-            header('Location: ' . $project . '/modules/checkout-success.php');
+            // NOTE: underscore filename is the actual file in this project.
+            header('Location: ' . $project . '/modules/checkout_success.php');
             exit;
 
         } catch (Exception $e) {
@@ -292,11 +255,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <style>
         .checkout-container { max-width: 1200px; margin: 40px auto; padding: 0 20px; }
         .checkout-grid { display: grid; grid-template-columns: 1fr 380px; gap: 40px; }
-        fieldset { border: 1px solid #ddd; padding: 25px; margin-bottom: 25px; border-radius: 8px; background: #fff; }
-        legend { font-weight: 600; padding: 0 15px; }
+        .checkout-form, .checkout-form * { font-family: inherit; }
+        fieldset { border: 1px solid #e7dff1; padding: 25px; margin-bottom: 25px; border-radius: 12px; background: #fff; }
+        legend { font-weight: 600; padding: 0 15px; color: #5f4b77; }
         .form-group { margin-bottom: 20px; }
-        .form-group label { display: block; margin-bottom: 8px; font-weight: 500; }
-        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 500; color: #3d3250; }
+        .form-group input:not([type="radio"]):not([type="checkbox"]), .form-group select, .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #d7d0e2;
+            border-radius: 8px;
+            color: #2f2441;
+            background: #fff;
+            outline: none;
+        }
+        .form-group input:not([type="radio"]):not([type="checkbox"]):focus, .form-group select:focus, .form-group textarea:focus {
+            border-color: #b9a7d3;
+            box-shadow: 0 0 0 3px rgba(169, 142, 214, 0.15);
+        }
+        .checkout-form input[type="radio"], .checkout-form input[type="checkbox"] {
+            accent-color: #a066f0;
+        }
         .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
         .error { color: #dc3545; font-size: 14px; }
         .error-field { border-color: #dc3545 !important; }
@@ -307,11 +286,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .guest-notice { background: #e7f3ff; padding: 20px; border-radius: 8px; margin-bottom: 25px; }
     </style>
 </head>
-<body>
+<body class="site-page">
+<?php
+$headerPath = __DIR__ . '/../include/header.php';
+if (file_exists($headerPath)) {
+    $activePage = 'checkout';
+    include $headerPath;
+}
+?>
 <div class="checkout-container">
     <h1 data-translate="checkoutTitle">Checkout</h1>
     <?php if ($shippingDifference > 0): ?>
-        <div class="free-shipping-notice"><span data-translate="checkoutAdd">Add</span> €<?= number_format($shippingDifference,2) ?> <span data-translate="checkoutMoreForFreeDelivery">more for FREE Delivery!</span></div>
+        <div class="free-shipping-notice"><span data-translate="checkoutAdd">Add</span> &euro;<?= number_format($shippingDifference,2) ?> <span data-translate="checkoutMoreForFreeDelivery">more for FREE Delivery!</span></div>
     <?php endif; ?>
     <?php if ($error): ?>
         <div style="background:#f8d7da;color:#721c24;padding:15px;border-radius:8px;"><?= htmlspecialchars($error) ?></div>
@@ -319,7 +305,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="checkout-grid">
         <div class="checkout-form">
             <?php if (!$isLoggedIn): ?>
-                <div class="guest-notice"><strong data-translate="checkoutGuestCheckout">Guest checkout</strong> – <a href="<?= $project ?>/authentication/login.php" data-translate="checkoutLogin">Login</a> <span data-translate="checkoutForFasterCheckout">for faster checkout.</span></div>
+                <div class="guest-notice"><strong data-translate="checkoutGuestCheckout">Guest checkout</strong> - <a href="<?= $project ?>/authentication/login.php" data-translate="checkoutLogin">Login</a> <span data-translate="checkoutForFasterCheckout">for faster checkout.</span></div>
             <?php endif; ?>
             <form method="post">
                 <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
@@ -392,7 +378,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <label data-translate="checkoutSpeed">Speed</label>
                         <div style="display:flex; gap:20px;">
                             <label><input type="radio" name="shipping_speed" value="standard" <?= ($formData['shipping_speed']??'standard')=='standard'?'checked':'' ?>> <span data-translate="checkoutStandard">Standard</span></label>
-                            <label><input type="radio" name="shipping_speed" value="express" <?= ($formData['shipping_speed']??'')=='express'?'checked':'' ?>> <span data-translate="checkoutExpress">Express</span> (+€2)</label>
+                            <label><input type="radio" name="shipping_speed" value="express" <?= ($formData['shipping_speed']??'')=='express'?'checked':'' ?>> <span data-translate="checkoutExpress">Express</span> (+&euro;2)</label>
                         </div>
                     </div>
                 </fieldset>
@@ -420,31 +406,76 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <?php if (isset($errors['accept_terms'])): ?><span class="error"><?= $errors['accept_terms'] ?></span><?php endif; ?>
                 </div>
 
-                <button type="submit" class="btn-primary"><span data-translate="checkoutPlaceOrder">Place Order</span> • €<?= number_format($cartTotal,2) ?></button>
+                <button type="submit" class="btn-primary"><span data-translate="checkoutPlaceOrder">Place Order</span> &bull; &euro;<span id="placeOrderTotal"><?= number_format($displayTotal,2) ?></span></button>
             </form>
         </div>
 
         <div class="order-summary">
             <h2><span data-translate="checkoutYourOrder">Your Order</span> (<?= $cartCount ?>)</h2>
             <?php foreach ($cartItems as $item): 
-                $name = $item['name'] ?? 'Product';
-                $price = (float)($item['price'] ?? 0);
+                $name = $item['name'] ?? $item['product']['nameEN'] ?? $item['product']['nameGR'] ?? 'Product';
+                $price = (float)($item['price'] ?? $item['pricing']['unitTotal'] ?? $item['product']['basePrice'] ?? 0);
                 $qty = (int)($item['quantity'] ?? 1);
+                $giftBits = [];
+                if (!empty($item['addons']['giftWrapping'])) $giftBits[] = 'Gift Wrapping (+€2.00)';
+                if (!empty($item['addons']['giftBagFlag'])) $giftBits[] = 'Gift Bag (+€1.50)';
+                if (!empty($item['addons']['giftMessage'])) $giftBits[] = 'Note: ' . (string)$item['addons']['giftMessage'];
             ?>
             <div class="order-item">
                 <div style="display:flex; justify-content:space-between;">
                     <span><?= htmlspecialchars($name) ?> x<?= $qty ?></span>
-                    <span>€<?= number_format($price*$qty,2) ?></span>
+                    <span>&euro;<?= number_format($price*$qty,2) ?></span>
                 </div>
+                <?php if (!empty($giftBits)): ?>
+                <div style="font-size:12px;color:#665b7f;margin-top:6px;">
+                    <?= htmlspecialchars(implode(' | ', $giftBits)) ?>
+                </div>
+                <?php endif; ?>
             </div>
             <?php endforeach; ?>
             <hr>
-            <div style="display:flex; justify-content:space-between;"><span data-translate="subtotal">Subtotal</span>: <span>€<?= number_format($cartTotal,2) ?></span></div>
-            <div style="display:flex; justify-content:space-between;"><span data-translate="shipping">Shipping</span>: <span data-translate="<?= $freeShippingEligible ? 'checkoutFree' : 'checkoutCalculated' ?>"><?= $freeShippingEligible ? 'FREE' : 'Calculated' ?></span></div>
-            <div style="display:flex; justify-content:space-between; font-weight:bold; margin-top:15px;"><span data-translate="total">Total</span>: <span>€<?= number_format($cartTotal,2) ?></span></div>
+            <div style="display:flex; justify-content:space-between;"><span data-translate="subtotal">Subtotal</span>: <span>&euro;<span id="orderSubtotal"><?= number_format($cartTotal,2) ?></span></span></div>
+            <div style="display:flex; justify-content:space-between;"><span data-translate="shipping">Shipping</span>: <span id="orderShipping"><?= $freeShippingEligible ? 'FREE' : ('€' . number_format($displayShippingCost,2)) ?></span></div>
+            <div style="display:flex; justify-content:space-between; font-weight:bold; margin-top:15px;"><span data-translate="total">Total</span>: <span>&euro;<span id="orderTotal"><?= number_format($displayTotal,2) ?></span></span></div>
         </div>
     </div>
 </div>
+<script>
+(function () {
+    var freeThreshold = <?= json_encode((float)$freeShippingThreshold) ?>;
+    var subtotal = <?= json_encode((float)$cartTotal) ?>;
+    var shippingRates = <?= json_encode($shippingRates) ?>;
+    var courierEl = document.querySelector('select[name="courier"]');
+    var speedEls = document.querySelectorAll('input[name="shipping_speed"]');
+    var shippingOut = document.getElementById('orderShipping');
+    var totalOut = document.getElementById('orderTotal');
+    var btnTotalOut = document.getElementById('placeOrderTotal');
+
+    function selectedSpeed() {
+        var checked = document.querySelector('input[name="shipping_speed"]:checked');
+        return checked ? checked.value : 'standard';
+    }
+
+    function updateTotals() {
+        var shippingCost = 0;
+        if (subtotal < freeThreshold) {
+            var courier = courierEl ? courierEl.value : '';
+            var speed = selectedSpeed();
+            if (shippingRates[courier] && typeof shippingRates[courier][speed] !== 'undefined') {
+                shippingCost = Number(shippingRates[courier][speed]) || 0;
+            }
+        }
+        var total = subtotal + shippingCost;
+        if (shippingOut) shippingOut.textContent = shippingCost === 0 ? 'FREE' : ('€' + shippingCost.toFixed(2));
+        if (totalOut) totalOut.textContent = total.toFixed(2);
+        if (btnTotalOut) btnTotalOut.textContent = total.toFixed(2);
+    }
+
+    if (courierEl) courierEl.addEventListener('change', updateTotals);
+    speedEls.forEach(function (el) { el.addEventListener('change', updateTotals); });
+    updateTotals();
+})();
+</script>
 <?php
 $footerPath = __DIR__ . '/../include/footer.php';
 if (file_exists($footerPath)) {
@@ -453,3 +484,4 @@ if (file_exists($footerPath)) {
     echo "</body></html>";
 }
 ?>
+

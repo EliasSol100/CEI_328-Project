@@ -72,6 +72,27 @@ $r = mysqli_query(
 );
 if ($r) { while ($row = mysqli_fetch_assoc($r)) $recentOrders[] = $row; }
 
+$adminNotifications = [];
+$unreadCount = 0;
+$tableCheck = mysqli_query($conn, "SHOW TABLES LIKE 'admin_notifications'");
+if ($tableCheck && mysqli_num_rows($tableCheck) > 0) {
+    $nr = mysqli_query(
+        $conn,
+        "SELECT id, message, created_at, is_read
+         FROM admin_notifications
+         ORDER BY id DESC
+         LIMIT 5"
+    );
+    if ($nr) {
+        while ($row = mysqli_fetch_assoc($nr)) {
+            $adminNotifications[] = $row;
+            if ((int)$row['is_read'] === 0) {
+                $unreadCount++;
+            }
+        }
+    }
+}
+
 $statusLabel = [
     'pending'       => ['label'=>'pending',       'badge'=>'badge-muted'],
     'accepted'      => ['label'=>'accepted',      'badge'=>'badge-accepted'],
@@ -109,6 +130,27 @@ $jsonValues = json_encode($trendValues);
     </div>
 
     <div class="content-body">
+
+      <?php if (!empty($adminNotifications)): ?>
+      <div class="alert-card alert-blue mb-6">
+        <div class="alert-title">
+          <i class="fas fa-bell"></i> Admin Notifications
+          <?php if ($unreadCount > 0): ?>
+            <span class="badge badge-red" style="margin-left:8px;"><?= (int)$unreadCount ?> new</span>
+          <?php endif; ?>
+        </div>
+        <div class="text-sm">
+          <?php foreach ($adminNotifications as $n): ?>
+            <div style="padding:6px 0;border-bottom:1px solid #dbeafe;">
+              <?= htmlspecialchars((string)$n['message']) ?>
+              <span class="text-muted" style="margin-left:6px;">
+                (<?= htmlspecialchars(date('m/d H:i', strtotime((string)$n['created_at']))) ?>)
+              </span>
+            </div>
+          <?php endforeach; ?>
+        </div>
+      </div>
+      <?php endif; ?>
 
       <!-- ── Stat cards ── -->
       <div class="grid-4 mb-6">

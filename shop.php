@@ -371,6 +371,7 @@ if (!in_array($selectedCategory, $validCategories, true)) {
                                  data-category="<?= htmlspecialchars($catName) ?>"
                                  data-price="<?= (float)$p['basePrice'] ?>">
                             <div class="shop-product-image" style="<?= $imgStyle ?>">
+                                <a class="shop-product-link" href="product.php?id=<?= $pid ?>" aria-label="View <?= htmlspecialchars($p['nameEN']) ?>"></a>
                                 <form method="post" action="shop.php">
                                     <input type="hidden" name="action" value="toggle_wishlist_item">
                                     <input type="hidden" name="product_id" value="<?= $pid ?>">
@@ -380,7 +381,7 @@ if (!in_array($selectedCategory, $validCategories, true)) {
                                 </form>
                             </div>
                             <div class="shop-product-info">
-                                <h3 class="shop-product-name"><?= htmlspecialchars($p['nameEN']) ?></h3>
+                                <h3 class="shop-product-name"><a href="product.php?id=<?= $pid ?>"><?= htmlspecialchars($p['nameEN']) ?></a></h3>
                                 <div class="shop-price-row">
                                     <span class="shop-price">€<?= number_format((float)$p['basePrice'], 0) ?></span>
                                     <?php if ($p['cartStatus'] === 'made_to_order'): ?>

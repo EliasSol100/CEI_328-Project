@@ -119,6 +119,17 @@ $activePage = '';
                         </div>
                         <?php endif; ?>
                         <div class="cart-item-unit-price">€<?= number_format((float)($item['product']['basePrice'] ?? 0), 2) ?> <span data-translate="each">each</span></div>
+                        <?php
+                            $addonBits = [];
+                            if (!empty($item['addons']['giftWrapping'])) $addonBits[] = 'Gift Wrapping (+€2.00)';
+                            if (!empty($item['addons']['giftBagFlag'])) $addonBits[] = 'Gift Bag (+€1.50)';
+                            if (!empty($item['addons']['giftMessage'])) $addonBits[] = 'Note: ' . (string)$item['addons']['giftMessage'];
+                        ?>
+                        <?php if (!empty($addonBits)): ?>
+                        <div class="cart-item-variant" style="margin-top:6px;">
+                            <?= htmlspecialchars(implode(' | ', $addonBits)) ?>
+                        </div>
+                        <?php endif; ?>
                     </div>
 
                     <div class="cart-item-controls">

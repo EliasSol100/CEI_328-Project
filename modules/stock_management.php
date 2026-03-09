@@ -1,226 +1,236 @@
 <?php
 /**
  * Stock Management Module
- * 
- * Handles stock deduction after order completion, threshold checks,
- * admin notifications, and audit logging.
- * 
+ *
+ * Handles stock deduction after order placement and triggers threshold checks.
+ *
  * @package CreationsByAthina
  */
 
-// Prevent direct access if needed
+// Prevent direct access if needed.
 if (!defined('INCLUDE_CHECK') && !defined('STOCK_MANAGEMENT_DIRECT')) {
     die('Direct access not permitted');
 }
 
+// Reuse threshold logic module (3.2.2.6).
+require_once __DIR__ . '/stock_threshold.php';
+
 /**
- * Deduct stock for all items in a confirmed order.
- * 
- * This function should be called **within an active transaction**
- * to ensure atomicity with order creation.
+ * Deduct stock for all items in an order and run threshold checks.
  *
- * @param int      $orderId The ID of the order (order_id column)
- * @param mysqli   $conn    Active database connection (already in transaction)
- * @throws Exception If any error occurs (rollback handled by caller)
- */
-function deductStockAfterOrderCompletion($orderId, $conn) {
-    // 1. Verify order exists and status allows stock deduction
-    $stmt = $conn->prepare("SELECT status FROM orders WHERE order_id = ?");
-    if (!$stmt) {
-        throw new Exception("Failed to prepare order check: " . $conn->error);
-    }
-    $stmt->bind_param("i", $orderId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    if ($result->num_rows === 0) {
-        throw new Exception("Order #$orderId not found.");
-    }
-    $order = $result->fetch_assoc();
-    $allowedStatuses = ['confirmed', 'paid', 'processing']; // adjust as needed
-    if (!in_array($order['status'], $allowedStatuses)) {
-        throw new Exception("Order #$orderId status '{$order['status']}' not eligible for stock deduction.");
-    }
-    $stmt->close();
-
-    // 2. Fetch all order items
-    $stmt = $conn->prepare("SELECT product_id, variation_id, quantity FROM order_items WHERE order_id = ?");
-    if (!$stmt) {
-        throw new Exception("Failed to prepare order items fetch: " . $conn->error);
-    }
-    $stmt->bind_param("i", $orderId);
-    $stmt->execute();
-    $items = $stmt->get_result();
-    $stmt->close();
-
-    if ($items->num_rows === 0) {
-        throw new Exception("No items found for order #$orderId.");
-    }
-
-    // 3. Process each item
-    while ($item = $items->fetch_assoc()) {
-        $productId   = (int)$item['product_id'];
-        $variationId = (int)$item['variation_id'];
-        $qtyOrdered  = (int)$item['quantity'];
-
-        // Skip if variation_id is null (maybe product without variations)
-        if (!$variationId) {
-            continue; // or handle differently if you have a separate product stock
-        }
-
-        // Lock the stock row to prevent race conditions
-        $stockStmt = $conn->prepare("SELECT quantity FROM variation_stock WHERE variation_id = ? FOR UPDATE");
-        if (!$stockStmt) {
-            throw new Exception("Failed to prepare stock select: " . $conn->error);
-        }
-        $stockStmt->bind_param("i", $variationId);
-        $stockStmt->execute();
-        $stockRes = $stockStmt->get_result();
-        if ($stockRes->num_rows === 0) {
-            // If no stock record exists, create one with 0 stock? Or throw?
-            // Better to throw because product should have stock record.
-            throw new Exception("Stock record not found for variation ID: $variationId");
-        }
-        $stockRow = $stockRes->fetch_assoc();
-        $currentStock = (int)$stockRow['quantity'];
-        $newStock = $currentStock - $qtyOrdered;
-
-        if ($newStock < 0) {
-            throw new Exception("Insufficient stock for variation ID: $variationId (ordered: $qtyOrdered, available: $currentStock)");
-        }
-
-        // Update stock quantity
-        $updateStmt = $conn->prepare("UPDATE variation_stock SET quantity = ? WHERE variation_id = ?");
-        if (!$updateStmt) {
-            throw new Exception("Failed to prepare stock update: " . $conn->error);
-        }
-        $updateStmt->bind_param("ii", $newStock, $variationId);
-        if (!$updateStmt->execute()) {
-            throw new Exception("Failed to update stock for variation ID: $variationId");
-        }
-        $updateStmt->close();
-
-        // Log the stock change for audit
-        logStockChange($conn, $orderId, $productId, $variationId, $qtyOrdered, $currentStock, $newStock);
-
-        // Check stock thresholds and trigger notifications/status updates
-        checkStockThreshold($conn, $productId, $variationId, $newStock);
-    }
-
-    // Optionally mark order as stock_deducted (if column exists)
-    // $markStmt = $conn->prepare("UPDATE orders SET stock_deducted = 1 WHERE order_id = ?");
-    // if ($markStmt) {
-    //     $markStmt->bind_param("i", $orderId);
-    //     $markStmt->execute();
-    //     $markStmt->close();
-    // }
-}
-
-/**
- * Check stock level against threshold and update product status.
- * 
+ * IMPORTANT:
+ * - Must be called inside an active DB transaction.
+ * - Uses current project schema: orders/order_items/variation_stock/products.
+ *
+ * @param int $orderId
  * @param mysqli $conn
- * @param int    $productId
- * @param int    $variationId
- * @param int    $newStock
  * @throws Exception
  */
-function checkStockThreshold($conn, $productId, $variationId, $newStock) {
-    // Get threshold from products table (default 5 if not set)
-    $threshold = 5;
-    $productName = "Product #$productId";
+function deductStockAfterOrderCompletion(int $orderId, mysqli $conn): void {
+    // 1) Verify order exists and status is eligible for stock handling.
+    $orderStmt = $conn->prepare("SELECT status FROM orders WHERE orderID = ?");
+    if (!$orderStmt) {
+        throw new Exception("Failed to prepare order check: " . $conn->error);
+    }
+    $orderStmt->bind_param("i", $orderId);
+    $orderStmt->execute();
+    $orderRes = $orderStmt->get_result();
+    if (!$orderRes || $orderRes->num_rows === 0) {
+        $orderStmt->close();
+        throw new Exception("Order #$orderId not found.");
+    }
+    $order = $orderRes->fetch_assoc();
+    $orderStmt->close();
 
-    $stmt = $conn->prepare("SELECT low_stock_threshold, name FROM products WHERE id = ?");
-    if ($stmt) {
-        $stmt->bind_param("i", $productId);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        if ($row = $result->fetch_assoc()) {
-            $threshold = (int)($row['low_stock_threshold'] ?? $threshold);
-            $productName = $row['name'] ?? $productName;
+    $allowedStatuses = ['accepted', 'in_production', 'shipped', 'completed'];
+    if (!in_array((string)$order['status'], $allowedStatuses, true)) {
+        return;
+    }
+
+    // 2) Read order lines.
+    $itemsStmt = $conn->prepare("
+        SELECT productID, variationID, quantity
+        FROM order_items
+        WHERE orderID = ?
+    ");
+    if (!$itemsStmt) {
+        throw new Exception("Failed to prepare order items query: " . $conn->error);
+    }
+    $itemsStmt->bind_param("i", $orderId);
+    $itemsStmt->execute();
+    $itemsRes = $itemsStmt->get_result();
+    $itemsStmt->close();
+
+    if (!$itemsRes || $itemsRes->num_rows === 0) {
+        throw new Exception("No order items found for order #$orderId.");
+    }
+
+    // 3) Deduct per line.
+    while ($item = $itemsRes->fetch_assoc()) {
+        $productId = (int)$item['productID'];
+        $variationId = isset($item['variationID']) ? (int)$item['variationID'] : 0;
+        $qtyOrdered = max(1, (int)$item['quantity']);
+
+        if ($variationId > 0) {
+            handleVariantStockDeduction($conn, $orderId, $productId, $variationId, $qtyOrdered);
+        } else {
+            handleProductStockDeduction($conn, $orderId, $productId, $qtyOrdered);
         }
-        $stmt->close();
-    }
-
-    // Determine status
-    $status = 'available';
-    if ($newStock <= 0) {
-        $status = 'out_of_stock';
-    } elseif ($newStock <= $threshold) {
-        $status = 'low_stock';
-    }
-
-    // Update stock_status in variation_stock (if column exists)
-    $updateStatus = $conn->prepare("UPDATE variation_stock SET stock_status = ? WHERE variation_id = ?");
-    if ($updateStatus) {
-        $updateStatus->bind_param("si", $status, $variationId);
-        $updateStatus->execute();
-        $updateStatus->close();
-    }
-
-    // If out of stock, deactivate the variation so it can't be ordered.
-    if ($status === 'out_of_stock') {
-        $disableStmt = $conn->prepare("UPDATE product_variations SET is_active = 0 WHERE id = ?");
-        if ($disableStmt) {
-            $disableStmt->bind_param("i", $variationId);
-            $disableStmt->execute();
-            $disableStmt->close();
-        }
-
-        // Notify admin about out of stock
-        createNotification($conn, "Product '$productName' (variation ID: $variationId) is now OUT OF STOCK.");
-    } elseif ($status === 'low_stock') {
-        createNotification($conn, "Product '$productName' (variation ID: $variationId) is LOW ON STOCK ($newStock left).");
     }
 }
 
 /**
- * Create an admin notification.
- * 
+ * Deduct stock for a specific variation and trigger threshold checks.
+ *
  * @param mysqli $conn
- * @param string $message
+ * @param int $orderId
+ * @param int $productId
+ * @param int $variationId
+ * @param int $qtyOrdered
+ * @throws Exception
  */
-function createNotification($conn, $message) {
-    $stmt = $conn->prepare("INSERT INTO admin_notifications (message, created_at, is_read) VALUES (?, NOW(), 0)");
-    if ($stmt) {
-        $stmt->bind_param("s", $message);
-        $stmt->execute();
-        $stmt->close();
-    } else {
-        // If table doesn't exist, log error but don't break
-        error_log("Failed to create notification: " . $conn->error);
+function handleVariantStockDeduction(mysqli $conn, int $orderId, int $productId, int $variationId, int $qtyOrdered): void {
+    // Lock variation stock row to avoid race conditions.
+    $stockStmt = $conn->prepare("
+        SELECT quantityAvailable, lowStockThreshold
+        FROM variation_stock
+        WHERE variationID = ?
+        FOR UPDATE
+    ");
+    if (!$stockStmt) {
+        throw new Exception("Failed to prepare variation stock query: " . $conn->error);
     }
+    $stockStmt->bind_param("i", $variationId);
+    $stockStmt->execute();
+    $stockRes = $stockStmt->get_result();
+    if (!$stockRes || $stockRes->num_rows === 0) {
+        $stockStmt->close();
+        throw new Exception("Stock record not found for variation ID: $variationId");
+    }
+
+    $stockRow = $stockRes->fetch_assoc();
+    $stockStmt->close();
+
+    $oldStock = (int)$stockRow['quantityAvailable'];
+    $threshold = (int)$stockRow['lowStockThreshold'];
+    $newStock = $oldStock - $qtyOrdered;
+
+    if ($newStock < 0) {
+        throw new Exception("Insufficient stock for variation ID: $variationId (ordered: $qtyOrdered, available: $oldStock)");
+    }
+
+    $updStmt = $conn->prepare("UPDATE variation_stock SET quantityAvailable = ? WHERE variationID = ?");
+    if (!$updStmt) {
+        throw new Exception("Failed to prepare variation stock update: " . $conn->error);
+    }
+    $updStmt->bind_param("ii", $newStock, $variationId);
+    if (!$updStmt->execute()) {
+        $updStmt->close();
+        throw new Exception("Failed to update variation stock for variation ID: $variationId");
+    }
+    $updStmt->close();
+
+    logStockChange($conn, $orderId, $productId, $variationId, $qtyOrdered, $oldStock, $newStock);
+
+    // Trigger 3.2.2.6 function (stock_threshold module).
+    checkStockThreshold($conn, $variationId, $newStock, $threshold);
 }
 
 /**
- * Log stock change for audit trail.
- * 
+ * Deduct stock from products.inventory when item has no variation.
+ *
  * @param mysqli $conn
- * @param int    $orderId
- * @param int    $productId
- * @param int    $variationId
- * @param int    $quantityChange
- * @param int    $oldStock
- * @param int    $newStock
+ * @param int $orderId
+ * @param int $productId
+ * @param int $qtyOrdered
+ * @throws Exception
  */
-function logStockChange($conn, $orderId, $productId, $variationId, $quantityChange, $oldStock, $newStock) {
-    $action = "Stock deducted for order #$orderId";
+function handleProductStockDeduction(mysqli $conn, int $orderId, int $productId, int $qtyOrdered): void {
+    $pStmt = $conn->prepare("
+        SELECT inventory, cartStatus
+        FROM products
+        WHERE productID = ?
+        FOR UPDATE
+    ");
+    if (!$pStmt) {
+        throw new Exception("Failed to prepare product stock query: " . $conn->error);
+    }
+    $pStmt->bind_param("i", $productId);
+    $pStmt->execute();
+    $pRes = $pStmt->get_result();
+    if (!$pRes || $pRes->num_rows === 0) {
+        $pStmt->close();
+        throw new Exception("Product #$productId not found during stock deduction.");
+    }
+    $pRow = $pRes->fetch_assoc();
+    $pStmt->close();
+
+    $cartStatus = (string)$pRow['cartStatus'];
+    if ($cartStatus === 'made_to_order') {
+        // Made-to-order products do not use inventory deduction.
+        return;
+    }
+
+    $oldStock = (int)$pRow['inventory'];
+    $newStock = $oldStock - $qtyOrdered;
+    if ($newStock < 0) {
+        throw new Exception("Insufficient stock for product ID: $productId (ordered: $qtyOrdered, available: $oldStock)");
+    }
+
+    $upd = $conn->prepare("UPDATE products SET inventory = ? WHERE productID = ?");
+    if (!$upd) {
+        throw new Exception("Failed to prepare product stock update: " . $conn->error);
+    }
+    $upd->bind_param("ii", $newStock, $productId);
+    if (!$upd->execute()) {
+        $upd->close();
+        throw new Exception("Failed to update product stock for product ID: $productId");
+    }
+    $upd->close();
+
+    logStockChange($conn, $orderId, $productId, null, $qtyOrdered, $oldStock, $newStock);
+}
+
+/**
+ * Log stock deduction event in audit_logs using the current project schema.
+ *
+ * @param mysqli $conn
+ * @param int $orderId
+ * @param int $productId
+ * @param int|null $variationId
+ * @param int $quantityChange
+ * @param int $oldStock
+ * @param int $newStock
+ */
+function logStockChange(
+    mysqli $conn,
+    int $orderId,
+    int $productId,
+    ?int $variationId,
+    int $quantityChange,
+    int $oldStock,
+    int $newStock
+): void {
     $details = json_encode([
-        'product_id'   => $productId,
+        'order_id' => $orderId,
+        'product_id' => $productId,
         'variation_id' => $variationId,
-        'quantity'     => $quantityChange,
-        'old_stock'    => $oldStock,
-        'new_stock'    => $newStock
+        'quantity' => $quantityChange,
+        'old_stock' => $oldStock,
+        'new_stock' => $newStock
     ]);
-
     $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+    $entityType = $variationId ? 'variation' : 'product';
+    $entityId = $variationId ?: $productId;
 
-    $stmt = $conn->prepare("INSERT INTO audit_logs (user_id, action, details, ip_address, created_at) VALUES (NULL, ?, ?, ?, NOW())");
+    $stmt = $conn->prepare("
+        INSERT INTO audit_logs (userID, role, actionType, entityType, entityID, ipAddress, detailsJSON)
+        VALUES (NULL, 'system', 'stock_deducted', ?, ?, ?, ?)
+    ");
     if ($stmt) {
-        $stmt->bind_param("sss", $action, $details, $ip);
+        $stmt->bind_param("siss", $entityType, $entityId, $ip, $details);
         $stmt->execute();
         $stmt->close();
-    } else {
-        error_log("Failed to log stock change: " . $conn->error);
     }
 }
-?>
+
