@@ -126,7 +126,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    header('Location: customer_management.php?flash=' . urlencode($flash));
+    $redirect = ['flash' => $flash];
+    $returnQ = trim((string)($_POST['q'] ?? ''));
+    $returnStatusFilter = trim((string)($_POST['status_filter'] ?? ''));
+    $returnRoleFilter = trim((string)($_POST['role_filter'] ?? ''));
+    if ($returnQ !== '') {
+        $redirect['q'] = $returnQ;
+    }
+    if ($returnStatusFilter !== '') {
+        $redirect['status_filter'] = $returnStatusFilter;
+    }
+    if ($returnRoleFilter !== '') {
+        $redirect['role_filter'] = $returnRoleFilter;
+    }
+    header('Location: customer_management.php?' . http_build_query($redirect));
     exit;
 }
 
@@ -137,17 +150,94 @@ if (isset($_GET['flash'])) {
 /* ─────────────────────────────────────────────
  * Load all customers
  * ───────────────────────────────────────────── */
-$customers = [];
-$r = mysqli_query(
-    $conn,
-    "SELECT userID, full_name, email, role, is_verified, phone, country, city
-     FROM users
-     ORDER BY userID DESC"
-);
-if ($r) {
-    while ($row = mysqli_fetch_assoc($r)) {
-        $customers[] = $row;
+$searchTerm = trim((string)($_GET['q'] ?? ''));
+$statusFilter = trim((string)($_GET['status_filter'] ?? ''));
+$roleFilter = trim((string)($_GET['role_filter'] ?? ''));
+$allowedStatusFilters = ['verified', 'unverified'];
+if (!in_array($statusFilter, $allowedStatusFilters, true)) {
+    $statusFilter = '';
+}
+$statusFilterOptions = [
+    '' => 'All Verification Statuses',
+    'verified' => 'Verified',
+    'unverified' => 'Unverified',
+];
+
+$roleFilterOptions = [
+    '' => 'All Roles',
+    'user' => 'Customer',
+    'admin' => 'Admin',
+];
+$rolesRes = mysqli_query($conn, "SELECT DISTINCT role FROM users WHERE role IS NOT NULL AND role <> '' ORDER BY role ASC");
+if ($rolesRes) {
+    while ($roleRow = mysqli_fetch_assoc($rolesRes)) {
+        $roleValue = trim((string)($roleRow['role'] ?? ''));
+        if ($roleValue === '' || isset($roleFilterOptions[$roleValue])) {
+            continue;
+        }
+        $roleFilterOptions[$roleValue] = ucwords(str_replace('_', ' ', $roleValue));
     }
+}
+$allowedRoleFilters = array_keys($roleFilterOptions);
+if (!in_array($roleFilter, $allowedRoleFilters, true)) {
+    $roleFilter = '';
+}
+
+$customers = [];
+$customersSql = "
+    SELECT userID, full_name, email, username, role, is_verified, phone, country, city
+    FROM users
+";
+$conditions = [];
+$bindTypes = '';
+$bindValues = [];
+
+if ($searchTerm !== '') {
+    $conditions[] = "(
+        full_name LIKE ? OR
+        email LIKE ? OR
+        username LIKE ? OR
+        phone LIKE ? OR
+        country LIKE ? OR
+        city LIKE ? OR
+        CAST(userID AS CHAR) LIKE ?
+    )";
+    $like = '%' . $searchTerm . '%';
+    $bindTypes .= 'sssssss';
+    array_push($bindValues, $like, $like, $like, $like, $like, $like, $like);
+}
+if ($statusFilter !== '') {
+    $conditions[] = "is_verified = ?";
+    $bindTypes .= 'i';
+    $bindValues[] = $statusFilter === 'verified' ? 1 : 0;
+}
+if ($roleFilter !== '') {
+    $conditions[] = "role = ?";
+    $bindTypes .= 's';
+    $bindValues[] = $roleFilter;
+}
+if (!empty($conditions)) {
+    $customersSql .= ' WHERE ' . implode(' AND ', $conditions);
+}
+$customersSql .= " ORDER BY userID DESC";
+
+$customersStmt = mysqli_prepare($conn, $customersSql);
+if ($customersStmt) {
+    if ($bindTypes !== '') {
+        $bindParams = [$customersStmt, $bindTypes];
+        foreach ($bindValues as $idx => $value) {
+            $bindParams[] = &$bindValues[$idx];
+        }
+        call_user_func_array('mysqli_stmt_bind_param', $bindParams);
+    }
+    mysqli_stmt_execute($customersStmt);
+    $customersRes = mysqli_stmt_get_result($customersStmt);
+    if ($customersRes) {
+        while ($row = mysqli_fetch_assoc($customersRes)) {
+            $customers[] = $row;
+        }
+    }
+    mysqli_stmt_close($customersStmt);
 }
 
 /* ─────────────────────────────────────────────
@@ -197,11 +287,64 @@ if (isset($_GET['edit'])) {
         </div>
       <?php endif; ?>
 
+      <form method="GET" class="search-form mb-4">
+        <div class="search-input-wrap">
+          <i class="fas fa-search"></i>
+          <input
+            type="text"
+            name="q"
+            class="form-input search-input"
+            placeholder="Search users by name, email, username, phone..."
+            value="<?= htmlspecialchars($searchTerm) ?>">
+        </div>
+        <select name="role_filter" class="form-input search-status-select">
+          <?php foreach ($roleFilterOptions as $value => $label): ?>
+            <option value="<?= htmlspecialchars($value) ?>" <?= $roleFilter === $value ? 'selected' : '' ?>>
+              <?= htmlspecialchars($label) ?>
+            </option>
+          <?php endforeach; ?>
+        </select>
+        <select name="status_filter" class="form-input search-status-select">
+          <?php foreach ($statusFilterOptions as $value => $label): ?>
+            <option value="<?= htmlspecialchars($value) ?>" <?= $statusFilter === $value ? 'selected' : '' ?>>
+              <?= htmlspecialchars($label) ?>
+            </option>
+          <?php endforeach; ?>
+        </select>
+        <button type="submit" class="btn-secondary">
+          <i class="fas fa-magnifying-glass"></i> Search
+        </button>
+        <?php if ($searchTerm !== '' || $statusFilter !== '' || $roleFilter !== ''): ?>
+          <a href="customer_management.php" class="btn-secondary">
+            <i class="fas fa-xmark"></i> Clear
+          </a>
+        <?php endif; ?>
+      </form>
+
+      <?php if ($searchTerm !== '' || $statusFilter !== '' || $roleFilter !== ''): ?>
+        <p class="text-sm text-muted mb-4">
+          Found <?= (int)count($customers) ?> user(s)
+          <?php if ($searchTerm !== ''): ?>
+            for "<strong><?= htmlspecialchars($searchTerm) ?></strong>"
+          <?php endif; ?>
+          <?php if ($roleFilter !== ''): ?>
+            with role "<strong><?= htmlspecialchars($roleFilterOptions[$roleFilter] ?? $roleFilter) ?></strong>"
+          <?php endif; ?>
+          <?php if ($statusFilter !== ''): ?>
+            with status "<strong><?= htmlspecialchars($statusFilterOptions[$statusFilter] ?? $statusFilter) ?></strong>"
+          <?php endif; ?>.
+        </p>
+      <?php endif; ?>
+
       <div class="card">
         <div class="card-title">All Customers</div>
 
         <?php if (empty($customers)): ?>
-          <p class="text-muted text-sm">No customers found yet.</p>
+          <p class="text-muted text-sm">
+            <?= ($searchTerm !== '' || $statusFilter !== '' || $roleFilter !== '')
+                ? 'No matching users found for your search.'
+                : 'No customers found yet.' ?>
+          </p>
         <?php else: ?>
           <div style="overflow-x:auto">
             <table class="data-table">
@@ -245,13 +388,16 @@ if (isset($_GET['edit'])) {
                     <a href="customer_order_history.php?<?= htmlspecialchars($historyQuery) ?>" class="btn-secondary btn-sm">
                       <i class="fas fa-clock-rotate-left"></i> View Order History
                     </a>
-                    <a href="?edit=<?= (int)$c['userID'] ?>" class="btn-edit">
+                    <a href="?edit=<?= (int)$c['userID'] ?><?= ($searchTerm !== '' || $statusFilter !== '' || $roleFilter !== '') ? '&' . http_build_query(['q' => $searchTerm, 'status_filter' => $statusFilter, 'role_filter' => $roleFilter]) : '' ?>" class="btn-edit">
                       <i class="fas fa-pen"></i> Edit
                     </a>
                     <form method="POST" style="display:inline"
                           onsubmit="return confirmDelete('Delete this customer account?')">
                       <input type="hidden" name="action" value="delete_user">
                       <input type="hidden" name="userID" value="<?= (int)$c['userID'] ?>">
+                      <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
+                      <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
+                      <input type="hidden" name="role_filter" value="<?= htmlspecialchars($roleFilter) ?>">
                       <button type="submit" class="btn-delete">
                         <i class="fas fa-trash"></i> Delete
                       </button>
@@ -279,6 +425,9 @@ if (isset($_GET['edit'])) {
 
     <form method="POST">
       <input type="hidden" name="action" value="add_user">
+      <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
+      <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
+      <input type="hidden" name="role_filter" value="<?= htmlspecialchars($roleFilter) ?>">
 
       <div class="form-grid-2">
         <div class="form-group">
@@ -349,6 +498,9 @@ if (isset($_GET['edit'])) {
     <form method="POST">
       <input type="hidden" name="action" value="edit_user">
       <input type="hidden" name="userID" value="<?= (int)$editUser['userID'] ?>">
+      <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
+      <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
+      <input type="hidden" name="role_filter" value="<?= htmlspecialchars($roleFilter) ?>">
 
       <div class="form-grid-2">
         <div class="form-group">
@@ -405,7 +557,7 @@ if (isset($_GET['edit'])) {
       </div>
 
       <div class="modal-footer">
-        <a href="customer_management.php" class="btn-cancel">Cancel</a>
+        <a href="customer_management.php<?= ($searchTerm !== '' || $statusFilter !== '' || $roleFilter !== '') ? '?' . http_build_query(['q' => $searchTerm, 'status_filter' => $statusFilter, 'role_filter' => $roleFilter]) : '' ?>" class="btn-cancel">Cancel</a>
         <button type="submit" class="btn-save">Save Changes</button>
       </div>
     </form>

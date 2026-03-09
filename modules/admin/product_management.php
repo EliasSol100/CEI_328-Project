@@ -144,7 +144,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    header('Location: product_management.php?flash=' . urlencode($flash));
+    $redirect = ['flash' => $flash];
+    $returnQ = trim((string)($_POST['q'] ?? ''));
+    $returnStatusFilter = trim((string)($_POST['status_filter'] ?? ''));
+    if ($returnQ !== '') {
+        $redirect['q'] = $returnQ;
+    }
+    if ($returnStatusFilter !== '') {
+        $redirect['status_filter'] = $returnStatusFilter;
+    }
+    header('Location: product_management.php?' . http_build_query($redirect));
     exit;
 }
 
@@ -153,12 +162,82 @@ if (isset($_GET['flash'])) {
 }
 
 /* ── Load products ── */
+$searchTerm = trim((string)($_GET['q'] ?? ''));
+$statusFilter = trim((string)($_GET['status_filter'] ?? ''));
+$allowedStatusFilters = ['active', 'low_stock', 'out_of_stock', 'made_to_order', 'discontinued'];
+if (!in_array($statusFilter, $allowedStatusFilters, true)) {
+    $statusFilter = '';
+}
 $products = [];
-$r = mysqli_query($conn, "SELECT * FROM products ORDER BY nameEN ASC");
-if ($r) {
-    while ($row = mysqli_fetch_assoc($r)) {
-        $products[] = $row;
+$productsSql = "SELECT * FROM products";
+if ($searchTerm !== '' && $statusFilter !== '') {
+    $productsSql .= " WHERE (
+        nameEN LIKE ? OR
+        nameGR LIKE ? OR
+        sku LIKE ? OR
+        category LIKE ? OR
+        cartStatus LIKE ? OR
+        CAST(productID AS CHAR) LIKE ? OR
+        descriptionEN LIKE ? OR
+        descriptionGR LIKE ?
+    ) AND cartStatus = ?";
+} elseif ($searchTerm !== '') {
+    $productsSql .= " WHERE
+        nameEN LIKE ? OR
+        nameGR LIKE ? OR
+        sku LIKE ? OR
+        category LIKE ? OR
+        cartStatus LIKE ? OR
+        CAST(productID AS CHAR) LIKE ? OR
+        descriptionEN LIKE ? OR
+        descriptionGR LIKE ?";
+} elseif ($statusFilter !== '') {
+    $productsSql .= " WHERE cartStatus = ?";
+}
+$productsSql .= " ORDER BY nameEN ASC";
+
+$productsStmt = mysqli_prepare($conn, $productsSql);
+if ($productsStmt) {
+    if ($searchTerm !== '' && $statusFilter !== '') {
+        $like = '%' . $searchTerm . '%';
+        mysqli_stmt_bind_param(
+            $productsStmt,
+            'sssssssss',
+            $like,
+            $like,
+            $like,
+            $like,
+            $like,
+            $like,
+            $like,
+            $like,
+            $statusFilter
+        );
+    } elseif ($searchTerm !== '') {
+        $like = '%' . $searchTerm . '%';
+        mysqli_stmt_bind_param(
+            $productsStmt,
+            'ssssssss',
+            $like,
+            $like,
+            $like,
+            $like,
+            $like,
+            $like,
+            $like,
+            $like
+        );
+    } elseif ($statusFilter !== '') {
+        mysqli_stmt_bind_param($productsStmt, 's', $statusFilter);
     }
+    mysqli_stmt_execute($productsStmt);
+    $productsRes = mysqli_stmt_get_result($productsStmt);
+    if ($productsRes) {
+        while ($row = mysqli_fetch_assoc($productsRes)) {
+            $products[] = $row;
+        }
+    }
+    mysqli_stmt_close($productsStmt);
 }
 
 /* ── Load one product for edit modal ── */
@@ -195,6 +274,14 @@ $statuses = [
     'out_of_stock'  => 'Out of Stock',
     'made_to_order' => 'Made to Order',
 ];
+$statusFilterOptions = [
+    ''              => 'All Statuses',
+    'active'        => 'In Stock',
+    'low_stock'     => 'Low Stock',
+    'out_of_stock'  => 'Out of Stock',
+    'made_to_order' => 'Made to Order',
+    'discontinued'  => 'Discontinued',
+];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -226,6 +313,45 @@ $statuses = [
         <?php [$type,$msg] = explode(':', $flash, 2); ?>
         <?php $flashClass = $type === 'ok' ? 'success' : ($type === 'warn' ? 'warning' : 'error'); ?>
         <div class="flash flash-<?= $flashClass ?>"><?= htmlspecialchars($msg) ?></div>
+      <?php endif; ?>
+
+      <form method="GET" class="search-form mb-4">
+        <div class="search-input-wrap">
+          <i class="fas fa-search"></i>
+          <input
+            type="text"
+            name="q"
+            class="form-input search-input"
+            placeholder="Search products by name, SKU, category, status..."
+            value="<?= htmlspecialchars($searchTerm) ?>">
+        </div>
+        <select name="status_filter" class="form-input search-status-select">
+          <?php foreach ($statusFilterOptions as $value => $label): ?>
+            <option value="<?= htmlspecialchars($value) ?>" <?= $statusFilter === $value ? 'selected' : '' ?>>
+              <?= htmlspecialchars($label) ?>
+            </option>
+          <?php endforeach; ?>
+        </select>
+        <button type="submit" class="btn-secondary">
+          <i class="fas fa-magnifying-glass"></i> Search
+        </button>
+        <?php if ($searchTerm !== '' || $statusFilter !== ''): ?>
+          <a href="product_management.php" class="btn-secondary">
+            <i class="fas fa-xmark"></i> Clear
+          </a>
+        <?php endif; ?>
+      </form>
+
+      <?php if ($searchTerm !== '' || $statusFilter !== ''): ?>
+        <p class="text-sm text-muted mb-4">
+          Found <?= (int)count($products) ?> product(s)
+          <?php if ($searchTerm !== ''): ?>
+            for "<strong><?= htmlspecialchars($searchTerm) ?></strong>"
+          <?php endif; ?>
+          <?php if ($statusFilter !== ''): ?>
+            with status "<strong><?= htmlspecialchars($statusFilterOptions[$statusFilter] ?? $statusFilter) ?></strong>"
+          <?php endif; ?>.
+        </p>
       <?php endif; ?>
 
       <div class="card">
@@ -268,13 +394,15 @@ $statuses = [
                 <td><span class="badge <?= $st['badge'] ?>"><?= $st['label'] ?></span></td>
                 <td><?= $p['cartStatus'] === 'made_to_order' ? 'N/A' : (int)$p['inventory'] ?></td>
                 <td style="text-align:right">
-                  <a href="?edit=<?= $p['productID'] ?>" class="btn-edit">
+                  <a href="?edit=<?= $p['productID'] ?><?= ($searchTerm !== '' || $statusFilter !== '') ? '&' . http_build_query(['q' => $searchTerm, 'status_filter' => $statusFilter]) : '' ?>" class="btn-edit">
                     <i class="fas fa-pen"></i> Edit
                   </a>
                   <form method="POST" style="display:inline"
                         onsubmit="return confirmDelete('Delete <?= htmlspecialchars(addslashes($p['nameEN'])) ?>?')">
                     <input type="hidden" name="action" value="delete">
                     <input type="hidden" name="productID" value="<?= $p['productID'] ?>">
+                    <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
+                    <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
                     <button type="submit" class="btn-delete">
                       <i class="fas fa-trash"></i> Delete
                     </button>
@@ -285,7 +413,9 @@ $statuses = [
             <?php if (empty($products)): ?>
               <tr>
                 <td colspan="7" class="text-muted" style="text-align:center;padding:32px 0;">
-                  No products yet. Click "Add Product" to get started.
+                  <?= ($searchTerm !== '' || $statusFilter !== '')
+                      ? 'No matching products found for your search.'
+                      : 'No products yet. Click "Add Product" to get started.' ?>
                 </td>
               </tr>
             <?php endif; ?>
@@ -304,6 +434,8 @@ $statuses = [
     <p class="modal-sub">Fill in the product details below.</p>
     <form method="POST" enctype="multipart/form-data">
       <input type="hidden" name="action" value="add">
+      <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
+      <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
       <div class="form-group">
         <label class="form-label">Product Photo</label>
         <input type="file" name="photo" class="form-input" accept="image/*">
@@ -383,6 +515,8 @@ $statuses = [
     <form method="POST" enctype="multipart/form-data">
       <input type="hidden" name="action" value="edit">
       <input type="hidden" name="productID" value="<?= $editProduct['productID'] ?>">
+      <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
+      <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
       <div class="form-group">
         <label class="form-label">Product Photo</label>
         <?php if (isset($images[$editProduct['productID']])): ?>
@@ -446,7 +580,7 @@ $statuses = [
         <input name="inventory" type="number" min="0" class="form-input" value="<?= (int)$editProduct['inventory'] ?>">
       </div>
       <div class="modal-footer">
-        <a href="product_management.php" class="btn-cancel">Cancel</a>
+        <a href="product_management.php<?= ($searchTerm !== '' || $statusFilter !== '') ? '?' . http_build_query(['q' => $searchTerm, 'status_filter' => $statusFilter]) : '' ?>" class="btn-cancel">Cancel</a>
         <button type="submit" class="btn-save">Save Changes</button>
       </div>
     </form>
