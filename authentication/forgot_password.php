@@ -18,13 +18,16 @@ $success = "";
  */
 function buildResetLink(string $token): string
 {
-    // Adjust this to your local / live URL if needed
     $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
     $host   = $_SERVER['HTTP_HOST'] ?? 'localhost';
-    // Path to reset_password.php inside /authentication
-    $path   = '/athina-eshop/authentication/reset_password.php';
+    $scriptName = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '/authentication/forgot_password.php');
+    $basePath   = rtrim(dirname($scriptName), '/');
+    if ($basePath === '') {
+        $basePath = '/authentication';
+    }
+    $path = $basePath . '/reset_password.php';
 
-    return "{$scheme}://{$host}{$path}?token={$token}";
+    return "{$scheme}://{$host}{$path}?token=" . rawurlencode($token);
 }
 
 if (isset($_POST["submit"])) {
