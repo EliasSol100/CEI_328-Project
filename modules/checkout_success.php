@@ -4,7 +4,11 @@ ini_set('display_errors', 1);
 session_start();
 
 if (!isset($_SESSION['checkout_result'])) {
-    header('Location: /CEI_328-Project/shop.php');
+    $projectRedirect = rtrim(str_replace('\\', '/', dirname(dirname($_SERVER['SCRIPT_NAME'] ?? ''))), '/');
+    if ($projectRedirect === '' || $projectRedirect === '.') {
+        $projectRedirect = '';
+    }
+    header('Location: ' . $projectRedirect . '/shop.php');
     exit;
 }
 $result = $_SESSION['checkout_result'];
@@ -26,15 +30,9 @@ if (file_exists($configPath)) {
 
 if (!$conn) die("Database connection failed");
 
-$root = $_SERVER['DOCUMENT_ROOT'];
-$project = '/CEI_328-Project';
-
-$headerPath = __DIR__ . '/../include/header.php';
-if (file_exists($headerPath)) {
-    $activePage = 'checkout-success';
-    include $headerPath;
-} else {
-    ?><!DOCTYPE html><html><head><title>Order Confirmed</title></head><body><?php
+$project = rtrim(str_replace('\\', '/', dirname(dirname($_SERVER['SCRIPT_NAME'] ?? ''))), '/');
+if ($project === '' || $project === '.') {
+    $project = '';
 }
 
 $orderDetails = null;
@@ -54,13 +52,16 @@ if (isset($result['order_id'])) {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Order Confirmed - <?= htmlspecialchars($system_title) ?></title>
     <link rel="stylesheet" href="<?= $project ?>/assets/styling/styles.css">
     <link rel="stylesheet" href="<?= $project ?>/assets/styling/header.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         .success-container { max-width: 800px; margin: 60px auto; padding: 0 20px; }
         .success-card { background: white; border-radius: 12px; padding: 40px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); text-align: center; }
-        .success-icon { width: 100px; height: 100px; background: #28a745; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 50px; margin: 0 auto 25px; }
+        .success-icon { width: 100px; height: 100px; background: #28a745; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 25px; }
+        .success-icon i { color: #fff; font-size: 52px; line-height: 1; }
         .order-number { font-size: 24px; font-weight: 700; color: #007bff; margin: 10px 0; padding: 10px 20px; background: #f0f8ff; display: inline-block; border-radius: 50px; }
         .shipping-message { background: #d4edda; color: #155724; padding: 15px; border-radius: 8px; margin: 25px 0; }
         .account-box { background: #cce5ff; color: #004085; padding: 25px; border-radius: 8px; margin: 25px 0; text-align: left; }
@@ -74,7 +75,14 @@ if (isset($result['order_id'])) {
         .email-note { background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 20px 0; }
     </style>
 </head>
-<body>
+<body class="site-page">
+<?php
+$headerPath = __DIR__ . '/../include/header.php';
+if (file_exists($headerPath)) {
+    $activePage = 'checkout-success';
+    include $headerPath;
+}
+?>
 <div class="success-container">
     <div class="success-card">
         <div class="success-icon"><i class="fas fa-check"></i></div>
@@ -138,7 +146,7 @@ if (isset($result['order_id'])) {
 $footerPath = __DIR__ . '/../include/footer.php';
 if (file_exists($footerPath)) {
     include $footerPath;
-} else {
-    echo "</body></html>";
 }
 ?>
+</body>
+</html>

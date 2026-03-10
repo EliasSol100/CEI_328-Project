@@ -22,8 +22,11 @@ if (!$conn || $conn->connect_error) {
     die("Database connection failed: " . ($conn->connect_error ?? 'Unknown error'));
 }
 
-// Define project root for asset URLs (used in HTML)
-$project = '/CEI_328-Project';
+// Build project root for URLs dynamically so the page works in nested folders too.
+$project = rtrim(str_replace('\\', '/', dirname(dirname($_SERVER['SCRIPT_NAME'] ?? ''))), '/');
+if ($project === '' || $project === '.') {
+    $project = '';
+}
 
 // ----- CSRF TOKEN -----
 if (empty($_SESSION['csrf_token'])) {
@@ -121,10 +124,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (!empty($_POST['shipping_postal_code'])) {
-        $postal = preg_replace('/[^0-9]/', '', $_POST['shipping_postal_code']);
-        if (!preg_match('/^[0-9]{5}$/', $postal)) {
-            $errors['shipping_postal_code'] = 'Postal code must be 5 digits';
+        $postal = preg_replace('/[^0-9]/', '', (string)$_POST['shipping_postal_code']);
+        $country = trim((string)($_POST['shipping_country'] ?? ''));
+        $isPostalValid = false;
+        $postalError = 'Postal code must be 4 or 5 digits.';
+
+        if ($country === 'Cyprus') {
+            $isPostalValid = (bool)preg_match('/^[0-9]{4}$/', $postal);
+            $postalError = 'Cyprus postal code must be exactly 4 digits.';
+        } elseif ($country === 'Greece') {
+            $isPostalValid = (bool)preg_match('/^[0-9]{5}$/', $postal);
+            $postalError = 'Greece postal code must be exactly 5 digits.';
+        } else {
+            // "Other EU" allows either 4 or 5 digits.
+            $isPostalValid = (bool)preg_match('/^[0-9]{4,5}$/', $postal);
         }
+
+        if (!$isPostalValid) {
+            $errors['shipping_postal_code'] = $postalError;
+        }
+
+        // Keep sanitized numeric value in-memory for re-render and order payload.
+        $_POST['shipping_postal_code'] = $postal;
+        $formData['shipping_postal_code'] = $postal;
     }
 
     if (empty($_POST['accept_terms'])) {
@@ -253,43 +275,307 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Checkout - <?= htmlspecialchars($system_title) ?></title>
     <link rel="stylesheet" href="<?= $project ?>/assets/styling/styles.css">
     <link rel="stylesheet" href="<?= $project ?>/assets/styling/header.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="<?= $project ?>/assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/translations.js') ?>" defer></script>
     <style>
-        .checkout-container { max-width: 1200px; margin: 40px auto; padding: 0 20px; }
-        .checkout-grid { display: grid; grid-template-columns: 1fr 380px; gap: 40px; }
-        .checkout-form, .checkout-form * { font-family: inherit; }
-        fieldset { border: 1px solid #e7dff1; padding: 25px; margin-bottom: 25px; border-radius: 12px; background: #fff; }
-        legend { font-weight: 600; padding: 0 15px; color: #5f4b77; }
-        .form-group { margin-bottom: 20px; }
-        .form-group label { display: block; margin-bottom: 8px; font-weight: 500; color: #3d3250; }
-        .form-group input:not([type="radio"]):not([type="checkbox"]), .form-group select, .form-group textarea {
+        .checkout-container {
+            max-width: 1160px;
+            margin: 36px auto 72px;
+            padding: 0 20px;
+        }
+
+        .checkout-title {
+            margin: 0 0 18px;
+            color: #2d184d;
+            font-size: clamp(1.9rem, 2.7vw, 2.4rem);
+            line-height: 1.1;
+            letter-spacing: 0.2px;
+        }
+
+        .checkout-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 360px;
+            gap: 28px;
+            align-items: start;
+        }
+
+        .checkout-form {
+            border: 1px solid #e6dff2;
+            border-radius: 18px;
+            padding: 24px;
+            background: #fff;
+            box-shadow: 0 12px 28px rgba(63, 32, 102, 0.08);
+        }
+
+        .checkout-form fieldset {
+            border: 1px solid #e5dcf2;
+            border-radius: 14px;
+            padding: 20px;
+            margin-bottom: 18px;
+            background: #fff;
+        }
+
+        .checkout-form legend {
+            color: #4e2f74;
+            font-weight: 700;
+            font-size: 14px;
+            padding: 0 10px;
+            letter-spacing: 0.2px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .form-group {
+            margin-bottom: 14px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #443058;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .form-group input:not([type="radio"]):not([type="checkbox"]),
+        .form-group select,
+        .form-group textarea {
             width: 100%;
-            padding: 12px;
-            border: 1px solid #d7d0e2;
-            border-radius: 8px;
-            color: #2f2441;
+            min-height: 46px;
+            border: 1px solid #d5cae8;
+            border-radius: 10px;
+            padding: 11px 13px;
+            color: #2f2342;
             background: #fff;
             outline: none;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
-        .form-group input:not([type="radio"]):not([type="checkbox"]):focus, .form-group select:focus, .form-group textarea:focus {
-            border-color: #b9a7d3;
-            box-shadow: 0 0 0 3px rgba(169, 142, 214, 0.15);
+
+        .form-group input:not([type="radio"]):not([type="checkbox"]):focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            border-color: #a879e2;
+            box-shadow: 0 0 0 3px rgba(168, 121, 226, 0.15);
         }
-        .checkout-form input[type="radio"], .checkout-form input[type="checkbox"] {
-            accent-color: #a066f0;
+
+        .form-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 18px;
         }
-        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .error { color: #dc3545; font-size: 14px; }
-        .error-field { border-color: #dc3545 !important; }
-        .free-shipping-notice { background: #d4edda; color: #155724; padding: 15px; border-radius: 8px; margin-bottom: 25px; text-align: center; }
-        .order-summary { background: #f8f9fa; padding: 25px; border-radius: 8px; }
-        .order-item { padding: 10px 0; border-bottom: 1px solid #e9ecef; }
-        .btn-primary { background: #007bff; color: white; padding: 14px; border: none; border-radius: 6px; width: 100%; font-size: 16px; font-weight: 600; cursor: pointer; }
-        .guest-notice { background: #e7f3ff; padding: 20px; border-radius: 8px; margin-bottom: 25px; }
+
+        .form-options.form-options-column {
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .option-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            color: #3a294f;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .checkout-form input[type="radio"],
+        .checkout-form input[type="checkbox"] {
+            accent-color: #8a4dd6;
+        }
+
+        .form-helper {
+            display: block;
+            margin-top: 6px;
+            color: #6e5e84;
+            font-size: 12px;
+            line-height: 1.35;
+        }
+
+        .error {
+            display: block;
+            margin-top: 7px;
+            color: #b42318;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .error-field {
+            border-color: #d64545 !important;
+            background: #fff7f7 !important;
+        }
+
+        .free-shipping-notice {
+            margin-bottom: 18px;
+            border: 1px solid #d0e9d8;
+            border-radius: 12px;
+            padding: 14px 16px;
+            text-align: center;
+            color: #185a35;
+            background: #e8f7ed;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .guest-notice {
+            margin-bottom: 16px;
+            border: 1px solid #cfe0ff;
+            border-radius: 12px;
+            padding: 14px 15px;
+            background: #ebf3ff;
+            color: #1e3a68;
+            font-size: 14px;
+        }
+
+        .guest-notice a {
+            color: #114a9c;
+            font-weight: 600;
+            text-decoration: underline;
+        }
+
+        .checkout-error {
+            margin-bottom: 16px;
+            border: 1px solid #f1aeb5;
+            border-radius: 12px;
+            background: #fcebed;
+            color: #8a1f2d;
+            padding: 14px 16px;
+            font-weight: 600;
+        }
+
+        .terms-row {
+            margin: 18px 0 14px;
+        }
+
+        .terms-label {
+            display: inline-flex;
+            align-items: flex-start;
+            gap: 8px;
+            color: #3f3058;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .btn-primary {
+            width: 100%;
+            border: none;
+            border-radius: 11px;
+            padding: 13px 16px;
+            background: linear-gradient(90deg, #8f54d9 0%, #5c2ea0 100%);
+            color: #fff;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            letter-spacing: 0.2px;
+            transition: transform 0.15s ease, box-shadow 0.2s ease;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 20px rgba(108, 58, 176, 0.28);
+        }
+
+        .order-summary {
+            position: sticky;
+            top: 90px;
+            border: 1px solid #e5dbf2;
+            border-radius: 16px;
+            padding: 22px;
+            background: linear-gradient(180deg, #fbf9ff 0%, #f5f1fb 100%);
+            box-shadow: 0 10px 24px rgba(61, 30, 98, 0.08);
+        }
+
+        .order-summary h2 {
+            margin: 0 0 12px;
+            color: #2f1d49;
+            font-size: 24px;
+            line-height: 1.2;
+        }
+
+        .order-item {
+            padding: 11px 0;
+            border-bottom: 1px solid #e6deef;
+        }
+
+        .order-item-main {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            color: #3c2a57;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .order-item-addons {
+            margin-top: 6px;
+            color: #6f5f85;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .summary-divider {
+            border: none;
+            border-top: 1px solid #ddd2ec;
+            margin: 15px 0 13px;
+        }
+
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            color: #432f60;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .summary-row-total {
+            margin-top: 14px;
+            padding-top: 12px;
+            border-top: 1px solid #d5c8e7;
+            color: #291747;
+            font-size: 18px;
+            font-weight: 800;
+        }
+
+        @media (max-width: 1024px) {
+            .checkout-container {
+                margin-top: 24px;
+            }
+
+            .checkout-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .order-summary {
+                position: static;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .checkout-container {
+                margin-bottom: 50px;
+                padding: 0 14px;
+            }
+
+            .checkout-form {
+                padding: 17px;
+            }
+
+            .checkout-form fieldset {
+                padding: 15px;
+            }
+
+            .form-row {
+                grid-template-columns: 1fr;
+                gap: 0;
+            }
+        }
     </style>
 </head>
 <body class="site-page">
@@ -301,12 +587,12 @@ if (file_exists($headerPath)) {
 }
 ?>
 <div class="checkout-container">
-    <h1 data-translate="checkoutTitle">Checkout</h1>
+    <h1 class="checkout-title" data-translate="checkoutTitle">Checkout</h1>
     <?php if ($shippingDifference > 0): ?>
         <div class="free-shipping-notice"><span data-translate="checkoutAdd">Add</span> &euro;<?= number_format($shippingDifference,2) ?> <span data-translate="checkoutMoreForFreeDelivery">more for FREE Delivery!</span></div>
     <?php endif; ?>
     <?php if ($error): ?>
-        <div style="background:#f8d7da;color:#721c24;padding:15px;border-radius:8px;"><?= htmlspecialchars($error) ?></div>
+        <div class="checkout-error"><?= htmlspecialchars($error) ?></div>
     <?php endif; ?>
     <div class="checkout-grid">
         <div class="checkout-form">
@@ -352,13 +638,24 @@ if (file_exists($headerPath)) {
                         </div>
                         <div class="form-group">
                             <label><span data-translate="checkoutPostalCode">Postal Code</span> *</label>
-                            <input type="text" name="shipping_postal_code" value="<?= htmlspecialchars($formData['shipping_postal_code']??'') ?>" class="<?= isset($errors['shipping_postal_code'])?'error-field':'' ?>" required>
+                            <input
+                                type="text"
+                                id="shipping_postal_code"
+                                name="shipping_postal_code"
+                                value="<?= htmlspecialchars($formData['shipping_postal_code']??'') ?>"
+                                class="<?= isset($errors['shipping_postal_code'])?'error-field':'' ?>"
+                                autocomplete="postal-code"
+                                inputmode="numeric"
+                                pattern="[0-9]{4,5}"
+                                maxlength="5"
+                                required
+                            >
                             <?php if (isset($errors['shipping_postal_code'])): ?><span class="error"><?= $errors['shipping_postal_code'] ?></span><?php endif; ?>
                         </div>
                     </div>
                     <div class="form-group">
                         <label><span data-translate="checkoutCountry">Country</span> *</label>
-                        <select name="shipping_country" class="<?= isset($errors['shipping_country'])?'error-field':'' ?>" required>
+                        <select id="shipping_country" name="shipping_country" class="<?= isset($errors['shipping_country'])?'error-field':'' ?>" required>
                             <option value="" data-translate="checkoutSelect">Select</option>
                             <option value="Greece" <?= ($formData['shipping_country']??'')=='Greece'?'selected':'' ?>>Greece</option>
                             <option value="Cyprus" <?= ($formData['shipping_country']??'')=='Cyprus'?'selected':'' ?>>Cyprus</option>
@@ -382,20 +679,20 @@ if (file_exists($headerPath)) {
                     </div>
                     <div class="form-group">
                         <label data-translate="checkoutSpeed">Speed</label>
-                        <div style="display:flex; gap:20px;">
-                            <label><input type="radio" name="shipping_speed" value="standard" <?= ($formData['shipping_speed']??'standard')=='standard'?'checked':'' ?>> <span data-translate="checkoutStandard">Standard</span></label>
-                            <label><input type="radio" name="shipping_speed" value="express" <?= ($formData['shipping_speed']??'')=='express'?'checked':'' ?>> <span data-translate="checkoutExpress">Express</span> (+&euro;2)</label>
+                        <div class="form-options">
+                            <label class="option-label"><input type="radio" name="shipping_speed" value="standard" <?= ($formData['shipping_speed']??'standard')=='standard'?'checked':'' ?>> <span data-translate="checkoutStandard">Standard</span></label>
+                            <label class="option-label"><input type="radio" name="shipping_speed" value="express" <?= ($formData['shipping_speed']??'')=='express'?'checked':'' ?>> <span data-translate="checkoutExpress">Express</span> (+&euro;2)</label>
                         </div>
                     </div>
                 </fieldset>
 
                 <fieldset>
                     <legend data-translate="checkoutPayment">Payment</legend>
-                    <div style="display:flex; flex-direction:column; gap:10px;">
-                        <label><input type="radio" name="payment_method" value="stripe" <?= ($formData['payment_method']??'stripe')=='stripe'?'checked':'' ?> required> Credit Card (Stripe)</label>
-                        <label><input type="radio" name="payment_method" value="paypal" <?= ($formData['payment_method']??'')=='paypal'?'checked':'' ?>> PayPal</label>
-                        <label><input type="radio" name="payment_method" value="cash_on_delivery" <?= ($formData['payment_method']??'')=='cash_on_delivery'?'checked':'' ?>> Cash on Delivery</label>
-                        <label><input type="radio" name="payment_method" value="bank_transfer" <?= ($formData['payment_method']??'')=='bank_transfer'?'checked':'' ?>> Bank Transfer</label>
+                    <div class="form-options form-options-column">
+                        <label class="option-label"><input type="radio" name="payment_method" value="stripe" <?= ($formData['payment_method']??'stripe')=='stripe'?'checked':'' ?> required> Credit Card (Stripe)</label>
+                        <label class="option-label"><input type="radio" name="payment_method" value="paypal" <?= ($formData['payment_method']??'')=='paypal'?'checked':'' ?>> PayPal</label>
+                        <label class="option-label"><input type="radio" name="payment_method" value="cash_on_delivery" <?= ($formData['payment_method']??'')=='cash_on_delivery'?'checked':'' ?>> Cash on Delivery</label>
+                        <label class="option-label"><input type="radio" name="payment_method" value="bank_transfer" <?= ($formData['payment_method']??'')=='bank_transfer'?'checked':'' ?>> Bank Transfer</label>
                     </div>
                     <?php if (isset($errors['payment_method'])): ?><span class="error"><?= $errors['payment_method'] ?></span><?php endif; ?>
                 </fieldset>
@@ -403,12 +700,12 @@ if (file_exists($headerPath)) {
                 <?php if (!$isLoggedIn): ?>
                 <fieldset>
                     <legend data-translate="checkoutOptional">Optional</legend>
-                    <label><input type="checkbox" name="create_account" value="yes" <?= isset($formData['create_account'])?'checked':'' ?>> <span data-translate="checkoutCreateAccount">Create an account with these details</span></label>
+                    <label class="option-label"><input type="checkbox" name="create_account" value="yes" <?= isset($formData['create_account'])?'checked':'' ?>> <span data-translate="checkoutCreateAccount">Create an account with these details</span></label>
                 </fieldset>
                 <?php endif; ?>
 
-                <div style="margin:20px 0;">
-                    <label><input type="checkbox" name="accept_terms" value="yes" <?= isset($formData['accept_terms'])?'checked':'' ?> class="<?= isset($errors['accept_terms'])?'error-field':'' ?>" required> <span data-translate="checkoutAcceptTermsPrivacy">I accept Terms & Privacy</span></label>
+                <div class="terms-row">
+                    <label class="terms-label"><input type="checkbox" name="accept_terms" value="yes" <?= isset($formData['accept_terms'])?'checked':'' ?> class="<?= isset($errors['accept_terms'])?'error-field':'' ?>" required> <span data-translate="checkoutAcceptTermsPrivacy">I accept Terms & Privacy</span></label>
                     <?php if (isset($errors['accept_terms'])): ?><span class="error"><?= $errors['accept_terms'] ?></span><?php endif; ?>
                 </div>
 
@@ -434,21 +731,21 @@ if (file_exists($headerPath)) {
                 if (!empty($item['addons']['giftMessage'])) $giftBits[] = 'Note: ' . (string)$item['addons']['giftMessage'];
             ?>
             <div class="order-item">
-                <div style="display:flex; justify-content:space-between;">
+                <div class="order-item-main">
                     <span><?= htmlspecialchars($name) ?> x<?= $qty ?></span>
                     <span>&euro;<?= number_format($price*$qty,2) ?></span>
                 </div>
                 <?php if (!empty($giftBits)): ?>
-                <div style="font-size:12px;color:#665b7f;margin-top:6px;">
+                <div class="order-item-addons">
                     <?= htmlspecialchars(implode(' | ', $giftBits)) ?>
                 </div>
                 <?php endif; ?>
             </div>
             <?php endforeach; ?>
-            <hr>
-            <div style="display:flex; justify-content:space-between;"><span data-translate="subtotal">Subtotal</span>: <span>&euro;<span id="orderSubtotal"><?= number_format($cartTotal,2) ?></span></span></div>
-            <div style="display:flex; justify-content:space-between;"><span data-translate="shipping">Shipping</span>: <span id="orderShipping"><?= $freeShippingEligible ? 'FREE' : ('€' . number_format($displayShippingCost,2)) ?></span></div>
-            <div style="display:flex; justify-content:space-between; font-weight:bold; margin-top:15px;"><span data-translate="total">Total</span>: <span>&euro;<span id="orderTotal"><?= number_format($displayTotal,2) ?></span></span></div>
+            <hr class="summary-divider">
+            <div class="summary-row"><span data-translate="subtotal">Subtotal</span><span>&euro;<span id="orderSubtotal"><?= number_format($cartTotal,2) ?></span></span></div>
+            <div class="summary-row"><span data-translate="shipping">Shipping</span><span id="orderShipping"><?= $freeShippingEligible ? 'FREE' : ('€' . number_format($displayShippingCost,2)) ?></span></div>
+            <div class="summary-row summary-row-total"><span data-translate="total">Total</span><span>&euro;<span id="orderTotal"><?= number_format($displayTotal,2) ?></span></span></div>
         </div>
     </div>
 </div>
@@ -462,6 +759,8 @@ if (file_exists($headerPath)) {
     var shippingOut = document.getElementById('orderShipping');
     var totalOut = document.getElementById('orderTotal');
     var btnTotalOut = document.getElementById('placeOrderTotal');
+    var countryEl = document.getElementById('shipping_country');
+    var postalEl = document.getElementById('shipping_postal_code');
 
     function selectedSpeed() {
         var checked = document.querySelector('input[name="shipping_speed"]:checked');
@@ -483,8 +782,80 @@ if (file_exists($headerPath)) {
         if (btnTotalOut) btnTotalOut.textContent = total.toFixed(2);
     }
 
+    function getPostalRule(country) {
+        if (country === 'Cyprus') {
+            return {
+                pattern: '[0-9]{4}',
+                maxLength: 4,
+                error: 'Cyprus postal code must be exactly 4 digits.'
+            };
+        }
+
+        if (country === 'Greece') {
+            return {
+                pattern: '[0-9]{5}',
+                maxLength: 5,
+                error: 'Greece postal code must be exactly 5 digits.'
+            };
+        }
+
+        return {
+            pattern: '[0-9]{4,5}',
+            maxLength: 5,
+            error: 'Postal code must be 4 or 5 digits.'
+        };
+    }
+
+    function sanitizePostalInput() {
+        if (!postalEl) return;
+        var maxLength = Number(postalEl.maxLength) || 5;
+        var digits = postalEl.value.replace(/\D/g, '');
+        if (digits.length > maxLength) {
+            digits = digits.slice(0, maxLength);
+        }
+        if (digits !== postalEl.value) {
+            postalEl.value = digits;
+        }
+    }
+
+    function validatePostalCode() {
+        if (!postalEl) return true;
+        var code = postalEl.value.trim();
+        if (code === '') {
+            postalEl.setCustomValidity('');
+            return true;
+        }
+
+        var country = countryEl ? countryEl.value : '';
+        var rule = getPostalRule(country);
+        var isValid = new RegExp('^' + rule.pattern + '$').test(code);
+        postalEl.setCustomValidity(isValid ? '' : rule.error);
+        return isValid;
+    }
+
+    function applyPostalRule() {
+        if (!postalEl) return;
+        var country = countryEl ? countryEl.value : '';
+        var rule = getPostalRule(country);
+        postalEl.maxLength = rule.maxLength;
+        postalEl.setAttribute('pattern', rule.pattern);
+        postalEl.setAttribute('title', rule.error);
+        sanitizePostalInput();
+        validatePostalCode();
+    }
+
     if (courierEl) courierEl.addEventListener('change', updateTotals);
     speedEls.forEach(function (el) { el.addEventListener('change', updateTotals); });
+    if (countryEl) countryEl.addEventListener('change', applyPostalRule);
+    if (postalEl) {
+        postalEl.addEventListener('input', function () {
+            sanitizePostalInput();
+            validatePostalCode();
+        });
+        postalEl.addEventListener('blur', validatePostalCode);
+    }
+
+    applyPostalRule();
     updateTotals();
 })();
 </script>

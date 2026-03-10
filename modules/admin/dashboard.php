@@ -4,6 +4,71 @@ require_once __DIR__ . '/includes/db.php';
 
 $current_page = 'dashboard';
 
+$dashboardFlash = '';
+if (isset($_SESSION['admin_dashboard_flash'])) {
+    $dashboardFlash = (string)$_SESSION['admin_dashboard_flash'];
+    unset($_SESSION['admin_dashboard_flash']);
+}
+
+if (empty($_SESSION['admin_dashboard_token'])) {
+    $_SESSION['admin_dashboard_token'] = bin2hex(random_bytes(32));
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['notif_action'])) {
+    $token = (string)($_POST['csrf_token'] ?? '');
+    if (!hash_equals($_SESSION['admin_dashboard_token'], $token)) {
+        $_SESSION['admin_dashboard_flash'] = 'err:Invalid request token.';
+        header('Location: dashboard.php');
+        exit;
+    }
+
+    $tableExists = false;
+    $tableCheck = mysqli_query($conn, "SHOW TABLES LIKE 'admin_notifications'");
+    if ($tableCheck && mysqli_num_rows($tableCheck) > 0) {
+        $tableExists = true;
+    }
+
+    if (!$tableExists) {
+        $_SESSION['admin_dashboard_flash'] = 'err:No notifications table found.';
+        header('Location: dashboard.php');
+        exit;
+    }
+
+    // Backward compatibility for older databases.
+    $colCheck = mysqli_query($conn, "SHOW COLUMNS FROM admin_notifications LIKE 'is_read'");
+    if ($colCheck && mysqli_num_rows($colCheck) === 0) {
+        mysqli_query($conn, "ALTER TABLE admin_notifications ADD COLUMN is_read TINYINT(1) NOT NULL DEFAULT 0");
+    }
+
+    $action = trim((string)($_POST['notif_action'] ?? ''));
+    if ($action === 'dismiss_one') {
+        $notifId = (int)($_POST['notif_id'] ?? 0);
+        if ($notifId > 0) {
+            $stmt = mysqli_prepare($conn, "UPDATE admin_notifications SET is_read = 1 WHERE id = ?");
+            if ($stmt) {
+                mysqli_stmt_bind_param($stmt, 'i', $notifId);
+                mysqli_stmt_execute($stmt);
+                mysqli_stmt_close($stmt);
+                $_SESSION['admin_dashboard_flash'] = 'ok:Notification dismissed.';
+            } else {
+                $_SESSION['admin_dashboard_flash'] = 'err:Could not dismiss notification.';
+            }
+        } else {
+            $_SESSION['admin_dashboard_flash'] = 'err:Invalid notification ID.';
+        }
+    } elseif ($action === 'dismiss_all') {
+        $ok = mysqli_query($conn, "UPDATE admin_notifications SET is_read = 1 WHERE is_read = 0");
+        $_SESSION['admin_dashboard_flash'] = $ok
+            ? 'ok:All notifications dismissed.'
+            : 'err:Could not dismiss all notifications.';
+    } else {
+        $_SESSION['admin_dashboard_flash'] = 'err:Unknown notification action.';
+    }
+
+    header('Location: dashboard.php');
+    exit;
+}
+
 /* ── Stats: Total sales last 7 days ── */
 $sales7 = 0;
 $r = mysqli_query($conn, "SELECT COALESCE(SUM(totalAmount),0) AS s FROM orders
@@ -74,20 +139,57 @@ if ($r) { while ($row = mysqli_fetch_assoc($r)) $recentOrders[] = $row; }
 
 $adminNotifications = [];
 $unreadCount = 0;
+$orderNumberToId = [];
 $tableCheck = mysqli_query($conn, "SHOW TABLES LIKE 'admin_notifications'");
 if ($tableCheck && mysqli_num_rows($tableCheck) > 0) {
+    $colCheck = mysqli_query($conn, "SHOW COLUMNS FROM admin_notifications LIKE 'is_read'");
+    if ($colCheck && mysqli_num_rows($colCheck) === 0) {
+        mysqli_query($conn, "ALTER TABLE admin_notifications ADD COLUMN is_read TINYINT(1) NOT NULL DEFAULT 0");
+    }
+
+    $countRes = mysqli_query($conn, "SELECT COUNT(*) AS c FROM admin_notifications WHERE is_read = 0");
+    if ($countRes) {
+        $countRow = mysqli_fetch_assoc($countRes);
+        $unreadCount = (int)($countRow['c'] ?? 0);
+    }
+
     $nr = mysqli_query(
         $conn,
         "SELECT id, message, created_at, is_read
          FROM admin_notifications
+         WHERE is_read = 0
          ORDER BY id DESC
-         LIMIT 5"
+         LIMIT 8"
     );
     if ($nr) {
         while ($row = mysqli_fetch_assoc($nr)) {
             $adminNotifications[] = $row;
-            if ((int)$row['is_read'] === 0) {
-                $unreadCount++;
+        }
+    }
+
+    $orderNumbers = [];
+    foreach ($adminNotifications as $notifRow) {
+        $maybeOrderNumber = extractOrderNumberFromNotif((string)$notifRow['message']);
+        if ($maybeOrderNumber !== null) {
+            $orderNumbers[$maybeOrderNumber] = true;
+        }
+    }
+
+    if (!empty($orderNumbers)) {
+        $escapedOrderNumbers = [];
+        foreach (array_keys($orderNumbers) as $ordNum) {
+            $escapedOrderNumbers[] = "'" . mysqli_real_escape_string($conn, $ordNum) . "'";
+        }
+
+        $ordersRes = mysqli_query(
+            $conn,
+            "SELECT orderID, orderNumber
+             FROM orders
+             WHERE orderNumber IN (" . implode(',', $escapedOrderNumbers) . ")"
+        );
+        if ($ordersRes) {
+            while ($or = mysqli_fetch_assoc($ordersRes)) {
+                $orderNumberToId[strtoupper((string)$or['orderNumber'])] = (int)$or['orderID'];
             }
         }
     }
@@ -100,6 +202,13 @@ function normalizeAdminNotifText(string $text): string {
         ['€', '•', '·', ''],
         $text
     );
+}
+
+function extractOrderNumberFromNotif(string $text): ?string {
+    if (preg_match('/\bORD-\d{4}-\d+\b/i', $text, $m)) {
+        return strtoupper((string)$m[0]);
+    }
+    return null;
 }
 
 $statusLabel = [
@@ -137,21 +246,62 @@ $jsonValues = json_encode($trendValues);
 
     <div class="content-body">
 
+      <?php if ($dashboardFlash !== ''): ?>
+        <?php [$flashType, $flashMsg] = array_pad(explode(':', $dashboardFlash, 2), 2, ''); ?>
+        <div class="flash flash-<?= $flashType === 'ok' ? 'success' : 'error' ?> mb-6">
+          <?= htmlspecialchars($flashMsg) ?>
+        </div>
+      <?php endif; ?>
+
       <?php if (!empty($adminNotifications)): ?>
       <div class="alert-card alert-blue mb-6">
-        <div class="alert-title">
-          <i class="fas fa-bell"></i> Admin Notifications
-          <?php if ($unreadCount > 0): ?>
-            <span class="badge badge-red" style="margin-left:8px;"><?= (int)$unreadCount ?> new</span>
-          <?php endif; ?>
+        <div class="notif-toolbar">
+          <div class="alert-title">
+            <i class="fas fa-bell"></i> Admin Notifications
+            <?php if ($unreadCount > 0): ?>
+              <span class="badge badge-red"><?= (int)$unreadCount ?> new</span>
+            <?php endif; ?>
+          </div>
+          <form method="POST" class="notif-inline-form" onsubmit="return confirm('Dismiss all notifications?');">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['admin_dashboard_token']) ?>">
+            <input type="hidden" name="notif_action" value="dismiss_all">
+            <button type="submit" class="btn-secondary btn-sm notif-dismiss-btn">
+              <i class="fas fa-trash"></i> Dismiss All
+            </button>
+          </form>
         </div>
-        <div class="text-sm">
+
+        <div class="notif-list">
           <?php foreach ($adminNotifications as $n): ?>
-            <div style="padding:6px 0;border-bottom:1px solid #dbeafe;">
-              <?= htmlspecialchars(normalizeAdminNotifText((string)$n['message'])) ?>
-              <span class="text-muted" style="margin-left:6px;">
-                (<?= htmlspecialchars(date('m/d H:i', strtotime((string)$n['created_at']))) ?>)
-              </span>
+            <?php
+              $rawMessage = (string)$n['message'];
+              $orderNumber = extractOrderNumberFromNotif($rawMessage);
+              $targetOrderId = $orderNumber !== null ? ($orderNumberToId[$orderNumber] ?? 0) : 0;
+            ?>
+            <div class="notif-row">
+              <div class="notif-main">
+                <div class="notif-message"><?= htmlspecialchars(normalizeAdminNotifText($rawMessage)) ?></div>
+                <div class="notif-meta"><?= htmlspecialchars(date('m/d H:i', strtotime((string)$n['created_at']))) ?></div>
+              </div>
+              <div class="notif-actions">
+                <?php if ($targetOrderId > 0): ?>
+                  <a href="order_management.php?view=<?= (int)$targetOrderId ?>" class="btn-secondary btn-sm">
+                    <i class="fas fa-arrow-up-right-from-square"></i> Open Order
+                  </a>
+                <?php elseif ($orderNumber !== null): ?>
+                  <a href="order_management.php" class="btn-secondary btn-sm">
+                    <i class="fas fa-box-open"></i> Open Orders
+                  </a>
+                <?php endif; ?>
+                <form method="POST" class="notif-inline-form">
+                  <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['admin_dashboard_token']) ?>">
+                  <input type="hidden" name="notif_action" value="dismiss_one">
+                  <input type="hidden" name="notif_id" value="<?= (int)$n['id'] ?>">
+                  <button type="submit" class="btn-secondary btn-sm notif-dismiss-btn">
+                    <i class="fas fa-xmark"></i> Dismiss
+                  </button>
+                </form>
+              </div>
             </div>
           <?php endforeach; ?>
         </div>

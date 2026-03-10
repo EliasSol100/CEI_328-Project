@@ -97,7 +97,13 @@ $colorHexMap = [
 ];
 
 $uniqueColors = [];
+$uniqueSizes = [];
 foreach ($variations as $v) {
+    $sizeLabel = trim((string)($v["size"] ?? ""));
+    if ($sizeLabel !== "" && !in_array($sizeLabel, $uniqueSizes, true)) {
+        $uniqueSizes[] = $sizeLabel;
+    }
+
     if (empty($v["colorID"])) {
         continue;
     }
@@ -182,6 +188,19 @@ include __DIR__ . "/include/header.php";
                 <?= nl2br(htmlspecialchars((string)($product["descriptionEN"] ?: "Handmade item by Creations by Athina."))) ?>
             </p>
 
+            <?php if (!empty($uniqueSizes)): ?>
+            <div class="section-title">Size</div>
+            <div class="size-row" id="size-row">
+                <?php foreach ($uniqueSizes as $idx => $sizeLabel): ?>
+                    <button type="button"
+                            class="size-chip <?= $idx === 0 ? "active" : "" ?>"
+                            data-size="<?= htmlspecialchars($sizeLabel) ?>">
+                        <?= htmlspecialchars($sizeLabel) ?>
+                    </button>
+                <?php endforeach; ?>
+            </div>
+            <?php endif; ?>
+
             <?php if (!empty($uniqueColors)): ?>
             <div class="section-title">Color</div>
             <div class="color-row" id="color-row">
@@ -254,6 +273,7 @@ include __DIR__ . "/include/header.php";
     var variations = <?= json_encode($variations, JSON_UNESCAPED_UNICODE) ?>;
     var qty = 1;
     var selectedColorId = null;
+    var selectedSize = null;
 
     var mainImage = document.getElementById("main-product-image");
     var thumbs = document.querySelectorAll(".thumb-btn");
@@ -275,6 +295,18 @@ include __DIR__ . "/include/header.php";
         qty = Math.min(99, qty + 1);
         qtyOut.textContent = String(qty);
     });
+
+    var sizeChips = document.querySelectorAll(".size-chip");
+    sizeChips.forEach(function (chip) {
+        chip.addEventListener("click", function () {
+            sizeChips.forEach(function (c) { c.classList.remove("active"); });
+            chip.classList.add("active");
+            selectedSize = (chip.getAttribute("data-size") || "").trim() || null;
+        });
+    });
+    if (sizeChips.length) {
+        sizeChips[0].click();
+    }
 
     var colorDots = document.querySelectorAll(".color-dot");
     colorDots.forEach(function (dot) {
@@ -331,13 +363,19 @@ include __DIR__ . "/include/header.php";
 
         if (hasVariants) {
             var selected = null;
-            if (selectedColorId) {
-                selected = variations.find(function (v) { return Number(v.colorID) === Number(selectedColorId); }) || null;
+            if (selectedColorId || selectedSize) {
+                selected = variations.find(function (v) {
+                    var colorOk = !selectedColorId || Number(v.colorID) === Number(selectedColorId);
+                    var sizeOk = !selectedSize || String(v.size || "") === String(selectedSize);
+                    return colorOk && sizeOk;
+                }) || null;
             }
             if (selected && selected.variationID) {
                 payload.variation_id = selected.variationID;
-            } else if (selectedColorId) {
-                payload.variation = { color_id: selectedColorId };
+            } else if (selectedColorId || selectedSize) {
+                payload.variation = {};
+                if (selectedColorId) payload.variation.color_id = selectedColorId;
+                if (selectedSize) payload.variation.size = selectedSize;
             }
         }
 

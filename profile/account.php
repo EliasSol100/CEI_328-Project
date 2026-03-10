@@ -42,7 +42,7 @@ $user   = $result->fetch_assoc();
 $stmt->close();
 
 if (!$user) {
-    // Session says there is a user but DB row is missing → log out
+    // Session says there is a user but DB row is missing; log out
     session_unset();
     session_destroy();
     echo "User not found.";
@@ -75,6 +75,10 @@ $GLOBALS['header_user_role']      = $role;
 $GLOBALS['header_user_initials']  = $initials;
 
 $activeTab = $_GET["tab"] ?? "orders";
+$allowedTabs = ["orders", "addresses", "settings"];
+if (!in_array($activeTab, $allowedTabs, true)) {
+    $activeTab = "orders";
+}
 
 // Helper: format dates
 function formatDateTime(?string $value): string {
@@ -157,34 +161,6 @@ function accountRecalcCartTotals(array $items): array {
     ];
 }
 
-// --------- Simple product catalog (for wishlist display) ----------
-$catalogProducts = [
-    'flame_dragon' => [
-        'name'  => 'Flame Dragon Amigurumi Plush',
-        'price' => 38,
-    ],
-    'electric_mouse' => [
-        'name'  => 'Electric Mouse Buddy Plush',
-        'price' => 34,
-    ],
-    'lilac_turtle' => [
-        'name'  => 'Lilac Sea Turtle Plush',
-        'price' => 40,
-    ],
-    'daisy_bunny' => [
-        'name'  => 'Daisy Dress Bunny Plush',
-        'price' => 42,
-    ],
-    'meadow_bunny' => [
-        'name'  => 'Meadow Bunny in Pink Dress',
-        'price' => 39,
-    ],
-    'berry_bunny' => [
-        'name'  => 'Berry Bunny with Bow',
-        'price' => 35,
-    ],
-];
-
 // Messages
 $successMessage = "";
 $errorMessage   = "";
@@ -200,47 +176,6 @@ if (empty($_SESSION["account_reorder_token"])) {
  */
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $action = $_POST["action"] ?? "";
-
-    /**
-     * Wishlist: add item
-     */
-    if ($action === "add_wishlist_item") {
-        $productKey = $_POST["product_key"] ?? "";
-
-        if ($productKey && isset($catalogProducts[$productKey])) {
-            if (!isset($_SESSION["wishlist"]) || !is_array($_SESSION["wishlist"])) {
-                $_SESSION["wishlist"] = [];
-            }
-
-            if (!in_array($productKey, $_SESSION["wishlist"], true)) {
-                $_SESSION["wishlist"][] = $productKey;
-                $successMessage = "Item added to your wishlist.";
-            } else {
-                $successMessage = "This item is already in your wishlist.";
-            }
-        } else {
-            $errorMessage = "Product not found.";
-        }
-
-        $activeTab = "wishlist";
-    }
-
-    /**
-     * Wishlist: remove item
-     */
-    if ($action === "remove_wishlist_item") {
-        $productKey = $_POST["product_key"] ?? "";
-
-        if (isset($_SESSION["wishlist"]) && is_array($_SESSION["wishlist"])) {
-            $_SESSION["wishlist"] = array_values(array_filter(
-                $_SESSION["wishlist"],
-                fn($key) => $key !== $productKey
-            ));
-            $successMessage = "Item removed from your wishlist.";
-        }
-
-        $activeTab = "wishlist";
-    }
 
     /**
      * Reorder: add all items from a previous order back to cart.
@@ -1089,11 +1024,6 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                             <i class="bi bi-box-seam me-2"></i>
                             <span data-translate="sidebarOrders">Orders</span>
                         </a>
-                        <a href="account.php?tab=wishlist"
-                           class="list-group-item list-group-item-action <?= $activeTab === 'wishlist' ? 'active' : '' ?>">
-                            <i class="bi bi-heart me-2"></i>
-                            <span data-translate="sidebarWishlist">Wishlist</span>
-                        </a>
                         <a href="account.php?tab=addresses"
                            class="list-group-item list-group-item-action <?= $activeTab === 'addresses' ? 'active' : '' ?>">
                             <i class="bi bi-geo-alt me-2"></i>
@@ -1122,7 +1052,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                             <h4 class="mb-4" data-translate="ordersTitle">Order History</h4>
                             <?php if (empty($orderHistory)): ?>
                                 <p class="text-muted mb-0" data-translate="ordersEmpty">
-                                    You havenâ€™t placed any orders yet.
+                                    You haven't placed any orders yet.
                                     Once you purchase something from the shop, it will appear here.
                                 </p>
                             <?php else: ?>
@@ -1214,60 +1144,6 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                     <?php endforeach; ?>
                                 </div>
                             <?php endif; ?>
-                        <?php elseif ($activeTab === "wishlist"): ?>
-                            <!-- WISHLIST TAB -->
-                            <h4 class="mb-4" id="wishlist" data-translate="wishlistTitle">My Wishlist</h4>
-
-                            <?php
-                            $wishlistItems = isset($_SESSION["wishlist"]) && is_array($_SESSION["wishlist"])
-                                ? array_unique($_SESSION["wishlist"])
-                                : [];
-                            ?>
-
-                            <?php if (empty($wishlistItems)): ?>
-                                <div class="py-5 text-center text-muted">
-                                    <i class="bi bi-heart fs-1 mb-3"></i>
-                                    <p class="mb-0" data-translate="wishlistEmpty">
-                                        Your wishlist is empty. Add some favorites from the shop!
-                                    </p>
-                                </div>
-                            <?php else: ?>
-                                <div class="row g-3">
-                                    <?php foreach ($wishlistItems as $key): ?>
-                                        <?php if (!isset($catalogProducts[$key])) continue;
-                                        $p = $catalogProducts[$key]; ?>
-                                        <div class="col-md-6 col-lg-4">
-                                            <div class="card h-100 border-0 shadow-sm rounded-4">
-                                                <div class="card-body d-flex flex-column">
-                                                    <h5 class="card-title mb-1">
-                                                        <?= htmlspecialchars($p["name"]) ?>
-                                                    </h5>
-                                                    <p class="text-muted mb-3">
-                                                        €<?= number_format((float)$p["price"], 2) ?>
-                                                    </p>
-                                                    <div class="mt-auto d-flex justify-content-between align-items-center">
-                                                        <a href="../shop.php" class="btn btn-sm btn-outline-primary">
-                                                            <i class="bi bi-cart-plus me-1"></i>
-                                                            <span data-translate="wishlistViewInShop">View in Shop</span>
-                                                        </a>
-                                                        <form method="post" class="ms-2">
-                                                            <input type="hidden" name="action" value="remove_wishlist_item">
-                                                            <input type="hidden" name="product_key"
-                                                                   value="<?= htmlspecialchars($key) ?>">
-                                                            <button type="submit"
-                                                                    class="btn btn-sm btn-outline-danger"
-                                                                    title="Remove from wishlist">
-                                                                <i class="bi bi-trash"></i>
-                                                            </button>
-                                                        </form>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    <?php endforeach; ?>
-                                </div>
-                            <?php endif; ?>
-
                         <?php elseif ($activeTab === "addresses"): ?>
                             <!-- ADDRESSES TAB -->
                             <div class="d-flex justify-content-between align-items-center mb-4">
@@ -1391,7 +1267,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                 <?php if (empty($user["address"]) && count($addresses) === 0): ?>
                                     <div class="col-12">
                                         <p class="text-muted mb-0" data-translate="addressesNoneText">
-                                            You don’t have any saved addresses yet. Click “Add New” to create one.
+                                            You don't have any saved addresses yet. Click "Add New" to create one.
                                         </p>
                                     </div>
                                 <?php endif; ?>
@@ -1538,7 +1414,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                     <input type="text" name="address_label" class="form-control"
                            placeholder="Apartment, Home, Business, etc.">
                     <small class="text-muted">
-                        Optional – leave blank if you don’t want a label.
+                        Optional - leave blank if you don't want a label.
                     </small>
                 </div>
                 <div class="form-check mb-2">
@@ -1687,20 +1563,8 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 
-<!-- If URL was called with #wishlist only, force tab=wishlist as well -->
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-    if (window.location.hash === '#wishlist') {
-        const url = new URL(window.location.href);
-        if (url.searchParams.get('tab') !== 'wishlist') {
-            url.searchParams.set('tab', 'wishlist');
-            url.hash = '#wishlist';
-            window.location.replace(url.toString());
-        }
-    }
-});
-</script>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
+
