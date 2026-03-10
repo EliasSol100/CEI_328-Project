@@ -6,7 +6,7 @@ require_once "authentication/database.php";
 header('Content-Type: application/json; charset=utf-8');
 
 /* =========================
-   GET: Return cart  OR  variations for a product
+   GET: Return cart OR variations for a product
    ========================= */
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
 
@@ -81,19 +81,36 @@ try {
     }
 
     $variation = null;
+    $customVariation = null;
     $effectiveHasVariants = $hasVariants;
     if ($hasVariants) {
         if ($variationId !== null && $variationId > 0) {
             $variation = fetchVariationById($conn, $variationId, $productId);
         } elseif ($colorId !== null && $colorId > 0) {
             $variation = fetchVariationByFields($conn, $productId, $size, $yarnType, $colorId);
+            if ($variation === null && $size !== '') {
+                $variation = fetchVariationByColorAndSize($conn, $productId, $size, $colorId);
+            }
+        } elseif ($size !== '') {
+            $variation = fetchVariationBySize($conn, $productId, $size);
         } else {
-            // No variation specified — pick the first available one automatically
+            // No variation specified; pick the first available one automatically.
             $variation = fetchFirstVariation($conn, $productId);
         }
-        // Fallback for inconsistent catalog data:
-        // if hasVariants=1 but no variation row exists, treat as non-variant item.
-        if ($variation === null) {
+
+        // If no DB variation row exists but client provided variation fields,
+        // preserve those values so cart/checkout can still show the selection.
+        if ($variation === null && ($size !== '' || $yarnType !== '' || ($colorId !== null && $colorId > 0))) {
+            $customVariation = [
+                'variationID' => null,
+                'size' => $size,
+                'yarnType' => $yarnType,
+                'colorID' => (int)($colorId ?? 0),
+                'colorName' => ($colorId !== null && $colorId > 0) ? fetchColorName($conn, (int)$colorId) : '',
+            ];
+        } elseif ($variation === null) {
+            // Fallback for inconsistent catalog data:
+            // if hasVariants=1 but no variation row exists, treat as non-variant item.
             $effectiveHasVariants = false;
         }
     }
@@ -101,9 +118,15 @@ try {
     if ($cartStatus === 'made_to_order') {
         $availableStock = PHP_INT_MAX;
     } else {
-        $availableStock = $effectiveHasVariants
-            ? fetchVariationStock($conn, (int)$variation['variationID'])
-            : (int)$product['inventory'];
+        if ($effectiveHasVariants) {
+            $resolvedVariation = $variation ?? $customVariation;
+            $resolvedVariationId = (int)($resolvedVariation['variationID'] ?? 0);
+            $availableStock = $resolvedVariationId > 0
+                ? fetchVariationStock($conn, $resolvedVariationId)
+                : (int)$product['inventory'];
+        } else {
+            $availableStock = (int)$product['inventory'];
+        }
 
         if ($availableStock <= 0) badRequest('Out of stock.');
     }
@@ -113,7 +136,7 @@ try {
     $existingIndex = findExistingLineIndex(
         $cart['items'],
         $productId,
-        $effectiveHasVariants ? (int)$variation['variationID'] : null,
+        $effectiveHasVariants ? ($variation ?? $customVariation) : null,
         $addons
     );
 
@@ -132,6 +155,7 @@ try {
     $unitTotal = $unitPrice + $addonsCost;
     $lineTotal = $unitTotal * $newQty;
 
+    $resolvedVariation = $variation ?? $customVariation;
     $lineItem = [
         'product' => [
             'id' => (int)$product['productID'],
@@ -143,11 +167,11 @@ try {
             'hasVariants' => $effectiveHasVariants,
         ],
         'variation' => $effectiveHasVariants ? [
-            'variationID' => (int)$variation['variationID'],
-            'size' => (string)$variation['size'],
-            'yarnType' => (string)$variation['yarnType'],
-            'colorID' => (int)$variation['colorID'],
-            'colorName' => (string)($variation['colorName'] ?? ''),
+            'variationID' => isset($resolvedVariation['variationID']) ? toInt($resolvedVariation['variationID']) : null,
+            'size' => trim((string)($resolvedVariation['size'] ?? '')),
+            'yarnType' => trim((string)($resolvedVariation['yarnType'] ?? '')),
+            'colorID' => toInt($resolvedVariation['colorID'] ?? null),
+            'colorName' => (string)($resolvedVariation['colorName'] ?? ''),
         ] : null,
         'quantity' => $newQty,
         'addons' => [
@@ -224,11 +248,35 @@ function &getOrInitCart(): array {
     }
     return $_SESSION['cart'];
 }
-function findExistingLineIndex(array $items, int $productId, ?int $variationId, array $addons): ?int {
+function findExistingLineIndex(array $items, int $productId, ?array $variation, array $addons): ?int {
     foreach ($items as $i => $item) {
         if ((int)($item['product']['id'] ?? 0) !== $productId) continue;
-        $existingVarId = $item['variation']['variationID'] ?? null;
-        if (($variationId ?? null) !== ($existingVarId ?? null)) continue;
+
+        $existingVariation = is_array($item['variation'] ?? null) ? $item['variation'] : null;
+        $targetHasVariation = is_array($variation);
+        if ($targetHasVariation !== ($existingVariation !== null)) continue;
+
+        if ($targetHasVariation && $existingVariation !== null) {
+            $targetVarId = toInt($variation['variationID'] ?? null);
+            $existingVarId = toInt($existingVariation['variationID'] ?? null);
+
+            if ($targetVarId !== null || $existingVarId !== null) {
+                if ($targetVarId !== $existingVarId) continue;
+            } else {
+                $targetSize  = normalizeVariationValue((string)($variation['size'] ?? ''));
+                $targetYarn  = normalizeVariationValue((string)($variation['yarnType'] ?? ''));
+                $targetColor = toInt($variation['colorID'] ?? null) ?? 0;
+
+                $existingSize  = normalizeVariationValue((string)($existingVariation['size'] ?? ''));
+                $existingYarn  = normalizeVariationValue((string)($existingVariation['yarnType'] ?? ''));
+                $existingColor = toInt($existingVariation['colorID'] ?? null) ?? 0;
+
+                if ($targetSize !== $existingSize) continue;
+                if ($targetYarn !== $existingYarn) continue;
+                if ($targetColor !== $existingColor) continue;
+            }
+        }
+
         $ad = $item['addons'] ?? [];
         if ((bool)($ad['giftWrapping'] ?? false) !== (bool)$addons['gift_wrapping']) continue;
         if ((bool)($ad['giftBagFlag'] ?? false) !== (bool)$addons['gift_bag']) continue;
@@ -236,6 +284,9 @@ function findExistingLineIndex(array $items, int $productId, ?int $variationId, 
         return (int)$i;
     }
     return null;
+}
+function normalizeVariationValue(string $value): string {
+    return mb_strtolower(trim($value));
 }
 function recalcCartTotals(array $items): array {
     $itemsCount=0; $subtotal=0.0; $addonsTotal=0.0;
@@ -293,6 +344,34 @@ function fetchVariationByFields(mysqli $conn, int $productId, string $size, stri
     $st->close();
     return $row ?: null;
 }
+function fetchVariationByColorAndSize(mysqli $conn, int $productId, string $size, int $colorId): ?array {
+    $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, c.colorName
+            FROM product_variations pv
+            LEFT JOIN colors c ON c.colorID = pv.colorID
+            WHERE pv.productID=? AND pv.size=? AND pv.colorID=?
+            ORDER BY pv.variationID ASC LIMIT 1";
+    $st = $conn->prepare($sql);
+    if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
+    $st->bind_param("isi", $productId, $size, $colorId);
+    $st->execute();
+    $row = $st->get_result()->fetch_assoc();
+    $st->close();
+    return $row ?: null;
+}
+function fetchVariationBySize(mysqli $conn, int $productId, string $size): ?array {
+    $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, c.colorName
+            FROM product_variations pv
+            LEFT JOIN colors c ON c.colorID = pv.colorID
+            WHERE pv.productID=? AND pv.size=?
+            ORDER BY pv.variationID ASC LIMIT 1";
+    $st = $conn->prepare($sql);
+    if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
+    $st->bind_param("is", $productId, $size);
+    $st->execute();
+    $row = $st->get_result()->fetch_assoc();
+    $st->close();
+    return $row ?: null;
+}
 function fetchFirstVariation(mysqli $conn, int $productId): ?array {
     $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, c.colorName
             FROM product_variations pv
@@ -306,6 +385,16 @@ function fetchFirstVariation(mysqli $conn, int $productId): ?array {
     $row = $st->get_result()->fetch_assoc();
     $st->close();
     return $row ?: null;
+}
+function fetchColorName(mysqli $conn, int $colorId): string {
+    $sql = "SELECT colorName FROM colors WHERE colorID = ? LIMIT 1";
+    $st = $conn->prepare($sql);
+    if (!$st) return '';
+    $st->bind_param("i", $colorId);
+    $st->execute();
+    $row = $st->get_result()->fetch_assoc();
+    $st->close();
+    return trim((string)($row['colorName'] ?? ''));
 }
 function fetchAllVariations(mysqli $conn, int $productId): array {
     $sql = "SELECT pv.variationID, pv.size, pv.yarnType, pv.colorID, c.colorName,
@@ -326,7 +415,7 @@ function fetchAllVariations(mysqli $conn, int $productId): array {
             'variationID' => (int)$row['variationID'],
             'size'        => (string)$row['size'],
             'yarnType'    => (string)$row['yarnType'],
-            'colorID'     => (int)$row['colorID'],
+            'colorID'     => toInt($row['colorID'] ?? null),
             'colorName'   => (string)($row['colorName'] ?? ''),
             'stock'       => (int)$row['stock'],
         ];
