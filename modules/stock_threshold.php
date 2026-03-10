@@ -89,6 +89,9 @@ function checkStockThreshold($conn, $variationId, $currentStock = null, $thresho
         error_log("Failed to log stock threshold check: " . $conn->error);
     }
 
+    // Keep product-level stock/status synced from all its variations.
+    syncProductStockStatusFromVariations($conn, $productId);
+
     // If low or out of stock, create an admin notification
     if ($status !== 'available') {
         $message = ($status === 'out_of_stock')
@@ -98,6 +101,73 @@ function checkStockThreshold($conn, $variationId, $currentStock = null, $thresho
     }
 
     return $status;
+}
+
+/**
+ * Sync products.inventory and products.cartStatus from variation_stock rows.
+ *
+ * Rules:
+ * - out_of_stock: total stock <= 0
+ * - low_stock: total stock > 0 and no variation above its threshold
+ * - active: at least one variation is comfortably above threshold
+ *
+ * Keeps manual/admin workflow intact because admins can still override later.
+ *
+ * @param mysqli $conn
+ * @param int $productId
+ * @return void
+ */
+function syncProductStockStatusFromVariations(mysqli $conn, int $productId): void {
+    if ($productId <= 0) return;
+
+    // Do not override made-to-order products.
+    $p = $conn->prepare("SELECT cartStatus FROM products WHERE productID = ? LIMIT 1");
+    if (!$p) return;
+    $p->bind_param("i", $productId);
+    $p->execute();
+    $pr = $p->get_result();
+    $prow = $pr ? $pr->fetch_assoc() : null;
+    $p->close();
+    if (!$prow) return;
+    if ((string)($prow['cartStatus'] ?? '') === 'made_to_order') return;
+
+    $stmt = $conn->prepare("
+        SELECT vs.quantityAvailable, vs.lowStockThreshold
+        FROM variation_stock vs
+        JOIN product_variations pv ON pv.variationID = vs.variationID
+        WHERE pv.productID = ?
+    ");
+    if (!$stmt) return;
+    $stmt->bind_param("i", $productId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+
+    $totalStock = 0;
+    $hasComfortableStock = false;
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $qty = (int)($row['quantityAvailable'] ?? 0);
+            $thr = (int)($row['lowStockThreshold'] ?? 0);
+            $totalStock += $qty;
+            if ($qty > $thr) {
+                $hasComfortableStock = true;
+            }
+        }
+    }
+    $stmt->close();
+
+    $newStatus = 'active';
+    if ($totalStock <= 0) {
+        $newStatus = 'out_of_stock';
+    } elseif (!$hasComfortableStock) {
+        $newStatus = 'low_stock';
+    }
+
+    $upd = $conn->prepare("UPDATE products SET inventory = ?, cartStatus = ? WHERE productID = ?");
+    if (!$upd) return;
+    $upd->bind_param("isi", $totalStock, $newStatus, $productId);
+    $upd->execute();
+    $upd->close();
 }
 
 /**

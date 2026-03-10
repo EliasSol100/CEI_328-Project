@@ -62,9 +62,52 @@ function deductStockAfterOrderCompletion($orderId, $conn) {
         $variationId = (int)$item['variationID'];
         $qtyOrdered  = (int)$item['quantity'];
 
-        // Skip if variation_id is null (maybe product without variations)
+        // If no variation_id, deduct from product inventory directly.
         if (!$variationId) {
-            continue; // or handle differently if you have a separate product stock
+            $pStmt = $conn->prepare("SELECT inventory, cartStatus FROM products WHERE productID = ? FOR UPDATE");
+            if (!$pStmt) {
+                throw new Exception("Failed to prepare product stock select: " . $conn->error);
+            }
+            $pStmt->bind_param("i", $productId);
+            $pStmt->execute();
+            $pRes = $pStmt->get_result();
+            $pRow = $pRes ? $pRes->fetch_assoc() : null;
+            $pStmt->close();
+
+            if (!$pRow) {
+                throw new Exception("Product not found for product ID: $productId");
+            }
+
+            if ((string)($pRow['cartStatus'] ?? '') === 'made_to_order') {
+                continue;
+            }
+
+            $oldStock = (int)$pRow['inventory'];
+            $newStock = $oldStock - $qtyOrdered;
+            if ($newStock < 0) {
+                throw new Exception("Insufficient stock for product ID: $productId (ordered: $qtyOrdered, available: $oldStock)");
+            }
+
+            $autoStatus = 'active';
+            if ($newStock <= 0) {
+                $autoStatus = 'out_of_stock';
+            } elseif ($newStock <= 3) {
+                $autoStatus = 'low_stock';
+            }
+
+            $upd = $conn->prepare("UPDATE products SET inventory = ?, cartStatus = ? WHERE productID = ?");
+            if (!$upd) {
+                throw new Exception("Failed to prepare product stock update: " . $conn->error);
+            }
+            $upd->bind_param("isi", $newStock, $autoStatus, $productId);
+            if (!$upd->execute()) {
+                $upd->close();
+                throw new Exception("Failed to update product stock for product ID: $productId");
+            }
+            $upd->close();
+
+            logStockChange($conn, $orderId, $productId, null, $qtyOrdered, $oldStock, $newStock);
+            continue;
         }
 
         // Lock the stock row to prevent race conditions
@@ -205,7 +248,6 @@ function createNotification($conn, $message) {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
         $conn->query($createTable);
     }
-
     $stmt = $conn->prepare("INSERT INTO admin_notifications (message, created_at, is_read) VALUES (?, NOW(), 0)");
     if ($stmt) {
         $stmt->bind_param("s", $message);
@@ -217,33 +259,43 @@ function createNotification($conn, $message) {
 }
 
 /**
- * Log stock change for audit trail.
- * 
+ * Log stock deduction event in audit_logs using the current project schema.
+ *
  * @param mysqli $conn
- * @param int    $orderId
- * @param int    $productId
- * @param int    $variationId
- * @param int    $quantityChange
- * @param int    $oldStock
- * @param int    $newStock
+ * @param int $orderId
+ * @param int $productId
+ * @param int|null $variationId
+ * @param int $quantityChange
+ * @param int $oldStock
+ * @param int $newStock
  */
-function logStockChange($conn, $orderId, $productId, $variationId, $quantityChange, $oldStock, $newStock) {
-    $actionType = 'stock_deduction';
-    $entityType = 'order';
-    $entityID = $orderId;
-    $detailsJSON = json_encode([
-        'product_id'   => $productId,
+function logStockChange(
+    mysqli $conn,
+    int $orderId,
+    int $productId,
+    ?int $variationId,
+    int $quantityChange,
+    int $oldStock,
+    int $newStock
+): void {
+    $details = json_encode([
+        'order_id' => $orderId,
+        'product_id' => $productId,
         'variation_id' => $variationId,
-        'quantity'     => $quantityChange,
-        'old_stock'    => $oldStock,
-        'new_stock'    => $newStock
+        'quantity' => $quantityChange,
+        'old_stock' => $oldStock,
+        'new_stock' => $newStock
     ]);
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+    $entityType = $variationId ? 'variation' : 'product';
+    $entityId = $variationId ?: $productId;
 
-    $ipAddress = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
-
-    $stmt = $conn->prepare("INSERT INTO audit_logs (userID, actionType, entityType, entityID, detailsJSON, ipAddress, timestamp) VALUES (NULL, ?, ?, ?, ?, ?, NOW())");
+    $stmt = $conn->prepare("
+        INSERT INTO audit_logs (userID, role, actionType, entityType, entityID, ipAddress, detailsJSON)
+        VALUES (NULL, 'system', 'stock_deducted', ?, ?, ?, ?)
+    ");
     if ($stmt) {
-        $stmt->bind_param("ssiss", $actionType, $entityType, $entityID, $detailsJSON, $ipAddress);
+        $stmt->bind_param("siss", $entityType, $entityId, $ip, $details);
         $stmt->execute();
         $stmt->close();
     } else {

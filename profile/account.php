@@ -262,7 +262,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                                 }
 
                                 $cartStatus = (string)($row["cartStatus"] ?? "");
-                                if ($productId <= 0 || ($cartStatus !== "active" && $cartStatus !== "made_to_order")) {
+                                if (
+                                    $productId <= 0
+                                    || ($cartStatus !== "active" && $cartStatus !== "made_to_order" && $cartStatus !== "low_stock")
+                                ) {
                                     $skippedCount++;
                                     continue;
                                 }

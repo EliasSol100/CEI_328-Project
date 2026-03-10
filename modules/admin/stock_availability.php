@@ -5,6 +5,15 @@ require_once __DIR__ . '/includes/db.php';
 $current_page = 'stock_availability';
 $flash = '';
 
+// Optional manual override for per-product sales display on storefront.
+mysqli_query($conn, "
+    CREATE TABLE IF NOT EXISTS product_sales_overrides (
+        productID INT PRIMARY KEY,
+        manual_total_sales INT NOT NULL DEFAULT 0,
+        updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+");
+
 /* ── Handle POST: update product inventory / status ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
@@ -31,12 +40,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $flash = 'ok:Colour stock updated.';
     }
 
+    if ($action === 'update_sales_override') {
+        $productID = (int)$_POST['productID'];
+        $manualSales = max(0, (int)($_POST['manual_total_sales'] ?? 0));
+        $stmt = mysqli_prepare(
+            $conn,
+            "INSERT INTO product_sales_overrides (productID, manual_total_sales)
+             VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE manual_total_sales = VALUES(manual_total_sales)"
+        );
+        if ($stmt) {
+            mysqli_stmt_bind_param($stmt, 'ii', $productID, $manualSales);
+            mysqli_stmt_execute($stmt);
+            mysqli_stmt_close($stmt);
+            $flash = 'ok:Manual sales updated.';
+        }
+    }
+
+    if ($action === 'remove_sales_override') {
+        $productID = (int)$_POST['productID'];
+        $stmt = mysqli_prepare($conn, "DELETE FROM product_sales_overrides WHERE productID = ?");
+        if ($stmt) {
+            mysqli_stmt_bind_param($stmt, 'i', $productID);
+            mysqli_stmt_execute($stmt);
+            mysqli_stmt_close($stmt);
+            $flash = 'ok:Manual sales override removed.';
+        }
+    }
+
     header('Location: stock_availability.php?flash=' . urlencode($flash));
     exit;
 }
 
 if (isset($_GET['flash'])) {
     $flash = $_GET['flash'];
+}
+
+// Auto sales totals from placed order items.
+$autoSalesMap = [];
+$salesRes = mysqli_query($conn, "SELECT productID, COALESCE(SUM(quantity),0) AS total_qty FROM order_items GROUP BY productID");
+if ($salesRes) {
+    while ($row = mysqli_fetch_assoc($salesRes)) {
+        $autoSalesMap[(int)$row['productID']] = (int)$row['total_qty'];
+    }
+}
+
+// Manual overrides map.
+$manualSalesMap = [];
+$msRes = mysqli_query($conn, "SELECT productID, manual_total_sales FROM product_sales_overrides");
+if ($msRes) {
+    while ($row = mysqli_fetch_assoc($msRes)) {
+        $manualSalesMap[(int)$row['productID']] = (int)$row['manual_total_sales'];
+    }
 }
 
 /* ── Load products ── */
@@ -111,11 +166,21 @@ $statusBadge = [
               <th>Category</th>
               <th>Current Stock</th>
               <th>Status</th>
+              <th>Auto Sales</th>
+              <th>Sales Display</th>
+              <th>Manual Sales</th>
               <th>Update</th>
             </tr>
           </thead>
           <tbody>
             <?php foreach ($products as $p): ?>
+            <?php
+              $pid = (int)$p['productID'];
+              $autoSales = (int)($autoSalesMap[$pid] ?? 0);
+              $hasManualSales = array_key_exists($pid, $manualSalesMap);
+              $manualSales = $hasManualSales ? (int)$manualSalesMap[$pid] : null;
+              $effectiveSales = $hasManualSales ? (int)$manualSales : $autoSales;
+            ?>
             <tr>
               <td class="font-600"><?= htmlspecialchars($p['nameEN']) ?></td>
               <td class="text-muted"><?= htmlspecialchars($p['category'] ?? '—') ?></td>
@@ -134,10 +199,45 @@ $statusBadge = [
                   <?= $statusOptions[$p['cartStatus']] ?? $p['cartStatus'] ?>
                 </span>
               </td>
+              <td><?= $autoSales ?></td>
+              <td>
+                <span class="font-600"><?= $effectiveSales ?></span>
+                <?php if ($hasManualSales): ?>
+                  <span class="manual-badge" style="margin-left:6px">Manual</span>
+                <?php else: ?>
+                  <span class="text-muted" style="margin-left:6px">Auto</span>
+                <?php endif; ?>
+              </td>
+              <td>
+                <form method="POST" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <input type="hidden" name="action" value="update_sales_override">
+                  <input type="hidden" name="productID" value="<?= $pid ?>">
+                  <input
+                    type="number"
+                    name="manual_total_sales"
+                    value="<?= $hasManualSales ? (int)$manualSales : $autoSales ?>"
+                    min="0"
+                    class="form-input"
+                    style="width:96px;padding:6px 8px"
+                  >
+                  <button type="submit" class="btn-primary" style="padding:6px 12px;font-size:12px">
+                    <i class="fas fa-save"></i> Save
+                  </button>
+                </form>
+                <?php if ($hasManualSales): ?>
+                <form method="POST" style="margin-top:6px">
+                  <input type="hidden" name="action" value="remove_sales_override">
+                  <input type="hidden" name="productID" value="<?= $pid ?>">
+                  <button type="submit" class="btn-secondary" style="padding:5px 10px;font-size:12px">
+                    Use Auto
+                  </button>
+                </form>
+                <?php endif; ?>
+              </td>
               <td>
                 <form method="POST" style="display:flex;gap:8px;align-items:center">
                   <input type="hidden" name="action"    value="update_stock">
-                  <input type="hidden" name="productID" value="<?= $p['productID'] ?>">
+                  <input type="hidden" name="productID" value="<?= $pid ?>">
                   <input
                     type="number"
                     name="inventory"

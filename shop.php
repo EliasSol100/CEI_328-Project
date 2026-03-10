@@ -62,6 +62,15 @@ if (isset($_SESSION["user"])) {
 $GLOBALS['header_user_full_name'] = $fullName;
 $GLOBALS['header_user_role']      = $role;
 
+// Manual sales override table (used by admin page + storefront display).
+$conn->query("
+    CREATE TABLE IF NOT EXISTS product_sales_overrides (
+        productID INT PRIMARY KEY,
+        manual_total_sales INT NOT NULL DEFAULT 0,
+        updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+");
+
 // ---------------------------------------------
 // Wishlist handling (DB for logged-in, session for guests)
 // ---------------------------------------------
@@ -178,7 +187,7 @@ $catRes = $conn->query("
     SELECT DISTINCT category
     FROM products
     WHERE category IS NOT NULL AND category != ''
-      AND cartStatus IN ('active', 'made_to_order')
+      AND cartStatus IN ('active', 'low_stock', 'out_of_stock', 'made_to_order')
     ORDER BY category ASC
 ");
 if ($catRes) {
@@ -193,7 +202,7 @@ $maxPrice = 100;
 $priceBoundsRes = $conn->query("
     SELECT MIN(basePrice) AS min_price, MAX(basePrice) AS max_price
     FROM products
-    WHERE cartStatus IN ('active', 'made_to_order')
+    WHERE cartStatus IN ('active', 'low_stock', 'out_of_stock', 'made_to_order')
 ");
 if ($priceBoundsRes && ($bounds = $priceBoundsRes->fetch_assoc())) {
     if ($bounds['min_price'] !== null && $bounds['max_price'] !== null) {
@@ -229,10 +238,17 @@ $products = [];
 $sql = "
     SELECT p.productID, p.nameEN, p.nameGR, p.basePrice, p.inventory,
            p.cartStatus, p.category, p.hasVariants,
+           COALESCE(pso.manual_total_sales, COALESCE(os.total_qty, 0)) AS totalSales,
            MIN(ph.imageID) AS imageID
     FROM products p
     LEFT JOIN photos ph ON ph.productID = p.productID
-    WHERE p.cartStatus IN ('active', 'made_to_order')
+    LEFT JOIN (
+        SELECT productID, SUM(quantity) AS total_qty
+        FROM order_items
+        GROUP BY productID
+    ) os ON os.productID = p.productID
+    LEFT JOIN product_sales_overrides pso ON pso.productID = p.productID
+    WHERE p.cartStatus IN ('active', 'low_stock', 'out_of_stock', 'made_to_order')
 ";
 
 $bindTypes = '';
@@ -430,7 +446,8 @@ if ($revRes) {
                         <?php foreach ($products as $p):
                             $pid       = (int)$p['productID'];
                             $inWishlist = in_array($pid, $wishlistedIDs, true);
-                            $inStock   = (int)$p['inventory'] > 0;
+                            $isOutStock = ((string)$p['cartStatus'] === 'out_of_stock') || ((int)$p['inventory'] <= 0 && (string)$p['cartStatus'] !== 'made_to_order');
+                            $isLowStock = ((string)$p['cartStatus'] === 'low_stock') || (!$isOutStock && (int)$p['inventory'] > 0 && (int)$p['inventory'] <= 3);
                             $catName   = $p['category'] ?? '';
                             $imgStyle  = '';
                             if ($p['imageID']) {
@@ -466,10 +483,12 @@ if ($revRes) {
                                     <span class="shop-price">&euro;<?= number_format((float)$p['basePrice'], 0) ?></span>
                                     <?php if ($p['cartStatus'] === 'made_to_order'): ?>
                                         <span class="shop-stock" style="color:#a066f0;">Made to Order</span>
-                                    <?php elseif ($inStock): ?>
-                                        <span class="shop-stock" data-translate="inStock">In Stock</span>
-                                    <?php else: ?>
+                                    <?php elseif ($isOutStock): ?>
                                         <span class="shop-stock out" data-translate="outOfStock">Out of Stock</span>
+                                    <?php elseif ($isLowStock): ?>
+                                        <span class="shop-stock" style="background:#fff7d1;color:#9a6b00;">Only <?= (int)$p['inventory'] ?> left</span>
+                                    <?php else: ?>
+                                        <span class="shop-stock" data-translate="inStock">In Stock</span>
                                     <?php endif; ?>
                                 </div>
                                 <?php if ($rev['cnt'] > 0): ?>
@@ -478,6 +497,14 @@ if ($revRes) {
                                     <span class="shop-review-count">(<?= $rev['cnt'] ?>)</span>
                                 </div>
                                 <?php endif; ?>
+                                <div class="shop-review-count" style="margin-top:4px;display:block;">
+                                    <?= (int)($p['totalSales'] ?? 0) ?> sold
+                                </div>
+                                <button class="shop-atc-btn"
+                                        data-product-id="<?= $pid ?>"
+                                        data-has-variants="<?= (int)$p['hasVariants'] ?>">
+                                    <i class="fas fa-cart-plus"></i> <span data-translate="addToCart">Add to Cart</span>
+                                </button>
                             </div>
                         </article>
                         <?php endforeach; ?>
@@ -489,6 +516,7 @@ if ($revRes) {
     </main>
 
     <?php include __DIR__ . '/include/footer.php'; ?>
+    <div id="cart-toast" class="cart-toast"></div>
 
     <!-- Filtering behaviour (category + price + search) -->
     <script>
@@ -549,6 +577,104 @@ if ($revRes) {
             if (e.target.closest('form, button, a, input, label')) return;
             e.preventDefault();
             window.location.href = productUrl;
+        });
+    });
+
+    function currentLang() {
+        return localStorage.getItem('language') || 'en';
+    }
+
+    function t(en, el) {
+        return currentLang() === 'el' ? el : en;
+    }
+
+    function showToast(msg, isError) {
+        const t = document.getElementById('cart-toast');
+        t.textContent = msg;
+        t.classList.toggle('cart-toast-error', !!isError);
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), 2500);
+    }
+
+    function updateCartBadge(count) {
+        let badge = document.querySelector('a.cart-icon .cart-count');
+        if (count > 0) {
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'cart-count';
+                document.querySelector('a.cart-icon').appendChild(badge);
+            }
+            badge.textContent = count > 99 ? '99+' : count;
+        } else if (badge) {
+            badge.remove();
+        }
+    }
+
+    function addToCart(productId, variationId) {
+        const body = { product_id: productId, quantity: 1 };
+        if (variationId) body.variation_id = variationId;
+
+        return fetch('cart_api.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const count = data.cart?.totals?.items_count ?? 0;
+                updateCartBadge(count);
+                const msg = data.notice || t('Added to cart!', 'Προστέθηκε στο καλάθι!');
+                showToast(msg);
+            } else {
+                showToast(data.message || 'Could not add to cart.', true);
+            }
+            return data;
+        })
+        .catch(() => showToast('Network error.', true));
+    }
+
+    document.querySelectorAll('.shop-atc-btn').forEach(btn => {
+        btn.addEventListener('click', function () {
+            const pid = parseInt(this.dataset.productId);
+            const hasVariants = parseInt(this.dataset.hasVariants);
+            const btn = this;
+
+            if (hasVariants) {
+                // Fetch variations first
+                fetch('cart_api.php?action=variations&product_id=' + pid)
+                .then(r => r.json())
+                .then(data => {
+                    const vars = data.variations || [];
+                    if (vars.length === 0) {
+                        // No rows in product_variations — add without variation
+                        addToCart(pid, null).then(d => {
+                            if (d && d.success) {
+                                btn.classList.add('atc-added');
+                                btn.innerHTML = '<i class="fas fa-check"></i> ' + t('Added!', 'Προστέθηκε!');
+                                setTimeout(() => {
+                                    btn.classList.remove('atc-added');
+                                    btn.innerHTML = '<i class="fas fa-cart-plus"></i> ' + t('Add to Cart', 'Προσθήκη στο Καλάθι');
+                                }, 1800);
+                            }
+                        });
+                    } else {
+                        varModal.open(pid, vars, btn);
+                    }
+                })
+                .catch(() => showToast('Network error.', true));
+            } else {
+                addToCart(pid, null).then(d => {
+                    if (d && d.success) {
+                        btn.classList.add('atc-added');
+                        btn.innerHTML = '<i class="fas fa-check"></i> ' + t('Added!', 'Προστέθηκε!');
+                        setTimeout(() => {
+                            btn.classList.remove('atc-added');
+                            btn.innerHTML = '<i class="fas fa-cart-plus"></i> ' + t('Add to Cart', 'Προσθήκη στο Καλάθι');
+                        }, 1800);
+                    }
+                });
+            }
         });
     });
     </script>

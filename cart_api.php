@@ -76,7 +76,7 @@ try {
     $cartStatus  = (string)$product['cartStatus'];
     $hasVariants = ((int)$product['hasVariants'] === 1);
 
-    if ($cartStatus !== 'active' && $cartStatus !== 'made_to_order') {
+    if ($cartStatus !== 'active' && $cartStatus !== 'made_to_order' && $cartStatus !== 'low_stock') {
         badRequest('Product is not available for cart.');
     }
 
@@ -122,7 +122,7 @@ try {
             $resolvedVariation = $variation ?? $customVariation;
             $resolvedVariationId = (int)($resolvedVariation['variationID'] ?? 0);
             $availableStock = $resolvedVariationId > 0
-                ? fetchVariationStock($conn, $resolvedVariationId)
+                ? fetchVariationStock($conn, $resolvedVariationId, (int)$product['inventory'])
                 : (int)$product['inventory'];
         } else {
             $availableStock = (int)$product['inventory'];
@@ -144,7 +144,9 @@ try {
     if ($existingIndex !== null) {
         $newQty = (int)$cart['items'][$existingIndex]['quantity'] + $qty;
     }
-    if ($newQty > $availableStock) badRequest('Not enough stock for requested quantity.');
+    if ($newQty > $availableStock) {
+        badRequest('Only ' . $availableStock . ' left in stock.');
+    }
 
     // Gift add-on pricing
     $addonsCost = 0.0;
@@ -178,7 +180,7 @@ try {
             'giftWrapping' => $addons['gift_wrapping'],
             'giftBagFlag' => $addons['gift_bag'],
             'giftMessage' => $addons['message'],
-            'addonsCost' => 0.0,
+            'addonsCost' => round($addonsCost, 2),
         ],
         'pricing' => [
             'unitTotal' => round($unitTotal, 2),
@@ -193,7 +195,12 @@ try {
     $cart['totals'] = recalcCartTotals($cart['items']);
     $cart['updated_at'] = gmdate('c');
 
-    echo json_encode(['success' => true, 'cart' => $cart], JSON_UNESCAPED_UNICODE);
+    $notice = null;
+    if ($cartStatus !== 'made_to_order' && $availableStock <= 3) {
+        $notice = 'Low stock: only ' . $availableStock . ' left.';
+    }
+
+    echo json_encode(['success' => true, 'cart' => $cart, 'notice' => $notice], JSON_UNESCAPED_UNICODE);
     exit;
 
 } catch (Throwable $e) {
@@ -398,10 +405,11 @@ function fetchColorName(mysqli $conn, int $colorId): string {
 }
 function fetchAllVariations(mysqli $conn, int $productId): array {
     $sql = "SELECT pv.variationID, pv.size, pv.yarnType, pv.colorID, c.colorName,
-                   COALESCE(vs.quantityAvailable, 0) AS stock
+                   COALESCE(vs.quantityAvailable, p.inventory, 0) AS stock
             FROM product_variations pv
             LEFT JOIN colors c ON c.colorID = pv.colorID
             LEFT JOIN variation_stock vs ON vs.variationID = pv.variationID
+            JOIN products p ON p.productID = pv.productID
             WHERE pv.productID = ?
             ORDER BY pv.variationID ASC";
     $st = $conn->prepare($sql);
@@ -423,7 +431,7 @@ function fetchAllVariations(mysqli $conn, int $productId): array {
     $st->close();
     return $rows;
 }
-function fetchVariationStock(mysqli $conn, int $variationId): int {
+function fetchVariationStock(mysqli $conn, int $variationId, int $productInventoryFallback = 0): int {
     $sql = "SELECT quantityAvailable FROM variation_stock WHERE variationID = ? LIMIT 1";
     $st = $conn->prepare($sql);
     if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
@@ -431,5 +439,8 @@ function fetchVariationStock(mysqli $conn, int $variationId): int {
     $st->execute();
     $row = $st->get_result()->fetch_assoc();
     $st->close();
-    return $row ? (int)$row['quantityAvailable'] : 0;
+    if ($row && array_key_exists('quantityAvailable', $row)) {
+        return max(0, (int)$row['quantityAvailable']);
+    }
+    return max(0, $productInventoryFallback);
 }

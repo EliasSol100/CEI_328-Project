@@ -83,6 +83,10 @@ body {
 .content-header-left p {
   font-size: 13.5px; color: var(--text-2); margin-top: 3px;
 }
+.content-header-right {
+  display: flex;
+  align-items: center;
+}
 .content-body { padding: 24px 40px 48px; }
 
 /* ── Cards ───────────────────────────────────────── */

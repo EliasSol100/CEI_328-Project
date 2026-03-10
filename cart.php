@@ -62,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($qty > $availableStock) {
             $_SESSION['cart_notice'] = [
                 'type' => 'error',
-                'message' => 'Not enough stock for requested quantity.'
+                'message' => 'Only ' . max(0, $availableStock) . ' left in stock.'
             ];
             header('Location: cart.php');
             exit();

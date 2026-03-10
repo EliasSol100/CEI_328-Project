@@ -92,10 +92,16 @@ if ($r && mysqli_num_rows($r)) {
     $topProduct = ['name' => $row['nameEN'], 'sales' => (int)$row['total']];
 }
 
-/* ── Stats: Globally unavailable colours ── */
-$unavailableColors = [];
-$r = mysqli_query($conn, "SELECT colorName FROM colors WHERE isActive = 0 ORDER BY colorName");
-if ($r) { while ($row = mysqli_fetch_assoc($r)) $unavailableColors[] = $row['colorName']; }
+/* ── Stats: low/out-of-stock products ── */
+$lowStockProducts = [];
+$r = mysqli_query($conn, "
+    SELECT nameEN
+    FROM products
+    WHERE cartStatus <> 'made_to_order'
+      AND (cartStatus IN ('low_stock','out_of_stock') OR inventory <= 3)
+    ORDER BY nameEN
+");
+if ($r) { while ($row = mysqli_fetch_assoc($r)) $lowStockProducts[] = $row['nameEN']; }
 
 /* ── Sales trend (last 7 days) ── */
 $trendLabels = $trendValues = [];
@@ -242,6 +248,11 @@ $jsonValues = json_encode($trendValues);
         <h1>Dashboard Overview</h1>
         <p>Welcome back! Here's what's happening with your shop.</p>
       </div>
+      <div class="content-header-right">
+        <a href="../../index.php" class="btn-secondary">
+          <i class="fas fa-arrow-left"></i> Back to Website
+        </a>
+      </div>
     </div>
 
     <div class="content-body">
@@ -327,8 +338,8 @@ $jsonValues = json_encode($trendValues);
         </div>
         <div class="stat-card">
           <div class="stat-header">Low Stock Alerts <i class="fas fa-circle-exclamation stat-icon" style="color:#f59e0b;"></i></div>
-          <div class="stat-val"><?= count($unavailableColors) ?></div>
-          <div class="stat-desc">Colours unavailable</div>
+          <div class="stat-val"><?= count($lowStockProducts) ?></div>
+          <div class="stat-desc">Products low/out of stock</div>
         </div>
       </div>
 
@@ -358,14 +369,14 @@ $jsonValues = json_encode($trendValues);
         </div>
       </div>
 
-      <!-- ── Globally unavailable colours ── -->
-      <?php if (!empty($unavailableColors)): ?>
+      <!-- ── Low / out-of-stock products ── -->
+      <?php if (!empty($lowStockProducts)): ?>
       <div class="alert-card alert-orange mb-6">
         <div class="alert-title">
-          <i class="fas fa-circle-exclamation"></i> Globally Unavailable Colours
+          <i class="fas fa-circle-exclamation"></i> Low / Out-of-Stock Products
         </div>
-        <p class="alert-text mb-4">The following colours are marked as globally unavailable and cannot be selected for any products:</p>
-        <?php foreach ($unavailableColors as $c): ?>
+        <p class="alert-text mb-4">These products need attention (auto by inventory and manual admin updates):</p>
+        <?php foreach ($lowStockProducts as $c): ?>
           <span class="colour-tag"><?= htmlspecialchars($c) ?></span>
         <?php endforeach; ?>
       </div>

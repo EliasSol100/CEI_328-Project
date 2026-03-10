@@ -5,6 +5,14 @@ require_once __DIR__ . "/authentication/get_config.php";
 
 $systemTitle = getSystemConfig("site_title") ?: "Creations by Athina";
 
+$conn->query("
+    CREATE TABLE IF NOT EXISTS product_sales_overrides (
+        productID INT PRIMARY KEY,
+        manual_total_sales INT NOT NULL DEFAULT 0,
+        updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+");
+
 $productId = (int)($_GET["id"] ?? 0);
 if ($productId <= 0) {
     header("Location: shop.php");
@@ -92,9 +100,16 @@ $product = null;
 $productStmt = $conn->prepare(
     "SELECT p.productID, p.sku, p.nameEN, p.nameGR, p.descriptionEN, p.descriptionGR,
             p.basePrice, p.inventory, p.cartStatus, p.hasVariants, p.category,
+            COALESCE(pso.manual_total_sales, COALESCE(os.total_qty, 0)) AS totalSales,
             ROUND(COALESCE(AVG(r.rating), 0), 1) AS avgRating,
             COUNT(r.reviewID) AS reviewCount
      FROM products p
+     LEFT JOIN (
+        SELECT productID, SUM(quantity) AS total_qty
+        FROM order_items
+        GROUP BY productID
+     ) os ON os.productID = p.productID
+     LEFT JOIN product_sales_overrides pso ON pso.productID = p.productID
      LEFT JOIN reviews r ON r.productID = p.productID AND r.isVisible = 1
      WHERE p.productID = ?
      GROUP BY p.productID
@@ -389,6 +404,9 @@ include __DIR__ . "/include/header.php";
                 <?php endfor; ?>
                 <span><?= number_format((float)$product["avgRating"], 1) ?> (<?= (int)$product["reviewCount"] ?> reviews)</span>
             </div>
+            <div class="shop-review-count" style="margin: -4px 0 12px; display:block;">
+                <?= (int)($product["totalSales"] ?? 0) ?> sold
+            </div>
 
             <div class="price-row">&euro;<?= number_format((float)$product["basePrice"], 2) ?></div>
 
@@ -463,6 +481,8 @@ include __DIR__ . "/include/header.php";
                     <strong class="<?= ((int)$product["inventory"] > 0 || (string)$product["cartStatus"] === "made_to_order") ? "in-stock" : "out-stock" ?>">
                         <?php if ((string)$product["cartStatus"] === "made_to_order"): ?>
                             Made to Order
+                        <?php elseif ((string)$product["cartStatus"] === "low_stock" || ((int)$product["inventory"] > 0 && (int)$product["inventory"] <= 3)): ?>
+                            Only <?= (int)$product["inventory"] ?> left
                         <?php elseif ((int)$product["inventory"] > 0): ?>
                             In Stock
                         <?php else: ?>
@@ -806,7 +826,7 @@ include __DIR__ . "/include/header.php";
                     if (data && data.success) {
                         var count = data.cart && data.cart.totals ? data.cart.totals.items_count : 0;
                         updateCartBadge(Number(count) || 0);
-                        showToast("Added to cart.");
+                        showToast(data.notice || "Added to cart.");
                     } else {
                         showToast((data && data.message) || "Could not add to cart.", true);
                     }
