@@ -47,6 +47,11 @@ if (isset($result['order_id'])) {
         $stmt->close();
     }
 }
+
+function buildGuestReviewKeyForOrder(int $orderId, string $orderNumber, string $email): string {
+    $payload = $orderId . "|" . strtolower(trim($email)) . "|" . trim($orderNumber);
+    return hash_hmac("sha256", $payload, "athina_guest_review_v1");
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -72,6 +77,8 @@ if (isset($result['order_id'])) {
         .btn-primary { background: #007bff; color: white; }
         .btn-success { background: #28a745; color: white; }
         .btn-secondary { background: #6c757d; color: white; }
+        .btn-review { background: #495bd6; color: white; }
+        .btn-review:hover { background: #3f4fb6; }
         .email-note { background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 20px 0; }
     </style>
 </head>
@@ -120,6 +127,17 @@ if (file_exists($headerPath)) {
         $confirmationTo = (string)($result['confirmation_email_to'] ?? ($orderDetails['email'] ?? ($_SESSION['user']['email'] ?? 'your email')));
         $confirmationSent = !empty($result['confirmation_email_sent']);
         $confirmationError = trim((string)($result['confirmation_email_error'] ?? ''));
+        $reviewUrl = '';
+        if (!empty($result['order_id'])) {
+            $orderIdForReview = (int)$result['order_id'];
+            $orderNumberForReview = (string)($result['order_number'] ?? ($orderDetails['orderNumber'] ?? $orderIdForReview));
+            $orderEmailForReview = (string)($confirmationTo !== 'your email' ? $confirmationTo : '');
+            $reviewUrl = $project . '/submit_product_review.php?order_id=' . $orderIdForReview;
+            if (!isset($_SESSION['user']) && $orderEmailForReview !== '') {
+                $guestReviewKey = buildGuestReviewKeyForOrder($orderIdForReview, $orderNumberForReview, $orderEmailForReview);
+                $reviewUrl .= '&review_key=' . rawurlencode($guestReviewKey);
+            }
+        }
         ?>
         <?php if ($confirmationSent): ?>
             <div class="email-note"><i class="fas fa-envelope"></i> Confirmation sent to <strong><?= htmlspecialchars($confirmationTo) ?></strong></div>
@@ -135,6 +153,9 @@ if (file_exists($headerPath)) {
 
         <div>
             <a href="<?= $project ?>/shop.php" class="btn btn-primary">Continue Shopping</a>
+            <?php if ($reviewUrl !== ''): ?>
+                <a href="<?= htmlspecialchars($reviewUrl) ?>" class="btn btn-review">Product Review</a>
+            <?php endif; ?>
             <?php if (isset($_SESSION['user']) || !empty($result['account_created'])): ?>
                 <a href="<?= $project ?>/profile/account.php?tab=orders" class="btn btn-success">View Orders</a>
             <?php endif; ?>
