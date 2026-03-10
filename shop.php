@@ -172,24 +172,118 @@ if ($userId) {
 // Keep header wishlist counter in sync on this request.
 $_SESSION['wishlist_count'] = count($wishlistedIDs);
 
+// Load distinct active categories
+$categories = [];
+$catRes = $conn->query("
+    SELECT DISTINCT category
+    FROM products
+    WHERE category IS NOT NULL AND category != ''
+      AND cartStatus IN ('active', 'made_to_order')
+    ORDER BY category ASC
+");
+if ($catRes) {
+    while ($row = $catRes->fetch_assoc()) {
+        $categories[] = $row['category'];
+    }
+}
+
+// Price bounds from DB (all active/made_to_order products)
+$minPrice = 0;
+$maxPrice = 100;
+$priceBoundsRes = $conn->query("
+    SELECT MIN(basePrice) AS min_price, MAX(basePrice) AS max_price
+    FROM products
+    WHERE cartStatus IN ('active', 'made_to_order')
+");
+if ($priceBoundsRes && ($bounds = $priceBoundsRes->fetch_assoc())) {
+    if ($bounds['min_price'] !== null && $bounds['max_price'] !== null) {
+        $minPrice = (int)floor((float)$bounds['min_price']);
+        $maxPrice = (int)ceil((float)$bounds['max_price']);
+    }
+}
+if ($minPrice > $maxPrice) {
+    $minPrice = 0;
+    $maxPrice = 100;
+}
+
+// Active filter/search state from query string
+$searchQuery = trim((string)($_GET['q'] ?? ''));
+$searchQuery = substr($searchQuery, 0, 120);
+
+$selectedCategory = $_GET['category'] ?? 'all';
+$validCategories  = array_merge(['all'], $categories);
+if (!in_array($selectedCategory, $validCategories, true)) {
+    $selectedCategory = 'all';
+}
+
+$selectedPriceMax = $maxPrice;
+if (isset($_GET['price_max']) && $_GET['price_max'] !== '') {
+    $selectedPriceMax = (float)$_GET['price_max'];
+}
+$selectedPriceMax = max((float)$minPrice, min((float)$maxPrice, (float)$selectedPriceMax));
+
 // ---------------------------------------------
-// Load products from DB
+// Load products from DB (with active search + filters)
 // ---------------------------------------------
 $products = [];
-$res = $conn->query("
+$sql = "
     SELECT p.productID, p.nameEN, p.nameGR, p.basePrice, p.inventory,
            p.cartStatus, p.category, p.hasVariants,
            MIN(ph.imageID) AS imageID
     FROM products p
     LEFT JOIN photos ph ON ph.productID = p.productID
     WHERE p.cartStatus IN ('active', 'made_to_order')
+";
+
+$bindTypes = '';
+$bindValues = [];
+
+if ($selectedCategory !== 'all') {
+    $sql .= " AND p.category = ?";
+    $bindTypes .= 's';
+    $bindValues[] = $selectedCategory;
+}
+
+if ($searchQuery !== '') {
+    $sql .= " AND (
+        p.nameEN LIKE ?
+        OR p.nameGR LIKE ?
+        OR p.category LIKE ?
+        OR p.descriptionEN LIKE ?
+        OR p.descriptionGR LIKE ?
+    )";
+    $like = '%' . $searchQuery . '%';
+    $bindTypes .= 'sssss';
+    $bindValues[] = $like;
+    $bindValues[] = $like;
+    $bindValues[] = $like;
+    $bindValues[] = $like;
+    $bindValues[] = $like;
+}
+
+$sql .= " AND p.basePrice <= ?";
+$bindTypes .= 'd';
+$bindValues[] = (float)$selectedPriceMax;
+
+$sql .= "
     GROUP BY p.productID
     ORDER BY p.productID ASC
-");
-if ($res) {
-    while ($row = $res->fetch_assoc()) {
+";
+
+$stmtProducts = $conn->prepare($sql);
+if ($stmtProducts) {
+    $params = [];
+    $params[] = &$bindTypes;
+    foreach ($bindValues as $k => $v) {
+        $params[] = &$bindValues[$k];
+    }
+    call_user_func_array([$stmtProducts, 'bind_param'], $params);
+    $stmtProducts->execute();
+    $resProducts = $stmtProducts->get_result();
+    while ($row = $resProducts->fetch_assoc()) {
         $products[] = $row;
     }
+    $stmtProducts->close();
 }
 
 // Load review summary per product
@@ -206,37 +300,6 @@ if ($revRes) {
             'avg' => (float)$row['avg_rating'],
         ];
     }
-}
-
-// Load distinct active categories
-$categories = [];
-$catRes = $conn->query("
-    SELECT DISTINCT category
-    FROM products
-    WHERE category IS NOT NULL AND category != ''
-      AND cartStatus IN ('active', 'made_to_order')
-    ORDER BY category ASC
-");
-if ($catRes) {
-    while ($row = $catRes->fetch_assoc()) {
-        $categories[] = $row['category'];
-    }
-}
-
-// Price range from DB
-$minPrice = 0;
-$maxPrice = 100;
-if (!empty($products)) {
-    $prices   = array_column($products, 'basePrice');
-    $minPrice = (int)floor(min($prices));
-    $maxPrice = (int)ceil(max($prices));
-}
-
-// Selected category from query string
-$selectedCategory = $_GET['category'] ?? 'all';
-$validCategories  = array_merge(['all'], $categories);
-if (!in_array($selectedCategory, $validCategories, true)) {
-    $selectedCategory = 'all';
 }
 ?>
 <!DOCTYPE html>
@@ -269,15 +332,18 @@ if (!in_array($selectedCategory, $validCategories, true)) {
             <div class="shop-layout">
                 <!-- FILTER SIDEBAR -->
                 <aside class="shop-filters">
+                    <form id="shop-filters-form" method="get" action="shop.php">
 
                     <!-- Search -->
                     <div class="shop-search">
                         <div class="shop-search-input-wrap">
                             <i class="fas fa-search" aria-hidden="true"></i>
                             <input id="shop-search-input"
+                                   name="q"
                                    type="search"
                                    data-translate-placeholder="shopSearchPlaceholder"
-                                   placeholder="Search products...">
+                                   placeholder="Search products..."
+                                   value="<?= htmlspecialchars($searchQuery) ?>">
                         </div>
                     </div>
 
@@ -306,14 +372,15 @@ if (!in_array($selectedCategory, $validCategories, true)) {
                     <div class="filter-group">
                         <h4 data-translate="price">Price</h4>
                         <input id="price-range"
+                               name="price_max"
                                class="price-range-input"
                                type="range"
                                min="<?= $minPrice ?>"
                                max="<?= $maxPrice ?>"
-                               value="<?= $maxPrice ?>">
+                               value="<?= (float)$selectedPriceMax ?>">
                         <div class="price-range-labels">
-                            <span>€<?= $minPrice ?></span>
-                            <span id="price-max-label">€<?= $maxPrice ?></span>
+                            <span>&euro;<?= $minPrice ?></span>
+                            <span id="price-max-label">&euro;<?= (float)$selectedPriceMax ?></span>
                         </div>
                     </div>
 
@@ -328,6 +395,15 @@ if (!in_array($selectedCategory, $validCategories, true)) {
                         </div>
                     </div>
 
+                    <!-- APPLY FILTERS -->
+                    <div class="filter-group">
+                        <button type="submit"
+                                class="apply-filters-btn"
+                                data-translate="applyFilters">
+                            Apply Filters
+                        </button>
+                    </div>
+
                     <!-- CLEAR FILTERS -->
                     <div class="filter-group filter-clear-wrap">
                         <button id="clear-filters-btn"
@@ -337,6 +413,7 @@ if (!in_array($selectedCategory, $validCategories, true)) {
                             Clear Filters
                         </button>
                     </div>
+                    </form>
 
                 </aside>
 
@@ -346,7 +423,7 @@ if (!in_array($selectedCategory, $validCategories, true)) {
 
                         <?php if (empty($products)): ?>
                         <p style="grid-column:1/-1;text-align:center;color:#888;padding:40px 0;">
-                            No products available at the moment.
+                            No products match your search or filters.
                         </p>
                         <?php endif; ?>
 
@@ -386,7 +463,7 @@ if (!in_array($selectedCategory, $validCategories, true)) {
                             <div class="shop-product-info">
                                 <h3 class="shop-product-name"><?= htmlspecialchars($p['nameEN']) ?></h3>
                                 <div class="shop-price-row">
-                                    <span class="shop-price">€<?= number_format((float)$p['basePrice'], 0) ?></span>
+                                    <span class="shop-price">&euro;<?= number_format((float)$p['basePrice'], 0) ?></span>
                                     <?php if ($p['cartStatus'] === 'made_to_order'): ?>
                                         <span class="shop-stock" style="color:#a066f0;">Made to Order</span>
                                     <?php elseif ($inStock): ?>
@@ -415,81 +492,46 @@ if (!in_array($selectedCategory, $validCategories, true)) {
 
     <!-- Filtering behaviour (category + price + search) -->
     <script>
-    function applyFilters() {
-        // SEARCH
+    (function () {
+        const form = document.getElementById('shop-filters-form');
+        if (!form) return;
+
         const searchInput = document.getElementById('shop-search-input');
-        const searchQuery = searchInput ? searchInput.value.trim().toLowerCase() : '';
+        const categoryInputs = document.querySelectorAll('input[type="radio"][name="category"]');
+        const priceRange = document.getElementById('price-range');
+        const priceMaxLabel = document.getElementById('price-max-label');
+        const clearBtn = document.getElementById('clear-filters-btn');
+        let searchTimer = null;
 
-        // CATEGORY
-        const categoryInput = document.querySelector('input[name="category"]:checked');
-        const selectedCategory = categoryInput ? categoryInput.value : 'all';
+        const updatePriceLabel = () => {
+            if (!priceRange || !priceMaxLabel) return;
+            priceMaxLabel.textContent = '\u20AC' + priceRange.value;
+        };
 
-        // PRICE (max price)
-        const range = document.getElementById('price-range');
-        const maxPrice = range ? parseFloat(range.value) : Infinity;
-
-        const cards = document.querySelectorAll('.shop-product-card');
-
-        cards.forEach(card => {
-            const cardCategory = card.dataset.category || '';
-            const cardPrice    = parseFloat(card.dataset.price || '0');
-            const titleEl      = card.querySelector('.shop-product-name');
-            const cardTitle    = titleEl ? titleEl.textContent.toLowerCase() : '';
-
-            // Category match
-            let matchesCategory = (selectedCategory === 'all') || (cardCategory === selectedCategory);
-
-            // Price match
-            let matchesPrice = isNaN(maxPrice) || cardPrice <= maxPrice;
-
-            // Search match
-            let matchesSearch = !searchQuery || cardTitle.includes(searchQuery);
-
-            card.style.display = (matchesCategory && matchesPrice && matchesSearch) ? '' : 'none';
-        });
-    }
-
-    // Category radios
-    document.querySelectorAll('input[type="radio"][name="category"]').forEach(radio => {
-        radio.addEventListener('change', applyFilters);
-    });
-
-    // Price range slider
-    const priceRange = document.getElementById('price-range');
-    const priceMaxLabel = document.getElementById('price-max-label');
-    if (priceRange) {
-        priceRange.addEventListener('input', function () {
-            if (priceMaxLabel) priceMaxLabel.textContent = '€' + this.value;
-            applyFilters();
-        });
-    }
-
-    // Search box
-    const searchInputEl = document.getElementById('shop-search-input');
-    if (searchInputEl) {
-        searchInputEl.addEventListener('input', applyFilters);
-    }
-
-    // Clear Filters
-    document.getElementById('clear-filters-btn')?.addEventListener('click', function () {
-        const s = document.getElementById('shop-search-input');
-        if (s) s.value = '';
-
-        document.querySelectorAll('input[type="radio"][name="category"]').forEach(function (radio) {
-            radio.checked = (radio.value === 'all');
+        categoryInputs.forEach((radio) => {
+            radio.addEventListener('change', () => form.submit());
         });
 
-        const range = document.getElementById('price-range');
-        if (range) {
-            range.value = range.max;
-            if (priceMaxLabel) priceMaxLabel.textContent = '€' + range.max;
+        if (priceRange) {
+            priceRange.addEventListener('input', updatePriceLabel);
+            priceRange.addEventListener('change', () => form.submit());
         }
 
-        applyFilters();
-    });
+        if (searchInput) {
+            searchInput.addEventListener('input', () => {
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(() => form.submit(), 350);
+            });
+        }
 
-    // Initial state
-    applyFilters();
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                window.location.href = 'shop.php';
+            });
+        }
+
+        updatePriceLabel();
+    })();
     </script>
     <script src="assets/js/wishlist-live.js" defer></script>
     <script>

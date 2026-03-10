@@ -141,6 +141,25 @@
     margin-top: 26px;
 }
 
+.apply-filters-btn {
+    width: 100%;
+    padding: 11px 0;
+    border-radius: 999px;
+    border: none;
+    background: linear-gradient(90deg, var(--purple-dark), #9932cc);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: box-shadow 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+}
+
+.apply-filters-btn:hover {
+    box-shadow: 0 8px 18px rgba(124, 58, 237, 0.24);
+    transform: translateY(-1px);
+    opacity: 0.95;
+}
+
 .clear-filters-btn {
     width: 100%;
     padding: 11px 0;
