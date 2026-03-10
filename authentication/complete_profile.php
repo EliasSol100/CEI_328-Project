@@ -87,24 +87,45 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     // Check for duplicate username
     if ($isSocialLogin && $userId) {
         $stmt = $conn->prepare("SELECT userID FROM users WHERE username = ? AND userID != ?");
-        $stmt->bind_param("si", $username, $userId);
     } else {
         $stmt = $conn->prepare("SELECT userID FROM users WHERE username = ?");
-        $stmt->bind_param("s", $username);
     }
-    $stmt->execute();
-    $stmt->store_result();
+    if ($stmt) {
+        if ($isSocialLogin && $userId) {
+            $stmt->bind_param("si", $username, $userId);
+        } else {
+            $stmt->bind_param("s", $username);
+        }
+        $stmt->execute();
+        $stmt->store_result();
 
-    if ($stmt->num_rows > 0) {
-        $errors[] = "This username already exists, please choose a different one.";
+        if ($stmt->num_rows > 0) {
+            $errors[] = "This username already exists, please choose a different one.";
+        }
+        $stmt->close();
+    } else {
+        $errors[] = "We couldn't validate your username. Please try again.";
     }
-    $stmt->close();
+
+    if (!$isSocialLogin) {
+        $emailCheck = $conn->prepare("SELECT userID FROM users WHERE email = ? LIMIT 1");
+        if ($emailCheck) {
+            $emailCheck->bind_param("s", $email);
+            $emailCheck->execute();
+            $emailCheck->store_result();
+            if ($emailCheck->num_rows > 0) {
+                $errors[] = "An account with this email already exists!";
+            }
+            $emailCheck->close();
+        }
+    }
 
     // -----------------------------
     // 2. Save to DB if no errors
     // -----------------------------
     if (empty($errors)) {
         $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+        $newUserId = null;
 
         if ($isSocialLogin && $userId) {
             // Existing user (social login) completes their profile
@@ -125,26 +146,32 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     profile_complete = 1
                 WHERE userID = ?
             ");
-            $stmt->bind_param(
-                "ssssssssssssi",
-                $fullName,
-                $firstName,
-                $middleName,
-                $lastName,
-                $username,
-                $passwordHash,
-                $country,
-                $city,
-                $address,
-                $postcode,
-                $dob,
-                $phone,
-                $userId
-            );
-            $stmt->execute();
-            $stmt->close();
-
-            $newUserId = $userId;
+            if (!$stmt) {
+                $errors[] = "We couldn't update your profile. Please try again.";
+            } else {
+                $stmt->bind_param(
+                    "ssssssssssssi",
+                    $fullName,
+                    $firstName,
+                    $middleName,
+                    $lastName,
+                    $username,
+                    $passwordHash,
+                    $country,
+                    $city,
+                    $address,
+                    $postcode,
+                    $dob,
+                    $phone,
+                    $userId
+                );
+                if (!$stmt->execute()) {
+                    $errors[] = "We couldn't update your profile. Please try again.";
+                } else {
+                    $newUserId = $userId;
+                }
+                $stmt->close();
+            }
 
         } else {
             // New user from manual email flow
@@ -170,64 +197,78 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 )
             ");
             // 13 placeholders → 13 bound values (up to phone)
-            $stmt->bind_param(
-                "sssssssssssss",
-                $fullName,
-                $firstName,
-                $middleName,
-                $lastName,
-                $username,
-                $email,
-                $passwordHash,
-                $country,
-                $city,
-                $address,
-                $postcode,
-                $dob,
-                $phone
-            );
+            if (!$stmt) {
+                $errors[] = "We couldn't create your account. Please try again.";
+            } else {
+                $stmt->bind_param(
+                    "sssssssssssss",
+                    $fullName,
+                    $firstName,
+                    $middleName,
+                    $lastName,
+                    $username,
+                    $email,
+                    $passwordHash,
+                    $country,
+                    $city,
+                    $address,
+                    $postcode,
+                    $dob,
+                    $phone
+                );
+                if (!$stmt->execute()) {
+                    if ((int)$stmt->errno === 1062) {
+                        $errors[] = "An account with this email or username already exists.";
+                    } else {
+                        $errors[] = "We couldn't create your account. Please try again.";
+                    }
+                } else {
+                    $newUserId = (int)$stmt->insert_id;
+                    // No longer need the temporary manual_email
+                    unset($_SESSION["manual_email"]);
+                }
+                $stmt->close();
+            }
+        }
+
+        if (empty($errors) && !empty($newUserId)) {
+            // -----------------------------
+            // 3. Load fresh user row & set session
+            // -----------------------------
+            $stmt = $conn->prepare("SELECT *, userID AS id FROM users WHERE userID = ?");
+            $stmt->bind_param("i", $newUserId);
             $stmt->execute();
-            $newUserId = $stmt->insert_id;
+            $result  = $stmt->get_result();
+            $userRow = $result->fetch_assoc();
             $stmt->close();
 
-            // No longer need the temporary manual_email
-            unset($_SESSION["manual_email"]);
+            if ($userRow) {
+                // Core session keys that select_verification_method.php depends on
+                $_SESSION["user_id"]   = $userRow["id"];
+                $_SESSION["email"]     = $userRow["email"];
+                $_SESSION["full_name"] = $userRow["full_name"];
+                $_SESSION["role"]      = $userRow["role"] ?? 'user';
+
+                $_SESSION["user"] = [
+                    "id"               => $userRow["id"],
+                    "email"            => $userRow["email"],
+                    "full_name"        => $userRow["full_name"],
+                    "role"             => $userRow["role"] ?? 'user',
+                    "profile_complete" => $userRow["profile_complete"],
+                    "is_verified"      => $userRow["is_verified"],
+                ];
+
+                // -----------------------------
+                // 4. Go to verification step
+                // -----------------------------
+                header("Location: select_verification_method.php");
+                // JS fallback in case headers are already sent
+                echo '<script>window.location.href="select_verification_method.php";</script>';
+                exit();
+            }
+
+            $errors[] = "We couldn't start your verification session. Please log in and try again.";
         }
-
-        // -----------------------------
-        // 3. Load fresh user row & set session
-        // -----------------------------
-        $stmt = $conn->prepare("SELECT *, userID AS id FROM users WHERE userID = ?");
-        $stmt->bind_param("i", $newUserId);
-        $stmt->execute();
-        $result  = $stmt->get_result();
-        $userRow = $result->fetch_assoc();
-        $stmt->close();
-
-        if ($userRow) {
-            // Core session keys that select_verification_method.php depends on
-            $_SESSION["user_id"]   = $userRow["id"];
-            $_SESSION["email"]     = $userRow["email"];
-            $_SESSION["full_name"] = $userRow["full_name"];
-            $_SESSION["role"]      = $userRow["role"] ?? 'user';
-
-            $_SESSION["user"] = [
-                "id"               => $userRow["id"],
-                "email"            => $userRow["email"],
-                "full_name"        => $userRow["full_name"],
-                "role"             => $userRow["role"] ?? 'user',
-                "profile_complete" => $userRow["profile_complete"],
-                "is_verified"      => $userRow["is_verified"],
-            ];
-        }
-
-        // -----------------------------
-        // 4. Go to verification step
-        // -----------------------------
-        header("Location: select_verification_method.php");
-        // JS fallback in case headers are already sent
-        echo '<script>window.location.href="select_verification_method.php";</script>';
-        exit();
     }
 }
 ?>

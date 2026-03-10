@@ -10,6 +10,12 @@ if (isset($_SESSION["user"])) {
 if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
     $manual_email = trim($_POST["manual_email"]);
 
+    if (!filter_var($manual_email, FILTER_VALIDATE_EMAIL)) {
+        $_SESSION["registration_error"] = "Please enter a valid email address.";
+        header("Location: registration.php");
+        exit();
+    }
+
     // users table primary key is userID
     $stmt = $conn->prepare("SELECT userID FROM users WHERE email = ?");
     $stmt->bind_param("s", $manual_email);

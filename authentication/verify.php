@@ -68,7 +68,7 @@ function generateEmailVerificationCode(mysqli $conn, int $userId, string $email)
         return false;
     }
 
-    // Send via PHPMailer (same SMTP as twofa_verify.php)
+    // Send via PHPMailer
     try {
         $mail = new PHPMailer(true);
         $mail->isSMTP();

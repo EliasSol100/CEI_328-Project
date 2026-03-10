@@ -137,6 +137,8 @@ if (!empty($expiresAt)) {
         $remainingSeconds = max(0, $expiresTs - time());
     }
 }
+
+$canShowResetForm = (!empty($token) && !empty($emailDisplay) && !empty($expiresAt));
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -205,7 +207,7 @@ if (!empty($expiresAt)) {
                 <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
             <?php endif; ?>
 
-            <?php if (empty($error) || $token !== ""): ?>
+            <?php if ($canShowResetForm): ?>
                 <?php if ($remainingSeconds > 0): ?>
                     <p id="reset-timer" class="mb-2 text-center text-muted-small">
                         Link expires in <span id="reset-countdown"></span>

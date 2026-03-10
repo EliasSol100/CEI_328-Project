@@ -78,17 +78,6 @@ require_once "database.php";
                     if ($user = mysqli_fetch_assoc($result)) {
                         if (password_verify($password, $user["password"])) {
 
-                            // --- 2FA DISABLED (commented out) ---
-                            // $now = new DateTime();
-                            // $twofaValid =
-                            //     !empty($user["twofa_expires"]) &&
-                            //     (new DateTime($user["twofa_expires"])) > $now;
-                            // if (!$twofaValid) {
-                            //     $_SESSION['temp_user_id'] = $user['id'];
-                            //     header("Location: twofa_verify.php");
-                            //     exit();
-                            // }
-
                             // get previous last_login for session display
                             $prevLogin = null;
                             $getLogin  = $conn->prepare("SELECT last_login FROM users WHERE userID = ?");
@@ -106,16 +95,40 @@ require_once "database.php";
                             $updateLogin->execute();
                             $updateLogin->close();
 
+                            $fieldsComplete =
+                                !empty($user["country"])  &&
+                                !empty($user["city"])     &&
+                                !empty($user["address"])  &&
+                                !empty($user["postcode"]) &&
+                                !empty($user["dob"])      &&
+                                !empty($user["phone"]);
+
+                            $isVerified = ((int)($user["is_verified"] ?? 0) === 1);
+
                             // create full user session
                             $_SESSION["user"] = [
-                                "id"         => $user["id"],
-                                "email"      => $user["email"],
-                                "full_name"  => $user["full_name"],
-                                "role"       => $user["role"],
-                                "last_login" => $prevLogin
+                                "id"               => $user["id"],
+                                "email"            => $user["email"],
+                                "full_name"        => $user["full_name"],
+                                "role"             => $user["role"],
+                                "last_login"       => $prevLogin,
+                                "profile_complete" => $fieldsComplete ? 1 : 0,
+                                "is_verified"      => $isVerified ? 1 : 0
                             ];
                             $_SESSION['user_id'] = $user['id'];
                             $_SESSION['role']    = $user['role'];
+                            $_SESSION['email']   = $user['email'];
+                            $_SESSION['full_name'] = $user['full_name'];
+
+                            if (!$fieldsComplete) {
+                                header("Location: complete_profile.php");
+                                exit();
+                            }
+
+                            if (!$isVerified) {
+                                header("Location: select_verification_method.php");
+                                exit();
+                            }
 
                             header("Location: ../index.php");
                             exit();

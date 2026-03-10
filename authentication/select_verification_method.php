@@ -21,7 +21,7 @@ if (!isset($_SESSION["user_id"])) {
 $userId = (int) $_SESSION["user_id"];
 
 // Load user email + phone
-$stmt = $conn->prepare("SELECT email, phone, full_name, role FROM users WHERE userID = ?");
+$stmt = $conn->prepare("SELECT email, phone, full_name, role, is_verified, profile_complete FROM users WHERE userID = ?");
 $stmt->bind_param("i", $userId);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -32,6 +32,16 @@ if (!$userRow) {
     session_unset();
     session_destroy();
     header("Location: login.php");
+    exit();
+}
+
+if ((int)($userRow["profile_complete"] ?? 0) !== 1) {
+    header("Location: complete_profile.php");
+    exit();
+}
+
+if ((int)($userRow["is_verified"] ?? 0) === 1) {
+    header("Location: ../index.php");
     exit();
 }
 
