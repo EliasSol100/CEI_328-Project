@@ -1,0 +1,458 @@
+/* Shared navbar styles to keep header identical across pages */
+header.header {
+    margin-top: 0 !important;
+    background-color: var(--white);
+    padding: 8px 0 !important;
+    border-top: 0;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+header.header .header-content {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    min-height: 44px;
+    column-gap: 24px;
+}
+
+/* ---------------- Logo ---------------- */
+
+header.header .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    justify-self: start;
+    text-decoration: none;
+}
+
+header.header .logo-icon {
+    width: 50px;
+    height: 50px;
+    background-color: var(--purple-light);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--white);
+    font-weight: bold;
+    font-size: 18px;
+}
+
+header.header .logo-text {
+    font-size: 20px !important;
+    font-weight: 600;
+    line-height: 1.1;
+    color: var(--purple-dark);
+}
+
+/* ---------------- Navigation ---------------- */
+
+header.header .nav {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 48px;
+    justify-self: center;
+}
+
+header.header .nav-link {
+    text-decoration: none;
+    color: var(--text-dark);
+    font-size: 16px !important;
+    line-height: 1.1;
+    transition: color 0.3s;
+}
+
+header.header .nav-link.active {
+    color: var(--text-dark);
+    font-weight: 400;
+}
+
+header.header .nav-link:hover {
+    color: var(--purple-dark);
+}
+
+/* ---------------- Right Utility Section ---------------- */
+
+header.header .utility-icons {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    justify-self: end;
+}
+
+/* ---------------- Language Selector ---------------- */
+
+header.header .language-selector {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #4a5568;
+    font-size: 20px;
+    padding: 0 10px;
+    height: 40px;
+    border-radius: 10px;
+    user-select: none;
+}
+
+header.header .language-selector span {
+    font-size: 24px;
+    line-height: 1;
+    color: #334155;
+    font-weight: 500;
+}
+
+header.header .language-selector:hover {
+    background: rgba(106, 13, 173, 0.08);
+}
+
+header.header .language-selector:focus-visible {
+    outline: 2px solid rgba(106, 13, 173, 0.35);
+    outline-offset: 2px;
+}
+
+/* ---------------- Default Utility Icons ---------------- */
+
+header.header .utility-icon {
+    color: var(--text-dark);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 40px;
+    border-radius: 10px;
+    padding: 0 10px;
+}
+
+/* Cart counter badge */
+header.header .cart-icon {
+    position: relative;
+}
+
+header.header .cart-count {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--purple-dark);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+/* Wishlist counter badge */
+header.header .wishlist-icon {
+    position: relative;
+}
+
+header.header .wishlist-count {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #e63946;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+/* IMPORTANT: only affect the direct <i> child, not nested dropdown icons */
+header.header .utility-icon > i {
+    font-size: 22px !important;
+    transition: color 0.3s;
+}
+
+header.header .utility-icon:hover > i {
+    color: var(--purple-dark);
+}
+
+/* ============================= */
+/* ===== Logged In Styling ===== */
+/* ============================= */
+
+.user-menu {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* User Chip */
+
+.user-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: #f3e8ff;
+    border: 1px solid #e9d5ff;
+}
+
+/* Initials Circle (avatar) */
+
+.user-avatar-circle {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--purple-dark);
+    color: #ffffff;
+    font-size: 0.8rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Name + label (legacy chip) */
+
+.user-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+}
+
+.user-label {
+    font-size: 0.65rem;
+    color: #6b7280;
+}
+
+.user-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #111827;
+    max-width: 140px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* --- User Dropdown --- */
+
+.user-dropdown-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+/* the avatar icon button */
+.dropdown-toggle {
+    cursor: pointer;
+}
+
+/* base state: hidden but still rendered so we can animate */
+.user-dropdown {
+    position: absolute;
+    top: 120%;
+    right: 0;
+    background: #fff;
+    min-width: 170px;
+    border-radius: 10px;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+    padding: 8px 0;
+    display: flex;
+    flex-direction: column;
+    z-index: 1000;
+
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(8px);
+    pointer-events: none;
+    transition:
+        opacity 0.18s ease-out,
+        transform 0.18s ease-out,
+        visibility 0s linear 0.18s;
+}
+
+/* OPEN STATE – controlled by JS only */
+.user-dropdown-wrapper.open .user-dropdown {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+    pointer-events: auto;
+    transition:
+        opacity 0.18s ease-out,
+        transform 0.18s ease-out,
+        visibility 0s;
+}
+
+.dropdown-item {
+    padding: 10px 16px;
+    text-decoration: none;
+    color: #333;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: background 0.2s ease;
+}
+
+/* make sure dropdown icons keep their own colors */
+.dropdown-item i {
+    font-size: 16px;
+}
+
+.dropdown-item:hover {
+    background: #f5f5f5;
+}
+
+.logout-item {
+    color: #d9534f;
+}
+
+.logout-item i {
+    color: #d9534f;
+}
+
+/* Logged Out Auth Button */
+
+.auth-icon {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+}
+
+.auth-icon .auth-label {
+    font-size: 0.85rem;
+}
+
+/* ============================= */
+/* ====== Admin Button ========= */
+/* ============================= */
+
+header.header .admin-icon {
+    background: var(--purple-dark);
+    color: #ffffff;
+    border-radius: 999px;
+    padding: 0 14px;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+header.header .admin-icon > i {
+    font-size: 16px !important;
+    color: #ffffff;
+}
+
+header.header .admin-icon .admin-label {
+    font-size: 13px;
+    line-height: 1;
+}
+
+header.header .admin-icon:hover {
+    background: #4b0a7d;
+}
+
+/* ============================= */
+/* ========= Responsive ========= */
+/* ============================= */
+
+@media (max-width: 1024px) {
+    header.header .header-content {
+        grid-template-columns: 1fr;
+        row-gap: 12px;
+    }
+
+    header.header .logo,
+    header.header .nav,
+    header.header .utility-icons {
+        justify-self: center;
+    }
+
+    header.header .nav {
+        gap: 24px;
+        flex-wrap: wrap;
+    }
+
+    .user-name {
+        max-width: 100px;
+    }
+
+    /* Optionally hide the 'Admin' text label on smaller screens, keep icon only */
+    header.header .admin-icon .admin-label {
+        display: none;
+    }
+}
+
+@media (max-width: 768px) {
+
+    header.header {
+        padding: 8px 0 !important;
+    }
+
+    header.header .logo-text {
+        font-size: 18px !important;
+    }
+
+    header.header .nav-link {
+        font-size: 15px !important;
+    }
+
+    header.header .utility-icon > i {
+        font-size: 20px !important;
+    }
+
+    header.header .language-selector {
+        font-size: 18px;
+        height: 36px;
+    }
+
+    header.header .language-selector span {
+        font-size: 20px;
+    }
+}
+
+/* ============================= */
+/* === Fix Bootstrap overrides == */
+/* ============================= */
+
+/* Hide Bootstrap's default caret arrow that appears on .dropdown-toggle
+   for ANY dropdown inside the header */
+header.header .dropdown-toggle::after {
+    display: none !important;
+}
+
+/* Only strip Bootstrap button chrome for the avatar dropdown inside user-dropdown-wrapper,
+   so other dropdown buttons keep their background */
+header.header .user-dropdown-wrapper .dropdown-toggle {
+    border: none !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    /* NOTE: no background here on purpose, so the avatar keeps its purple background */
+}
+
+/* ============================= */
+/* === Force avatar visible ==== */
+/* ============================= */
+
+/* In case page-level CSS (e.g. account.css / Bootstrap) hides the avatar,
+   force it to be visible inside the header. */
+header.header .utility-icons .user-dropdown-wrapper {
+    display: flex !important;
+    align-items: center !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+header.header .utility-icons .user-avatar-circle {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+}

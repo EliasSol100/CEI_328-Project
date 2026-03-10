@@ -1,0 +1,22 @@
+/* Account page-specific helpers.
+   Core layout variables and shared base styles already come from styles.css. */
+
+.account-main .card {
+    border-radius: 1rem;
+}
+
+.account-main .list-group-item.active {
+    background-color: #6a0dad;
+    border-color: #6a0dad;
+}
+
+.account-main .table thead th {
+    font-size: 0.8rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.account-main .table td,
+.account-main .table th {
+    vertical-align: middle;
+}
