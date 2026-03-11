@@ -6,7 +6,7 @@ $hostName = "127.0.0.1";   // Use IP instead of localhost
 $dbUser = "root";
 $dbPassword = "";          // No password
 $dbName = "athina_eshop";
-$port = 3307;              
+$port = 3306;              // XAMPP MySQL default port
 
 $conn = mysqli_connect($hostName, $dbUser, $dbPassword, $dbName, $port);
 
