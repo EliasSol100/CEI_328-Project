@@ -7,6 +7,7 @@ $dbUser = "root";
 $dbPassword = "";          // No password
 $dbName = "athina_eshop";
 $port = 3306;              // XAMPP MySQL default port
+$port = 3306;              
 
 $conn = mysqli_connect($hostName, $dbUser, $dbPassword, $dbName, $port);
 
