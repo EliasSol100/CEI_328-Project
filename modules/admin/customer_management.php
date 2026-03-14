@@ -1,13 +1,11 @@
-<?php
+﻿<?php
 require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/includes/db.php';
 
 $current_page = 'customer_management';
 $flash = '';
 
-/* ─────────────────────────────────────────────
- * Handle POST actions: add / edit / delete user
- * ───────────────────────────────────────────── */
+/* Handle POST actions: add / edit / delete user */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
@@ -147,9 +145,7 @@ if (isset($_GET['flash'])) {
     $flash = $_GET['flash'];
 }
 
-/* ─────────────────────────────────────────────
- * Load all customers
- * ───────────────────────────────────────────── */
+/* Load all customers */
 $searchTerm = trim((string)($_GET['q'] ?? ''));
 $statusFilter = trim((string)($_GET['status_filter'] ?? ''));
 $roleFilter = trim((string)($_GET['role_filter'] ?? ''));
@@ -240,9 +236,7 @@ if ($customersStmt) {
     mysqli_stmt_close($customersStmt);
 }
 
-/* ─────────────────────────────────────────────
- * If editing, locate that user
- * ───────────────────────────────────────────── */
+/* If editing, locate that user */
 $editUser = null;
 if (isset($_GET['edit'])) {
     $eid = (int)$_GET['edit'];
@@ -259,7 +253,7 @@ if (isset($_GET['edit'])) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Customer Management – Athena Admin</title>
+  <title>Customer Management - Athena Admin</title>
   <link rel="stylesheet" href="assets/admin.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -347,16 +341,16 @@ if (isset($_GET['edit'])) {
           </p>
         <?php else: ?>
           <div style="overflow-x:auto">
-            <table class="data-table">
+            <table class="data-table customer-table">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Verified</th>
-                  <th>Phone</th>
-                  <th>Location</th>
-                  <th style="text-align:right">Actions</th>
+                  <th class="col-name">Name</th>
+                  <th class="col-email">Email</th>
+                  <th class="col-role">Role</th>
+                  <th class="col-verified">Verified</th>
+                  <th class="col-phone">Phone</th>
+                  <th class="col-location">Location</th>
+                  <th class="col-actions" style="text-align:right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -368,40 +362,42 @@ if (isset($_GET['edit'])) {
                   ]);
                 ?>
                 <tr>
-                  <td class="font-600"><?= htmlspecialchars($c['full_name'] ?? '—') ?></td>
-                  <td><?= htmlspecialchars($c['email'] ?? '—') ?></td>
-                  <td class="text-muted"><?= htmlspecialchars($c['role'] ?? 'user') ?></td>
-                  <td>
+                  <td class="col-name font-600"><?= htmlspecialchars($c['full_name'] ?? '-') ?></td>
+                  <td class="col-email"><?= htmlspecialchars($c['email'] ?? '-') ?></td>
+                  <td class="col-role text-muted"><?= htmlspecialchars($c['role'] ?? 'user') ?></td>
+                  <td class="col-verified">
                     <?php if (!empty($c['is_verified'])): ?>
                       <span class="badge badge-dark">Verified</span>
                     <?php else: ?>
                       <span class="badge badge-muted">Unverified</span>
                     <?php endif; ?>
                   </td>
-                  <td><?= htmlspecialchars($c['phone'] ?? '—') ?></td>
-                  <td>
+                  <td class="col-phone"><?= htmlspecialchars($c['phone'] ?? '-') ?></td>
+                  <td class="col-location">
                     <?= htmlspecialchars($c['city'] ?? '') ?>
-                    <?php if (!empty($c['city']) && !empty($c['country'])): ?> · <?php endif; ?>
+                    <?php if (!empty($c['city']) && !empty($c['country'])): ?> - <?php endif; ?>
                     <?= htmlspecialchars($c['country'] ?? '') ?>
                   </td>
-                  <td style="text-align:right">
-                    <a href="customer_order_history.php?<?= htmlspecialchars($historyQuery) ?>" class="btn-secondary btn-sm">
-                      <i class="fas fa-clock-rotate-left"></i> View Order History
-                    </a>
-                    <a href="?edit=<?= (int)$c['userID'] ?><?= ($searchTerm !== '' || $statusFilter !== '' || $roleFilter !== '') ? '&' . http_build_query(['q' => $searchTerm, 'status_filter' => $statusFilter, 'role_filter' => $roleFilter]) : '' ?>" class="btn-edit">
-                      <i class="fas fa-pen"></i> Edit
-                    </a>
-                    <form method="POST" style="display:inline"
-                          onsubmit="return confirmDelete('Delete this customer account?')">
-                      <input type="hidden" name="action" value="delete_user">
-                      <input type="hidden" name="userID" value="<?= (int)$c['userID'] ?>">
-                      <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
-                      <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
-                      <input type="hidden" name="role_filter" value="<?= htmlspecialchars($roleFilter) ?>">
-                      <button type="submit" class="btn-delete">
-                        <i class="fas fa-trash"></i> Delete
-                      </button>
-                    </form>
+                  <td class="col-actions" style="text-align:right">
+                    <div class="actions-group">
+                      <a href="customer_order_history.php?<?= htmlspecialchars($historyQuery) ?>" class="btn-secondary btn-sm">
+                        <i class="fas fa-clock-rotate-left"></i> View Order History
+                      </a>
+                      <a href="?edit=<?= (int)$c['userID'] ?><?= ($searchTerm !== '' || $statusFilter !== '' || $roleFilter !== '') ? '&' . http_build_query(['q' => $searchTerm, 'status_filter' => $statusFilter, 'role_filter' => $roleFilter]) : '' ?>" class="btn-edit">
+                        <i class="fas fa-pen"></i> Edit
+                      </a>
+                      <form method="POST"
+                            onsubmit="return confirmDelete('Delete this customer account?')">
+                        <input type="hidden" name="action" value="delete_user">
+                        <input type="hidden" name="userID" value="<?= (int)$c['userID'] ?>">
+                        <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
+                        <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
+                        <input type="hidden" name="role_filter" value="<?= htmlspecialchars($roleFilter) ?>">
+                        <button type="submit" class="btn-delete">
+                          <i class="fas fa-trash"></i> Delete
+                        </button>
+                      </form>
+                    </div>
                   </td>
                 </tr>
               <?php endforeach; ?>
@@ -415,9 +411,7 @@ if (isset($_GET['edit'])) {
   </main>
 </div>
 
-<!-- ─────────────────────────────────────────────
-     Add Customer Modal
-     ───────────────────────────────────────────── -->
+<!-- Add Customer Modal -->
 <div class="modal-overlay" id="modalAddCustomer">
   <div class="modal-box">
     <h3>New Customer Account</h3>
@@ -486,9 +480,7 @@ if (isset($_GET['edit'])) {
   </div>
 </div>
 
-<!-- ─────────────────────────────────────────────
-     Edit Customer Modal
-     ───────────────────────────────────────────── -->
+<!-- Edit Customer Modal -->
 <?php if ($editUser): ?>
 <div class="modal-overlay show" id="modalEditCustomer">
   <div class="modal-box">
@@ -568,3 +560,4 @@ if (isset($_GET['edit'])) {
 <script src="assets/admin.js"></script>
 </body>
 </html>
+

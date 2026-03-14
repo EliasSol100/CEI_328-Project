@@ -36,7 +36,7 @@ function deductStockAfterOrderCompletion($orderId, $conn) {
         throw new Exception("Order #$orderId not found.");
     }
     $order = $result->fetch_assoc();
-    $allowedStatuses = ['confirmed', 'paid', 'processing']; // adjust as needed
+    $allowedStatuses = ['confirmed', 'paid', 'processing', 'accepted']; // adjust as needed
     if (!in_array($order['status'], $allowedStatuses)) {
         throw new Exception("Order #$orderId status '{$order['status']}' not eligible for stock deduction.");
     }

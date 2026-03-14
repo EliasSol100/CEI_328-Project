@@ -443,6 +443,7 @@ include __DIR__ . "/include/header.php";
                 </div>
             <?php endif; ?>
 
+            <div class="color-stock" id="color-stock"></div>
             <div class="variant-status" id="variant-status"></div>
 
             <div class="qty-row">
@@ -601,13 +602,37 @@ include __DIR__ . "/include/header.php";
     var qtyOut = document.getElementById("qty-value");
     var qtyMinus = document.getElementById("qty-minus");
     var qtyPlus = document.getElementById("qty-plus");
+    function getSelectedStock() {
+        if (cartStatus === "made_to_order") {
+            return 999;
+        }
+        if (hasVariants && Array.isArray(variations) && variations.length > 0) {
+            var v = findSelectedVariation();
+            return v ? Number(v.stock || 0) : 0;
+        }
+        return Number(productInventory || 0);
+    }
+    function clampQtyToStock() {
+        if (!qtyOut) return;
+        var stock = getSelectedStock();
+        if (stock > 0) {
+            qty = Math.min(qty, stock);
+        }
+        qty = Math.max(1, qty);
+        qtyOut.textContent = String(qty);
+    }
     if (qtyMinus && qtyPlus && qtyOut) {
         qtyMinus.addEventListener("click", function () {
             qty = Math.max(1, qty - 1);
             qtyOut.textContent = String(qty);
         });
         qtyPlus.addEventListener("click", function () {
-            qty = Math.min(99, qty + 1);
+            var stock = getSelectedStock();
+            if (stock > 0) {
+                qty = Math.min(stock, qty + 1);
+            } else {
+                qty = Math.min(99, qty + 1);
+            }
             qtyOut.textContent = String(qty);
         });
     }
@@ -618,8 +643,53 @@ include __DIR__ . "/include/header.php";
 
     var sizeChips = Array.prototype.slice.call(document.querySelectorAll(".size-chip"));
     var colorDots = Array.prototype.slice.call(document.querySelectorAll(".color-dot"));
+    var colorStockEl = document.getElementById("color-stock");
     var variantStatus = document.getElementById("variant-status");
     var addCartBtn = document.getElementById("add-cart-btn");
+    var colorStockMap = {};
+
+    if (hasVariants && Array.isArray(variations)) {
+        variations.forEach(function (item) {
+            var colorId = Number(item.colorID || 0);
+            if (!colorId) {
+                return;
+            }
+            var qty = Number(item.stock || 0);
+            colorStockMap[colorId] = (colorStockMap[colorId] || 0) + qty;
+        });
+    }
+
+    function updateColorDots() {
+        if (!colorDots.length) {
+            return;
+        }
+        colorDots.forEach(function (dot) {
+            var colorId = parseInt(dot.getAttribute("data-color-id") || "0", 10) || 0;
+            var stock = Number(colorStockMap[colorId] || 0);
+            dot.dataset.colorStock = String(stock);
+            if (stock <= 0) {
+                dot.classList.add("is-out");
+                dot.title = (dot.getAttribute("data-color-name") || "Color") + " (Out of stock)";
+            } else {
+                dot.classList.remove("is-out");
+            }
+        });
+    }
+
+    function updateColorStockDisplay() {
+        if (!colorStockEl) {
+            return;
+        }
+        colorStockEl.classList.remove("is-error", "is-warning");
+        if (!selectedColorId) {
+            colorStockEl.textContent = "";
+            return;
+        }
+        var stock = Number(colorStockMap[selectedColorId] || 0);
+        var activeDot = document.querySelector(".color-dot.active");
+        var name = activeDot ? (activeDot.getAttribute("data-color-name") || "") : "";
+        colorStockEl.textContent = name ? name : "";
+    }
 
     function findSelectedVariation() {
         if (!Array.isArray(variations) || variations.length === 0) {
@@ -671,17 +741,22 @@ include __DIR__ . "/include/header.php";
     function updateAddToCartState() {
         var available = true;
         var selectedVariation = findSelectedVariation();
+        var requireExact = (sizeChips.length > 0 || colorDots.length > 0);
 
         if (hasVariants && Array.isArray(variations) && variations.length > 0) {
+            if (selectedColorId && cartStatus !== "made_to_order") {
+                var colorStock = Number(colorStockMap[selectedColorId] || 0);
+                if (colorStock <= 0) {
+                    available = false;
+                    setVariantStatus("Selected color is out of stock.", true);
+                }
+            }
             if (selectedVariation) {
-                var exactNeeded = (!!selectedSize || !!selectedColorId);
-                if (exactNeeded) {
-                    var sizeExact = !selectedSize || normalize(selectedVariation.size) === normalize(selectedSize);
-                    var colorExact = !selectedColorId || Number(selectedVariation.colorID || 0) === Number(selectedColorId || 0);
-                    if (!sizeExact || !colorExact) {
-                        available = false;
-                        setVariantStatus("This size and color combination is not available.", true);
-                    }
+                var sizeExact = !selectedSize || normalize(selectedVariation.size) === normalize(selectedSize);
+                var colorExact = !selectedColorId || Number(selectedVariation.colorID || 0) === Number(selectedColorId || 0);
+                if (requireExact && (!sizeExact || !colorExact)) {
+                    available = false;
+                    setVariantStatus("Please select a valid size and color.", true);
                 }
 
                 if (available) {
@@ -692,9 +767,12 @@ include __DIR__ . "/include/header.php";
                     } else if (cartStatus === "made_to_order") {
                         setVariantStatus("Made to order.", false);
                     } else {
-                        setVariantStatus("In stock: " + stock, false);
+                        setVariantStatus("In stock", false);
                     }
                 }
+            } else if (requireExact) {
+                available = false;
+                setVariantStatus("Please select a valid size and color.", true);
             }
         } else {
             if (cartStatus !== "made_to_order" && Number(productInventory) <= 0) {
@@ -703,13 +781,15 @@ include __DIR__ . "/include/header.php";
             } else if (cartStatus === "made_to_order") {
                 setVariantStatus("Made to order.", false);
             } else {
-                setVariantStatus("In stock.", false);
+                setVariantStatus("In stock", false);
             }
         }
 
         if (addCartBtn) {
             addCartBtn.disabled = !available;
         }
+        updateColorStockDisplay();
+        clampQtyToStock();
         return {
             available: available,
             selectedVariation: selectedVariation
@@ -740,8 +820,13 @@ include __DIR__ . "/include/header.php";
             updateAddToCartState();
         });
     });
+    updateColorDots();
     if (colorDots.length) {
-        colorDots[0].click();
+        var firstAvailable = colorDots.find(function (dot) {
+            var stock = Number(dot.dataset.colorStock || 0);
+            return stock > 0;
+        });
+        (firstAvailable || colorDots[0]).click();
     }
     updateAddToCartState();
 
@@ -785,6 +870,10 @@ include __DIR__ . "/include/header.php";
             var state = updateAddToCartState();
             if (!state.available) {
                 showToast("Please select an available option.", true);
+                return;
+            }
+            if (hasVariants && (!state.selectedVariation || !state.selectedVariation.variationID)) {
+                showToast("Please select a valid size and color.", true);
                 return;
             }
 

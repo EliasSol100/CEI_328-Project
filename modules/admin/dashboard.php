@@ -248,11 +248,7 @@ $jsonValues = json_encode($trendValues);
         <h1>Dashboard Overview</h1>
         <p>Welcome back! Here's what's happening with your shop.</p>
       </div>
-      <div class="content-header-right">
-        <a href="../../index.php" class="btn-secondary">
-          <i class="fas fa-arrow-left"></i> Back to Website
-        </a>
-      </div>
+      <div class="content-header-right"></div>
     </div>
 
     <div class="content-body">

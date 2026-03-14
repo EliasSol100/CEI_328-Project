@@ -19,6 +19,11 @@ $nav = [
     ['id' => 'marketing_integrations', 'label' => 'Marketing Integrations', 'icon' => 'fa-envelope',       'file' => 'marketing_integrations.php'],
     ['id' => 'content_management',     'label' => 'Content Management',     'icon' => 'fa-file-alt',       'file' => 'content_management.php'],
 ];
+$siteRoot = rtrim(dirname(dirname(dirname($_SERVER['SCRIPT_NAME'] ?? ''))), '/');
+if ($siteRoot === '') {
+    $siteRoot = '';
+}
+$backHref = $siteRoot . '/index.php';
 ?>
 <aside class="admin-sidebar">
   <div class="sidebar-logo">
@@ -34,4 +39,9 @@ $nav = [
       </a>
     <?php endforeach; ?>
   </nav>
+  <div class="sidebar-back-wrap">
+    <a class="sidebar-back-link" href="<?= htmlspecialchars($backHref) ?>">
+      <i class="fas fa-arrow-left"></i> Back to Website
+    </a>
+  </div>
 </aside>

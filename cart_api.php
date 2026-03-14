@@ -121,9 +121,10 @@ try {
         if ($effectiveHasVariants) {
             $resolvedVariation = $variation ?? $customVariation;
             $resolvedVariationId = (int)($resolvedVariation['variationID'] ?? 0);
-            $availableStock = $resolvedVariationId > 0
-                ? fetchVariationStock($conn, $resolvedVariationId, (int)$product['inventory'])
-                : (int)$product['inventory'];
+            if ($resolvedVariationId <= 0) {
+                badRequest('Please select a valid size and color.');
+            }
+            $availableStock = fetchVariationStock($conn, $resolvedVariationId, (int)$product['inventory']);
         } else {
             $availableStock = (int)$product['inventory'];
         }

@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/includes/db.php';
 
@@ -14,7 +14,7 @@ mysqli_query($conn, "
     )
 ");
 
-/* ── Handle POST: update product inventory / status ── */
+/* -- Handle POST: update product inventory / status -- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
@@ -94,7 +94,7 @@ if ($msRes) {
     }
 }
 
-/* ── Load products ── */
+/* -- Load products -- */
 $products = [];
 $r = mysqli_query($conn, "SELECT productID, nameEN, category, inventory, cartStatus FROM products ORDER BY nameEN");
 if ($r) {
@@ -103,7 +103,7 @@ if ($r) {
     }
 }
 
-/* ── Load colours ── */
+/* -- Load colours -- */
 $colours = [];
 $r = mysqli_query($conn, "SELECT * FROM colors ORDER BY colorName");
 if ($r) {
@@ -153,23 +153,21 @@ $statusBadge = [
         <div class="flash flash-<?= $type === 'ok' ? 'success' : 'error' ?>"><?= htmlspecialchars($msg) ?></div>
       <?php endif; ?>
 
-      <!-- ── Product Stock Table ── -->
+      <!-- -- Product Stock Table -- -->
       <div class="card mb-6">
         <div class="card-title">Product Stock Levels</div>
         <p class="text-sm text-muted mb-4">
           Update the quantity and availability status per product. Changes reflect immediately on the storefront.
         </p>
-        <table class="data-table">
+        <table class="data-table stock-table">
           <thead>
             <tr>
-              <th>Product</th>
-              <th>Category</th>
-              <th>Current Stock</th>
-              <th>Status</th>
-              <th>Auto Sales</th>
-              <th>Sales Display</th>
-              <th>Manual Sales</th>
-              <th>Update</th>
+              <th class="col-product">Product</th>
+              <th class="col-category">Category</th>
+              <th class="col-stock">Current Stock</th>
+              <th class="col-status">Status</th>
+              <th class="col-auto">Auto Sales</th>
+              <th class="col-update">Update</th>
             </tr>
           </thead>
           <tbody>
@@ -179,50 +177,43 @@ $statusBadge = [
               $autoSales = (int)($autoSalesMap[$pid] ?? 0);
               $hasManualSales = array_key_exists($pid, $manualSalesMap);
               $manualSales = $hasManualSales ? (int)$manualSalesMap[$pid] : null;
-              $effectiveSales = $hasManualSales ? (int)$manualSales : $autoSales;
             ?>
             <tr>
-              <td class="font-600"><?= htmlspecialchars($p['nameEN']) ?></td>
-              <td class="text-muted"><?= htmlspecialchars($p['category'] ?? '—') ?></td>
-              <td>
-                <?php if ($p['cartStatus'] === 'made_to_order'): ?>
-                  <span class="text-muted">N/A</span>
-                <?php else: ?>
-                  <span class="font-600"><?= (int)$p['inventory'] ?></span>
-                  <?php if ((int)$p['inventory'] <= 3 && $p['cartStatus'] !== 'out_of_stock'): ?>
-                    <span class="badge badge-warning" style="margin-left:6px">Low</span>
+              <td class="col-product font-600"><?= htmlspecialchars($p['nameEN']) ?></td>
+              <td class="col-category text-muted"><?= htmlspecialchars($p['category'] ?? '—') ?></td>
+              <td class="col-stock">
+                <div class="stock-cell">
+                  <?php if ($p['cartStatus'] === 'made_to_order'): ?>
+                    <span class="text-muted stock-number">N/A</span>
+                  <?php else: ?>
+                    <span class="font-600 stock-number"><?= (int)$p['inventory'] ?></span>
+                    <?php if ((int)$p['inventory'] <= 3 && $p['cartStatus'] !== 'out_of_stock'): ?>
+                      <span class="badge badge-warning">Low</span>
+                    <?php endif; ?>
                   <?php endif; ?>
-                <?php endif; ?>
+                </div>
               </td>
-              <td>
+              <td class="col-status">
                 <span class="badge <?= $statusBadge[$p['cartStatus']] ?? 'badge-muted' ?>">
                   <?= $statusOptions[$p['cartStatus']] ?? $p['cartStatus'] ?>
                 </span>
               </td>
-              <td><?= $autoSales ?></td>
-              <td>
-                <span class="font-600"><?= $effectiveSales ?></span>
-                <?php if ($hasManualSales): ?>
-                  <span class="manual-badge" style="margin-left:6px">Manual</span>
-                <?php else: ?>
-                  <span class="text-muted" style="margin-left:6px">Auto</span>
-                <?php endif; ?>
-              </td>
-              <td>
+              <td class="col-auto">
                 <form method="POST" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                   <input type="hidden" name="action" value="update_sales_override">
                   <input type="hidden" name="productID" value="<?= $pid ?>">
-                  <input
-                    type="number"
-                    name="manual_total_sales"
-                    value="<?= $hasManualSales ? (int)$manualSales : $autoSales ?>"
-                    min="0"
-                    class="form-input"
-                    style="width:96px;padding:6px 8px"
-                  >
-                  <button type="submit" class="btn-primary" style="padding:6px 12px;font-size:12px">
-                    <i class="fas fa-save"></i> Save
-                  </button>
+                  <div class="input-with-icon">
+                    <input
+                      type="number"
+                      name="manual_total_sales"
+                      value="<?= $hasManualSales ? (int)$manualSales : $autoSales ?>"
+                      min="0"
+                      class="form-input has-icon-right"
+                    >
+                    <button type="submit" class="icon-btn" aria-label="Save auto sales">
+                      <i class="fas fa-save"></i>
+                    </button>
+                  </div>
                 </form>
                 <?php if ($hasManualSales): ?>
                 <form method="POST" style="margin-top:6px">
@@ -234,7 +225,7 @@ $statusBadge = [
                 </form>
                 <?php endif; ?>
               </td>
-              <td>
+              <td class="col-update">
                 <form method="POST" style="display:flex;gap:8px;align-items:center">
                   <input type="hidden" name="action"    value="update_stock">
                   <input type="hidden" name="productID" value="<?= $pid ?>">
@@ -262,7 +253,7 @@ $statusBadge = [
         </table>
       </div>
 
-      <!-- ── Colour Yarn Stock ── -->
+      <!-- -- Colour Yarn Stock -- -->
       <div class="card">
         <div class="card-title">Yarn Colour Inventory</div>
         <p class="text-sm text-muted mb-4">
@@ -322,3 +313,4 @@ $statusBadge = [
 <script src="assets/admin.js"></script>
 </body>
 </html>
+

@@ -41,6 +41,36 @@ body {
   z-index: 100;
 }
 
+.sidebar-back-wrap {
+  margin-top: auto;
+  padding: 16px 14px 18px;
+  background: var(--white);
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 2px solid #cfd6e1;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: .01em;
+  color: #1f2937;
+  text-decoration: none;
+  background: #ffffff;
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.06);
+  transition: background .15s, border-color .15s, box-shadow .15s, transform .15s;
+}
+.sidebar-back-link:hover {
+  background: #f8fafc;
+  border-color: #a8b3c5;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
 .admin-main {
   margin-left: var(--sidebar-w);
   flex: 1; min-height: 100vh;
@@ -141,11 +171,112 @@ body {
 .data-table tr:hover td { background: #fafafa; }
 .pr-8 { padding-right: 8px; }
 
+/* Stock availability table alignment */
+.stock-table { table-layout: fixed; }
+.stock-table th,
+.stock-table td { padding-right: 12px; }
+.stock-table th:last-child,
+.stock-table td:last-child { padding-right: 0; }
+.stock-table .col-product { width: 22%; }
+.stock-table .col-category { width: 10%; }
+.stock-table .col-stock { width: 8%; text-align: right; }
+.stock-table .col-status { width: 12%; text-align: center; }
+.stock-table .col-auto { width: 20%; }
+.stock-table .col-update { width: 28%; }
+.stock-table .stock-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.stock-number { display: inline-block; min-width: 22px; text-align: right; }
+.stock-table .col-update form { flex-wrap: wrap; justify-content: flex-end; }
+
+/* Keep status pills consistent in this table */
+.stock-table .badge {
+  min-width: 98px;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.stock-table .badge.badge-green,
+.stock-table .badge.badge-red,
+.stock-table .badge.badge-warning,
+.stock-table .badge.badge-muted {
+  min-width: 98px;
+  padding: 3px 10px;
+  font-weight: 500;
+}
+
+/* Make rows feel lighter */
+.stock-table td {
+  border-bottom: 1px solid #edf1f6;
+}
+.stock-table tr:hover td { background: transparent; }
+
+/* Keep Update inputs on one line */
+.stock-table .col-update form {
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+.stock-table .col-update .form-input {
+  width: 78px;
+  padding: 6px 8px;
+}
+.stock-table .col-update select.form-input {
+  width: 140px;
+}
+.stock-table .col-update .btn-primary {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+/* Compact auto sales editor */
+.stock-table .col-auto form { flex-wrap: nowrap; }
+.stock-table .col-auto .form-input { width: 96px; padding: 6px 28px 6px 10px; }
+
+/* Inline save icon inside inputs */
+.input-with-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.input-with-icon .has-icon-right {
+  padding-right: 30px;
+}
+.icon-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 2px;
+  font-size: 12px;
+}
+.icon-btn:hover { color: #111827; }
+
 /* ── Badges / Status ─────────────────────────────── */
 .badge {
   display: inline-flex; align-items: center;
-  padding: 3px 10px; border-radius: 20px;
+  min-width: 108px;
+  justify-content: center;
+  padding: 3px 12px;
+  border-radius: 20px;
   font-size: 12px; font-weight: 500; white-space: nowrap;
+  border-width: 1px;
+  border-style: solid;
+  box-sizing: border-box;
+}
+
+/* Make the "Available"/"Globally Disabled" pills align perfectly with switches */
+.badge.badge-green,
+.badge.badge-red {
+  min-width: 140px;
+  padding: 4px 14px;
+  font-weight: 600;
 }
 .badge-muted   { background:#f3f4f6; color:#6b7280; border:1px solid #e5e7eb; }
 .badge-blue    { background:#dbeafe; color:#1d4ed8; border:1px solid #93c5fd; }
@@ -539,6 +670,33 @@ select.form-input { cursor:pointer; }
   grid-template-columns:1.15fr 1.85fr;
   gap:16px;
 }
+.customer-table { table-layout: fixed; }
+.customer-table th,
+.customer-table td { padding-right: 12px; }
+.customer-table th:last-child,
+.customer-table td:last-child { padding-right: 0; }
+.customer-table .col-name { width: 16%; }
+.customer-table .col-email { width: 24%; }
+.customer-table .col-role { width: 8%; }
+.customer-table .col-verified { width: 12%; }
+.customer-table .col-phone { width: 12%; }
+.customer-table .col-location { width: 16%; }
+.customer-table .col-actions { width: 12%; }
+.customer-table .col-email,
+.customer-table .col-location { word-break: break-word; }
+.customer-table .col-role,
+.customer-table .col-verified,
+.customer-table .col-phone { white-space: nowrap; }
+.customer-table .col-role,
+.customer-table .col-verified { text-align: center; }
+.customer-table .actions-group {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.customer-table .actions-group form { margin: 0; }
 .customer-list-table th,
 .customer-list-table td {
   padding-right:18px;
