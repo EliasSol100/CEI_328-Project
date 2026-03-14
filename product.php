@@ -476,7 +476,6 @@ include __DIR__ . "/include/header.php";
 
             <div class="meta-list">
                 <div><span>Category:</span><strong><?= htmlspecialchars((string)($product["category"] ?: "-")) ?></strong></div>
-                <div><span>SKU:</span><strong><?= htmlspecialchars((string)$product["sku"]) ?></strong></div>
                 <div>
                     <span>Availability:</span>
                     <strong class="<?= ((int)$product["inventory"] > 0 || (string)$product["cartStatus"] === "made_to_order") ? "in-stock" : "out-stock" ?>">
