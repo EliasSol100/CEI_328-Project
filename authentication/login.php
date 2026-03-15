@@ -1,5 +1,7 @@
 <?php
 session_start();
+
+// Αν ο χρήστης είναι ήδη logged in, δεν χρειάζεται να ξαναμπεί — πήγαινε στο index
 if (isset($_SESSION["user"])) {
     header("Location: ../index.php");
     exit();
@@ -62,23 +64,27 @@ require_once "database.php";
             </p>
 
             <?php
+            // Εκτελείται μόνο όταν ο χρήστης υποβάλλει το form (πατάει Login)
             if (isset($_POST["login"])) {
-                $loginInput = trim($_POST["login_input"]);
+                $loginInput = trim($_POST["login_input"]); // email ή username
                 $password   = $_POST["password"];
 
-                // Alias userID as id so existing PHP code can keep using $user["id"]
+                // Ψάχνει στη DB με email ή username (case-insensitive)
+                // Το userID AS id το κάνει alias ώστε να δουλεύει παντού ως $user["id"]
                 $sql  = "SELECT *, userID AS id FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?)";
                 $stmt = mysqli_stmt_init($conn);
 
                 if (mysqli_stmt_prepare($stmt, $sql)) {
+                    // Περνάει το loginInput δύο φορές: μία για email, μία για username
                     mysqli_stmt_bind_param($stmt, "ss", $loginInput, $loginInput);
                     mysqli_stmt_execute($stmt);
                     $result = mysqli_stmt_get_result($stmt);
 
                     if ($user = mysqli_fetch_assoc($result)) {
+                        // password_verify: συγκρίνει plain text με το hashed password της DB
                         if (password_verify($password, $user["password"])) {
 
-                            // get previous last_login for session display
+                            // Αποθηκεύει την προηγούμενη σύνδεση πριν την αντικαταστήσει
                             $prevLogin = null;
                             $getLogin  = $conn->prepare("SELECT last_login FROM users WHERE userID = ?");
                             $getLogin->bind_param("i", $user['id']);
@@ -89,12 +95,13 @@ require_once "database.php";
                             }
                             $getLogin->close();
 
-                            // update last_login to now
+                            // Ενημερώνει το last_login στη DB με την τωρινή ώρα
                             $updateLogin = $conn->prepare("UPDATE users SET last_login = NOW() WHERE userID = ?");
                             $updateLogin->bind_param("i", $user['id']);
                             $updateLogin->execute();
                             $updateLogin->close();
 
+                            // Ελέγχει αν τα υποχρεωτικά πεδία προφίλ είναι συμπληρωμένα
                             $fieldsComplete =
                                 !empty($user["country"])  &&
                                 !empty($user["city"])     &&
@@ -103,9 +110,10 @@ require_once "database.php";
                                 !empty($user["dob"])      &&
                                 !empty($user["phone"]);
 
+                            // Ελέγχει αν το email έχει επαληθευτεί (0 ή 1 στη DB)
                             $isVerified = ((int)($user["is_verified"] ?? 0) === 1);
 
-                            // create full user session
+                            // Δημιουργεί το session — αυτό είναι το "login"
                             $_SESSION["user"] = [
                                 "id"               => $user["id"],
                                 "email"            => $user["email"],
@@ -115,21 +123,25 @@ require_once "database.php";
                                 "profile_complete" => $fieldsComplete ? 1 : 0,
                                 "is_verified"      => $isVerified ? 1 : 0
                             ];
-                            $_SESSION['user_id'] = $user['id'];
-                            $_SESSION['role']    = $user['role'];
-                            $_SESSION['email']   = $user['email'];
+                            // Παλιές μεταβλητές session για backwards compatibility με άλλες σελίδες
+                            $_SESSION['user_id']   = $user['id'];
+                            $_SESSION['role']      = $user['role'];
+                            $_SESSION['email']     = $user['email'];
                             $_SESSION['full_name'] = $user['full_name'];
 
+                            // Αν το προφίλ δεν είναι ολοκληρωμένο, πήγαινε στο wizard
                             if (!$fieldsComplete) {
                                 header("Location: complete_profile.php");
                                 exit();
                             }
 
+                            // Αν το email δεν είναι verified, πήγαινε στην επαλήθευση
                             if (!$isVerified) {
                                 header("Location: select_verification_method.php");
                                 exit();
                             }
 
+                            // Όλα εντάξει — πήγαινε στην αρχική
                             header("Location: ../index.php");
                             exit();
                         } else {
