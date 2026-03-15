@@ -14,6 +14,7 @@ $statusOptions = [
     'accepted'      => 'Accepted',
     'in_production' => 'In Production',
     'shipped'       => 'Shipped',
+    'delivered'     => 'Delivered',
     'completed'     => 'Completed',
     'cancelled'     => 'Cancelled',
 ];
@@ -22,9 +23,207 @@ $statusBadge = [
     'accepted'      => 'badge-green',
     'in_production' => 'badge-orange',
     'shipped'       => 'badge-purple',
+    'delivered'     => 'badge-dark',
     'completed'     => 'badge-dark',
     'cancelled'     => 'badge-red',
 ];
+
+function buildGuestReviewKeyForOrder(int $orderId, string $orderNumber, string $email): string {
+    $payload = $orderId . "|" . strtolower(trim($email)) . "|" . trim($orderNumber);
+    return hash_hmac("sha256", $payload, "athina_guest_review_v1");
+}
+
+function isOrderPaymentConfirmed(mysqli $conn, int $orderId): bool {
+    if ($orderId <= 0) {
+        return false;
+    }
+
+    $stmt = mysqli_prepare(
+        $conn,
+        "SELECT 1
+         FROM payments
+         WHERE orderID = ?
+           AND LOWER(paymentStatus) IN ('paid', 'completed', 'captured', 'succeeded', 'confirmed')
+         LIMIT 1"
+    );
+    if (!$stmt) {
+        return false;
+    }
+    mysqli_stmt_bind_param($stmt, 'i', $orderId);
+    mysqli_stmt_execute($stmt);
+    $res = mysqli_stmt_get_result($stmt);
+    $ok = ($res && mysqli_num_rows($res) > 0);
+    mysqli_stmt_close($stmt);
+    return $ok;
+}
+
+function fetchOrderReviewInviteContext(mysqli $conn, int $orderId): ?array {
+    if ($orderId <= 0) {
+        return null;
+    }
+
+    $stmt = mysqli_prepare(
+        $conn,
+        "SELECT
+            o.orderID,
+            o.orderNumber,
+            o.userID,
+            o.email AS orderEmail,
+            COALESCE(NULLIF(TRIM(u.email), ''), o.email, '') AS recipientEmail,
+            COALESCE(NULLIF(TRIM(u.full_name), ''), 'Customer') AS customerName
+         FROM orders o
+         LEFT JOIN users u ON u.userID = o.userID
+         WHERE o.orderID = ?
+         LIMIT 1"
+    );
+    if (!$stmt) {
+        return null;
+    }
+    mysqli_stmt_bind_param($stmt, 'i', $orderId);
+    mysqli_stmt_execute($stmt);
+    $res = mysqli_stmt_get_result($stmt);
+    $row = $res ? mysqli_fetch_assoc($res) : null;
+    mysqli_stmt_close($stmt);
+    return $row ?: null;
+}
+
+function buildProjectBasePath(): string {
+    $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
+    $base = rtrim(str_replace('\\', '/', dirname(dirname(dirname($script)))), '/');
+    if ($base === '/' || $base === '.' || $base === '') {
+        return '';
+    }
+    return $base;
+}
+
+function buildReviewInviteUrl(array $ctx): string {
+    $orderId = (int)($ctx['orderID'] ?? 0);
+    $orderNumber = (string)($ctx['orderNumber'] ?? '');
+    $orderEmail = (string)($ctx['orderEmail'] ?? '');
+    $userId = (int)($ctx['userID'] ?? 0);
+
+    $params = ['order_id' => (string)$orderId];
+    if ($userId <= 0 && $orderId > 0 && $orderNumber !== '' && $orderEmail !== '') {
+        $params['review_key'] = buildGuestReviewKeyForOrder($orderId, $orderNumber, $orderEmail);
+    }
+
+    $scheme = (!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off') ? 'https' : 'http';
+    $host = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
+    $path = buildProjectBasePath() . '/submit_product_review.php?' . http_build_query($params) . '#spr-form';
+
+    if ($host !== '') {
+        return $scheme . '://' . $host . $path;
+    }
+    return $path;
+}
+
+function ensureOrderReviewNotificationTable(mysqli $conn): void {
+    mysqli_query(
+        $conn,
+        "CREATE TABLE IF NOT EXISTS order_review_notifications (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            orderID INT NOT NULL UNIQUE,
+            recipientEmail VARCHAR(255) NOT NULL,
+            sentAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+    );
+}
+
+function orderReviewNotificationAlreadySent(mysqli $conn, int $orderId): bool {
+    $stmt = mysqli_prepare($conn, "SELECT 1 FROM order_review_notifications WHERE orderID = ? LIMIT 1");
+    if (!$stmt) {
+        return false;
+    }
+    mysqli_stmt_bind_param($stmt, 'i', $orderId);
+    mysqli_stmt_execute($stmt);
+    $res = mysqli_stmt_get_result($stmt);
+    $exists = ($res && mysqli_num_rows($res) > 0);
+    mysqli_stmt_close($stmt);
+    return $exists;
+}
+
+function markOrderReviewNotificationSent(mysqli $conn, int $orderId, string $recipientEmail): void {
+    $stmt = mysqli_prepare($conn, "INSERT INTO order_review_notifications (orderID, recipientEmail) VALUES (?, ?) ON DUPLICATE KEY UPDATE recipientEmail = VALUES(recipientEmail), sentAt = CURRENT_TIMESTAMP");
+    if (!$stmt) {
+        return;
+    }
+    mysqli_stmt_bind_param($stmt, 'is', $orderId, $recipientEmail);
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
+}
+
+function sendReviewInvitationEmail(array $payload): array {
+    $toEmail = trim((string)($payload['to_email'] ?? ''));
+    if ($toEmail === '' || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+        return ['sent' => false, 'error' => 'invalid recipient'];
+    }
+
+    $customerName = trim((string)($payload['customer_name'] ?? 'Customer'));
+    if ($customerName === '') {
+        $customerName = 'Customer';
+    }
+    $orderNumber = trim((string)($payload['order_number'] ?? ''));
+    $reviewUrl = trim((string)($payload['review_url'] ?? ''));
+    if ($reviewUrl === '') {
+        return ['sent' => false, 'error' => 'missing review url'];
+    }
+
+    require_once __DIR__ . '/../../PHPMailer-master/src/Exception.php';
+    require_once __DIR__ . '/../../PHPMailer-master/src/PHPMailer.php';
+    require_once __DIR__ . '/../../PHPMailer-master/src/SMTP.php';
+
+    $subject = 'Your order is delivered - leave a product review';
+    $body =
+        "Hello {$customerName},\n\n" .
+        "Your order " . ($orderNumber !== '' ? $orderNumber : '') . " has been delivered and payment is confirmed.\n" .
+        "You can now submit your product review using this link:\n" .
+        $reviewUrl . "\n\n" .
+        "Thank you,\nAthina E-Shop";
+
+    $transports = [
+        ['port' => 587, 'secure' => \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS, 'label' => '587/STARTTLS'],
+        ['port' => 465, 'secure' => \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS, 'label' => '465/SMTPS'],
+    ];
+    $attemptErrors = [];
+
+    foreach ($transports as $transport) {
+        $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+        try {
+            $mail->SMTPDebug = 0;
+            $mail->isSMTP();
+            $mail->Host = 'premium245.web-hosting.com';
+            $mail->SMTPAuth = true;
+            $mail->Username = 'admin@festival-web.com';
+            $mail->Password = '!g3$~8tYju*D';
+            $mail->SMTPSecure = $transport['secure'];
+            $mail->Port = (int)$transport['port'];
+            $mail->Timeout = 20;
+            $mail->SMTPOptions = [
+                'ssl' => [
+                    'verify_peer' => false,
+                    'verify_peer_name' => false,
+                    'allow_self_signed' => true,
+                ],
+            ];
+
+            $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
+            $mail->addAddress($toEmail, $customerName);
+            $mail->CharSet = 'UTF-8';
+            $mail->isHTML(false);
+            $mail->Subject = $subject;
+            $mail->Body = $body;
+            $mail->send();
+            return ['sent' => true, 'error' => ''];
+        } catch (\Throwable $e) {
+            $detail = trim((string)($mail->ErrorInfo ?? ''));
+            $msg = $detail !== '' ? $detail : trim((string)$e->getMessage());
+            $attemptErrors[] = $transport['label'] . ': ' . ($msg !== '' ? $msg : 'send failed');
+        }
+    }
+
+    $error = implode(' | ', $attemptErrors);
+    return ['sent' => false, 'error' => $error !== '' ? $error : 'email delivery failed'];
+}
 
 /* Update order status */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -48,6 +247,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($affected >= 0) {
                 $flash = 'ok:Order status updated.';
+
+                $normalizedStatus = strtolower($status);
+                if ($normalizedStatus === 'delivered') {
+                    if (isOrderPaymentConfirmed($conn, $orderID)) {
+                        $ctx = fetchOrderReviewInviteContext($conn, $orderID);
+                        $recipientEmail = trim((string)($ctx['recipientEmail'] ?? ''));
+                        if ($ctx && $recipientEmail !== '' && filter_var($recipientEmail, FILTER_VALIDATE_EMAIL)) {
+                            ensureOrderReviewNotificationTable($conn);
+                            if (!orderReviewNotificationAlreadySent($conn, $orderID)) {
+                                $reviewUrl = buildReviewInviteUrl($ctx);
+                                $mailResult = sendReviewInvitationEmail([
+                                    'to_email' => $recipientEmail,
+                                    'customer_name' => (string)($ctx['customerName'] ?? 'Customer'),
+                                    'order_number' => (string)($ctx['orderNumber'] ?? ''),
+                                    'review_url' => $reviewUrl,
+                                ]);
+                                if ($mailResult['sent']) {
+                                    markOrderReviewNotificationSent($conn, $orderID, $recipientEmail);
+                                    $flash = 'ok:Order status updated. Review notification sent.';
+                                } else {
+                                    error_log('Review notification email failed for order #' . $orderID . ': ' . (string)$mailResult['error']);
+                                    $flash = 'ok:Order status updated. Review notification email failed.';
+                                }
+                            } else {
+                                $flash = 'ok:Order status updated. Review notification already sent.';
+                            }
+                        } else {
+                            $flash = 'ok:Order status updated. No valid customer email for review notification.';
+                        }
+                    } else {
+                        $flash = 'ok:Order status updated. Review notification pending payment confirmation.';
+                    }
+                }
             } else {
                 $flash = 'err:Order update failed.';
             }

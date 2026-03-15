@@ -52,6 +52,36 @@ function buildGuestReviewKeyForOrder(int $orderId, string $orderNumber, string $
     $payload = $orderId . "|" . strtolower(trim($email)) . "|" . trim($orderNumber);
     return hash_hmac("sha256", $payload, "athina_guest_review_v1");
 }
+
+function isOrderReviewEligible(mysqli $conn, int $orderId): bool {
+    if ($orderId <= 0) {
+        return false;
+    }
+
+    $stmt = $conn->prepare(
+        "SELECT 1
+         FROM orders o
+         WHERE o.orderID = ?
+           AND LOWER(o.status) IN ('delivered')
+           AND EXISTS (
+               SELECT 1
+               FROM payments p
+               WHERE p.orderID = o.orderID
+                 AND LOWER(p.paymentStatus) IN ('paid', 'completed', 'captured', 'succeeded', 'confirmed')
+               LIMIT 1
+           )
+         LIMIT 1"
+    );
+    if (!$stmt) {
+        return false;
+    }
+    $stmt->bind_param("i", $orderId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $ok = ($res && $res->num_rows > 0);
+    $stmt->close();
+    return $ok;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -128,14 +158,19 @@ if (file_exists($headerPath)) {
         $confirmationSent = !empty($result['confirmation_email_sent']);
         $confirmationError = trim((string)($result['confirmation_email_error'] ?? ''));
         $reviewUrl = '';
+        $reviewEligible = false;
         if (!empty($result['order_id'])) {
             $orderIdForReview = (int)$result['order_id'];
             $orderNumberForReview = (string)($result['order_number'] ?? ($orderDetails['orderNumber'] ?? $orderIdForReview));
             $orderEmailForReview = (string)($confirmationTo !== 'your email' ? $confirmationTo : '');
-            $reviewUrl = $project . '/submit_product_review.php?order_id=' . $orderIdForReview;
-            if (!isset($_SESSION['user']) && $orderEmailForReview !== '') {
-                $guestReviewKey = buildGuestReviewKeyForOrder($orderIdForReview, $orderNumberForReview, $orderEmailForReview);
-                $reviewUrl .= '&review_key=' . rawurlencode($guestReviewKey);
+            $reviewEligible = isOrderReviewEligible($conn, $orderIdForReview);
+            if ($reviewEligible) {
+                $reviewUrl = $project . '/submit_product_review.php?order_id=' . $orderIdForReview;
+                if (!isset($_SESSION['user']) && $orderEmailForReview !== '') {
+                    $guestReviewKey = buildGuestReviewKeyForOrder($orderIdForReview, $orderNumberForReview, $orderEmailForReview);
+                    $reviewUrl .= '&review_key=' . rawurlencode($guestReviewKey);
+                }
+                $reviewUrl .= '#spr-form';
             }
         }
         ?>
@@ -155,12 +190,21 @@ if (file_exists($headerPath)) {
             <a href="<?= $project ?>/shop.php" class="btn btn-primary">Continue Shopping</a>
             <?php if ($reviewUrl !== ''): ?>
                 <a href="<?= htmlspecialchars($reviewUrl) ?>" class="btn btn-review">Product Review</a>
+            <?php else: ?>
+                <span class="btn btn-review" style="opacity:.65;cursor:not-allowed;" title="Available after delivery">Product Review (Locked)</span>
             <?php endif; ?>
             <?php if (isset($_SESSION['user']) || !empty($result['account_created'])): ?>
                 <a href="<?= $project ?>/profile/account.php?tab=orders" class="btn btn-success">View Orders</a>
             <?php endif; ?>
             <a href="<?= $project ?>/contact.php" class="btn btn-secondary">Need Help?</a>
         </div>
+
+        <?php if (!$reviewEligible): ?>
+            <div class="email-note" style="margin-top:14px;">
+                <i class="fas fa-circle-info"></i>
+                Product review opens after order delivery and confirmed payment. You will receive a notification email with your review link.
+            </div>
+        <?php endif; ?>
     </div>
 </div>
 <?php

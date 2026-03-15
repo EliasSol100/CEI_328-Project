@@ -40,7 +40,7 @@ function fetchOrderSummary(mysqli $conn, int $orderId): ?array {
         return null;
     }
 
-    $stmt = $conn->prepare("SELECT orderID, orderNumber, userID, isGuestFlag, email FROM orders WHERE orderID = ? LIMIT 1");
+    $stmt = $conn->prepare("SELECT orderID, orderNumber, userID, isGuestFlag, email, status FROM orders WHERE orderID = ? LIMIT 1");
     if (!$stmt) {
         return null;
     }
@@ -50,6 +50,37 @@ function fetchOrderSummary(mysqli $conn, int $orderId): ?array {
     $row = $res ? $res->fetch_assoc() : null;
     $stmt->close();
     return $row ?: null;
+}
+
+function isOrderReviewEligible(mysqli $conn, int $orderId): bool {
+    if ($orderId <= 0) {
+        return false;
+    }
+
+    $stmt = $conn->prepare(
+        "SELECT 1
+         FROM orders o
+         WHERE o.orderID = ?
+           AND LOWER(o.status) IN ('delivered')
+           AND EXISTS (
+               SELECT 1
+               FROM payments p
+               WHERE p.orderID = o.orderID
+                 AND LOWER(p.paymentStatus) IN ('paid', 'completed', 'captured', 'succeeded', 'confirmed')
+               LIMIT 1
+           )
+         LIMIT 1"
+    );
+    if (!$stmt) {
+        return false;
+    }
+
+    $stmt->bind_param("i", $orderId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $ok = ($res && $res->num_rows > 0);
+    $stmt->close();
+    return $ok;
 }
 
 function verifyGuestReviewKey(?array $order, string $providedKey): bool {
@@ -129,7 +160,22 @@ function orderContainsProduct(mysqli $conn, int $orderId, int $productId): bool 
     if ($orderId <= 0 || $productId <= 0) {
         return false;
     }
-    $stmt = $conn->prepare("SELECT 1 FROM order_items WHERE orderID = ? AND productID = ? LIMIT 1");
+    $stmt = $conn->prepare(
+        "SELECT 1
+         FROM orders o
+         INNER JOIN order_items oi ON oi.orderID = o.orderID
+         WHERE o.orderID = ?
+           AND oi.productID = ?
+           AND LOWER(o.status) IN ('delivered')
+           AND EXISTS (
+               SELECT 1
+               FROM payments p
+               WHERE p.orderID = o.orderID
+                 AND LOWER(p.paymentStatus) IN ('paid', 'completed', 'captured', 'succeeded', 'confirmed')
+               LIMIT 1
+           )
+         LIMIT 1"
+    );
     if (!$stmt) {
         return false;
     }
@@ -145,7 +191,22 @@ function userPurchasedProduct(mysqli $conn, int $userId, int $productId): bool {
     if ($userId <= 0 || $productId <= 0) {
         return false;
     }
-    $stmt = $conn->prepare("SELECT 1 FROM order_items oi INNER JOIN orders o ON o.orderID = oi.orderID WHERE o.userID = ? AND oi.productID = ? LIMIT 1");
+    $stmt = $conn->prepare(
+        "SELECT 1
+         FROM order_items oi
+         INNER JOIN orders o ON o.orderID = oi.orderID
+         WHERE o.userID = ?
+           AND oi.productID = ?
+           AND LOWER(o.status) IN ('delivered')
+           AND EXISTS (
+               SELECT 1
+               FROM payments p
+               WHERE p.orderID = o.orderID
+                 AND LOWER(p.paymentStatus) IN ('paid', 'completed', 'captured', 'succeeded', 'confirmed')
+               LIMIT 1
+           )
+         LIMIT 1"
+    );
     if (!$stmt) {
         return false;
     }
@@ -200,12 +261,43 @@ function fetchReviewProducts(mysqli $conn, int $loggedUserId, bool $isAdmin, boo
     if ($orderId > 0) {
         $stmt = null;
         if ($isAdmin || $guestAccess) {
-            $stmt = $conn->prepare("SELECT DISTINCT p.productID, p.nameEN, p.nameGR FROM order_items oi INNER JOIN products p ON p.productID = oi.productID WHERE oi.orderID = ? ORDER BY p.nameEN ASC, p.productID ASC");
+            $stmt = $conn->prepare(
+                "SELECT DISTINCT p.productID, p.nameEN, p.nameGR
+                 FROM orders o
+                 INNER JOIN order_items oi ON oi.orderID = o.orderID
+                 INNER JOIN products p ON p.productID = oi.productID
+                 WHERE o.orderID = ?
+                   AND LOWER(o.status) IN ('delivered')
+                   AND EXISTS (
+                       SELECT 1
+                       FROM payments pay
+                       WHERE pay.orderID = o.orderID
+                         AND LOWER(pay.paymentStatus) IN ('paid', 'completed', 'captured', 'succeeded', 'confirmed')
+                       LIMIT 1
+                   )
+                 ORDER BY p.nameEN ASC, p.productID ASC"
+            );
             if ($stmt) {
                 $stmt->bind_param("i", $orderId);
             }
         } elseif ($loggedUserId > 0) {
-            $stmt = $conn->prepare("SELECT DISTINCT p.productID, p.nameEN, p.nameGR FROM orders o INNER JOIN order_items oi ON oi.orderID = o.orderID INNER JOIN products p ON p.productID = oi.productID WHERE o.orderID = ? AND o.userID = ? ORDER BY p.nameEN ASC, p.productID ASC");
+            $stmt = $conn->prepare(
+                "SELECT DISTINCT p.productID, p.nameEN, p.nameGR
+                 FROM orders o
+                 INNER JOIN order_items oi ON oi.orderID = o.orderID
+                 INNER JOIN products p ON p.productID = oi.productID
+                 WHERE o.orderID = ?
+                   AND o.userID = ?
+                   AND LOWER(o.status) IN ('delivered')
+                   AND EXISTS (
+                       SELECT 1
+                       FROM payments pay
+                       WHERE pay.orderID = o.orderID
+                         AND LOWER(pay.paymentStatus) IN ('paid', 'completed', 'captured', 'succeeded', 'confirmed')
+                       LIMIT 1
+                   )
+                 ORDER BY p.nameEN ASC, p.productID ASC"
+            );
             if ($stmt) {
                 $stmt->bind_param("ii", $orderId, $loggedUserId);
             }
@@ -233,7 +325,23 @@ function fetchReviewProducts(mysqli $conn, int $loggedUserId, bool $isAdmin, boo
         return [];
     }
 
-    $stmt = $conn->prepare("SELECT p.productID, p.nameEN, p.nameGR, MAX(o.createdAt) AS lastPurchased FROM orders o INNER JOIN order_items oi ON oi.orderID = o.orderID INNER JOIN products p ON p.productID = oi.productID WHERE o.userID = ? GROUP BY p.productID, p.nameEN, p.nameGR ORDER BY lastPurchased DESC, p.nameEN ASC");
+    $stmt = $conn->prepare(
+        "SELECT p.productID, p.nameEN, p.nameGR, MAX(o.createdAt) AS lastPurchased
+         FROM orders o
+         INNER JOIN order_items oi ON oi.orderID = o.orderID
+         INNER JOIN products p ON p.productID = oi.productID
+         WHERE o.userID = ?
+           AND LOWER(o.status) IN ('delivered')
+           AND EXISTS (
+               SELECT 1
+               FROM payments pay
+               WHERE pay.orderID = o.orderID
+                 AND LOWER(pay.paymentStatus) IN ('paid', 'completed', 'captured', 'succeeded', 'confirmed')
+               LIMIT 1
+           )
+         GROUP BY p.productID, p.nameEN, p.nameGR
+         ORDER BY lastPurchased DESC, p.nameEN ASC"
+    );
     if ($stmt) {
         $stmt->bind_param("i", $loggedUserId);
         $stmt->execute();
@@ -299,17 +407,21 @@ $actorUserId = $loggedUserId;
 if ($loggedUserId <= 0 && !$isAdmin) {
     $hasOrderContext = $orderSummary && (int)($orderSummary["orderID"] ?? 0) > 0;
     if ($hasOrderContext && verifyGuestReviewKey($orderSummary, $reviewKey)) {
-        $guestIdentity = ensureGuestReviewerUser($conn, (int)$orderSummary["orderID"], (string)($orderSummary["email"] ?? ""));
-        if ($guestIdentity && (int)$guestIdentity["userID"] > 0) {
-            $guestAccess = true;
-            $actorUserId = (int)$guestIdentity["userID"];
-            $GLOBALS["header_user_full_name"] = (string)$guestIdentity["full_name"];
-            $GLOBALS["header_user_role"] = "guest";
+        if (isOrderReviewEligible($conn, (int)$orderSummary["orderID"])) {
+            $guestIdentity = ensureGuestReviewerUser($conn, (int)$orderSummary["orderID"], (string)($orderSummary["email"] ?? ""));
+            if ($guestIdentity && (int)$guestIdentity["userID"] > 0) {
+                $guestAccess = true;
+                $actorUserId = (int)$guestIdentity["userID"];
+                $GLOBALS["header_user_full_name"] = (string)$guestIdentity["full_name"];
+                $GLOBALS["header_user_role"] = "guest";
+            } else {
+                $guestAccessError = "Could not initialize guest review access. Please try again.";
+            }
         } else {
-            $guestAccessError = "Could not initialize guest review access. Please try again.";
+            $guestAccessError = "Review unlocks only after delivery and confirmed payment.";
         }
     } else {
-        $guestAccessError = "For guest reviews, open this page from Checkout Success using the Product Review button.";
+        $guestAccessError = "For guest reviews, use the secure review link that is sent after delivery.";
     }
 }
 
@@ -334,7 +446,7 @@ if ($selectedProductId > 0 && !isset($availableById[$selectedProductId])) {
             ];
         }
     } elseif ($loggedUserId > 0 || $guestAccess) {
-        $reviewErrors[] = "You can review only products that were purchased.";
+        $reviewErrors[] = "You can review only delivered products with confirmed payment.";
     }
 }
 
@@ -376,7 +488,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && ($actorUserId > 0 || $isAdmin)) {
             $reviewErrors[] = "Rating is required (1 to 5 stars).";
         }
         if (!canReviewProduct($conn, $isAdmin, $guestAccess, $loggedUserId, $orderId, $selectedProductId)) {
-            $reviewErrors[] = "You can review only products that were purchased.";
+            $reviewErrors[] = "You can review only delivered products with confirmed payment.";
         }
         if (reviewWordCount($reviewText) > 1000) {
             $reviewErrors[] = "Comment must be up to 1000 words.";
@@ -491,8 +603,13 @@ if ($myReview && ($_SERVER["REQUEST_METHOD"] !== "POST" || empty($reviewErrors))
     $reviewInput["review_text"] = (string)$myReview["reviewText"];
 }
 
+$canSubmitCurrentSelection = false;
+if ($selectedProductId > 0) {
+    $canSubmitCurrentSelection = canReviewProduct($conn, $isAdmin, $guestAccess, $loggedUserId, $orderId, $selectedProductId);
+}
+
 $defaultRating = max(1, min(5, (int)$reviewInput["rating"]));
-$openReviewForm = !empty($reviewErrors) || !$myReview;
+$openReviewForm = $canSubmitCurrentSelection && (!empty($reviewErrors) || !$myReview);
 $canUseReviewModule = $isAdmin || $actorUserId > 0;
 ?>
 <!DOCTYPE html>
@@ -519,10 +636,10 @@ include __DIR__ . "/include/header.php";
                 <a href="product.php?id=<?= (int)$selectedProductId ?>" class="spr-btn spr-btn-secondary">Back to Product</a>
             <?php endif; ?>
         </div>
-        <p class="spr-sub">Rate your product with stars (required) and add an optional comment (max 1000 words).</p>
+        <p class="spr-sub">Rate your delivered product with stars (required) and add an optional comment (max 1000 words).</p>
 
         <?php if ($guestAccess && $orderSummary): ?>
-            <p class="spr-note">Guest review access enabled for order <?= htmlspecialchars((string)$orderSummary["orderNumber"]) ?>.</p>
+            <p class="spr-note">Guest review access enabled for delivered order <?= htmlspecialchars((string)$orderSummary["orderNumber"]) ?>.</p>
         <?php endif; ?>
 
         <?php if ($statusMessage !== ""): ?>
@@ -538,7 +655,7 @@ include __DIR__ . "/include/header.php";
             </div>
             <a href="shop.php" class="spr-btn spr-btn-primary">Go to Shop</a>
         <?php elseif (empty($availableProducts) && !$selectedProduct): ?>
-            <p class="spr-note">No purchased products found yet for review.</p>
+            <p class="spr-note">No delivered products with confirmed payment are available for review yet.</p>
             <a href="shop.php" class="spr-btn spr-btn-primary">Go to Shop</a>
         <?php else: ?>
             <?php if (!empty($availableProducts)): ?>
@@ -608,56 +725,62 @@ include __DIR__ . "/include/header.php";
                     </div>
                     <p><?= nl2br(htmlspecialchars($myReview["reviewText"] !== "" ? $myReview["reviewText"] : "No comment provided.")) ?></p>
 
-                    <div class="spr-review-actions">
-                        <form method="post" onsubmit="return confirm('Delete this review?');">
-                            <input type="hidden" name="review_token" value="<?= htmlspecialchars($reviewToken) ?>">
-                            <input type="hidden" name="review_key" value="<?= htmlspecialchars($reviewKey) ?>">
-                            <input type="hidden" name="action" value="delete_review">
-                            <input type="hidden" name="order_id" value="<?= (int)$orderId ?>">
-                            <input type="hidden" name="product_id" value="<?= (int)$selectedProductId ?>">
-                            <input type="hidden" name="review_id" value="<?= (int)$myReview["reviewID"] ?>">
-                            <button type="submit" class="spr-delete-btn" title="Delete review" aria-label="Delete review">
-                                <i class="fas fa-trash-can"></i>
-                            </button>
-                        </form>
-                        <button type="button" class="spr-edit-btn" id="spr-edit-btn">Edit</button>
-                    </div>
+                    <?php if ($canSubmitCurrentSelection): ?>
+                        <div class="spr-review-actions">
+                            <form method="post" onsubmit="return confirm('Delete this review?');">
+                                <input type="hidden" name="review_token" value="<?= htmlspecialchars($reviewToken) ?>">
+                                <input type="hidden" name="review_key" value="<?= htmlspecialchars($reviewKey) ?>">
+                                <input type="hidden" name="action" value="delete_review">
+                                <input type="hidden" name="order_id" value="<?= (int)$orderId ?>">
+                                <input type="hidden" name="product_id" value="<?= (int)$selectedProductId ?>">
+                                <input type="hidden" name="review_id" value="<?= (int)$myReview["reviewID"] ?>">
+                                <button type="submit" class="spr-delete-btn" title="Delete review" aria-label="Delete review">
+                                    <i class="fas fa-trash-can"></i>
+                                </button>
+                            </form>
+                            <button type="button" class="spr-edit-btn" id="spr-edit-btn">Edit</button>
+                        </div>
+                    <?php endif; ?>
                 </article>
             <?php endif; ?>
 
-            <form method="post" id="spr-form" class="spr-form <?= $openReviewForm ? "" : "hidden" ?>">
-                <input type="hidden" name="review_token" value="<?= htmlspecialchars($reviewToken) ?>">
-                <input type="hidden" name="review_key" value="<?= htmlspecialchars($reviewKey) ?>">
-                <input type="hidden" name="action" value="save_review">
-                <input type="hidden" name="order_id" value="<?= (int)$orderId ?>">
-                <input type="hidden" name="product_id" value="<?= (int)$selectedProductId ?>">
+            <?php if ($canSubmitCurrentSelection): ?>
+                <form method="post" id="spr-form" class="spr-form <?= $openReviewForm ? "" : "hidden" ?>">
+                    <input type="hidden" name="review_token" value="<?= htmlspecialchars($reviewToken) ?>">
+                    <input type="hidden" name="review_key" value="<?= htmlspecialchars($reviewKey) ?>">
+                    <input type="hidden" name="action" value="save_review">
+                    <input type="hidden" name="order_id" value="<?= (int)$orderId ?>">
+                    <input type="hidden" name="product_id" value="<?= (int)$selectedProductId ?>">
 
-                <label class="spr-label">Your rating *</label>
-                <div class="spr-star-input" id="spr-star-input">
-                    <?php for ($i = 1; $i <= 5; $i++): ?>
-                        <label class="spr-star <?= $i <= $defaultRating ? "is-on" : "" ?>">
-                            <input type="radio" name="rating" value="<?= $i ?>" <?= $i === $defaultRating ? "checked" : "" ?> required>
-                            <i class="fas fa-star"></i>
-                        </label>
-                    <?php endfor; ?>
-                </div>
+                    <label class="spr-label">Your rating *</label>
+                    <div class="spr-star-input" id="spr-star-input">
+                        <?php for ($i = 1; $i <= 5; $i++): ?>
+                            <label class="spr-star <?= $i <= $defaultRating ? "is-on" : "" ?>">
+                                <input type="radio" name="rating" value="<?= $i ?>" <?= $i === $defaultRating ? "checked" : "" ?> required>
+                                <i class="fas fa-star"></i>
+                            </label>
+                        <?php endfor; ?>
+                    </div>
 
-                <label class="spr-label" for="spr-review-text">Your comment (optional)</label>
-                <textarea
-                    id="spr-review-text"
-                    name="review_text"
-                    rows="6"
-                    maxlength="7000"
-                    placeholder="Write your comment here..."><?= htmlspecialchars($reviewInput["review_text"]) ?></textarea>
-                <div class="spr-word-counter" id="spr-word-counter">0 / 1000 words</div>
+                    <label class="spr-label" for="spr-review-text">Your comment (optional)</label>
+                    <textarea
+                        id="spr-review-text"
+                        name="review_text"
+                        rows="6"
+                        maxlength="7000"
+                        placeholder="Write your comment here..."><?= htmlspecialchars($reviewInput["review_text"]) ?></textarea>
+                    <div class="spr-word-counter" id="spr-word-counter">0 / 1000 words</div>
 
-                <div class="spr-form-actions">
-                    <button type="submit" class="spr-btn spr-btn-primary"><?= $myReview ? "Save Changes" : "Submit Review" ?></button>
-                    <?php if ($myReview): ?>
-                        <button type="button" class="spr-btn spr-btn-secondary" id="spr-cancel-btn">Cancel</button>
-                    <?php endif; ?>
-                </div>
-            </form>
+                    <div class="spr-form-actions">
+                        <button type="submit" class="spr-btn spr-btn-primary"><?= $myReview ? "Save Changes" : "Submit Review" ?></button>
+                        <?php if ($myReview): ?>
+                            <button type="button" class="spr-btn spr-btn-secondary" id="spr-cancel-btn">Cancel</button>
+                        <?php endif; ?>
+                    </div>
+                </form>
+            <?php elseif ($selectedProduct): ?>
+                <p class="spr-note">This page is view-only. Review becomes available after delivery and confirmed payment.</p>
+            <?php endif; ?>
         <?php endif; ?>
     </section>
 </main>

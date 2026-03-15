@@ -23,8 +23,57 @@ $sessionUser = $_SESSION["user"] ?? [];
 $userId = (int)($sessionUser["id"] ?? $sessionUser["userID"] ?? 0);
 $fullName = $sessionUser["full_name"] ?? "Guest";
 $role = $sessionUser["role"] ?? "guest";
+$isAdmin = in_array(strtolower((string)$role), ["admin", "administrator", "superadmin"], true);
 $GLOBALS["header_user_full_name"] = $fullName;
 $GLOBALS["header_user_role"] = $role;
+
+$conn->query("
+    CREATE TABLE IF NOT EXISTS review_admin_replies (
+        replyID INT AUTO_INCREMENT PRIMARY KEY,
+        reviewID INT NOT NULL UNIQUE,
+        adminUserID INT NOT NULL,
+        replyText MEDIUMTEXT NOT NULL,
+        isVisible TINYINT(1) NOT NULL DEFAULT 1,
+        createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_review_admin_replies_admin (adminUserID)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+");
+
+function userCanReviewDeliveredProduct(mysqli $conn, int $userId, int $productId): bool {
+    if ($userId <= 0 || $productId <= 0) {
+        return false;
+    }
+
+    $stmt = $conn->prepare(
+        "SELECT 1
+         FROM orders o
+         INNER JOIN order_items oi ON oi.orderID = o.orderID
+         WHERE o.userID = ?
+           AND oi.productID = ?
+           AND LOWER(o.status) IN ('delivered')
+           AND EXISTS (
+               SELECT 1
+               FROM payments p
+               WHERE p.orderID = o.orderID
+                 AND LOWER(p.paymentStatus) IN ('paid', 'completed', 'captured', 'succeeded', 'confirmed')
+               LIMIT 1
+           )
+         LIMIT 1"
+    );
+    if (!$stmt) {
+        return false;
+    }
+
+    $stmt->bind_param("ii", $userId, $productId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $allowed = ($res && $res->num_rows > 0);
+    $stmt->close();
+    return $allowed;
+}
+
+$canWriteReview = userCanReviewDeliveredProduct($conn, $userId, $productId);
 
 $reviewErrors = [];
 $reviewInput = [
@@ -32,66 +81,149 @@ $reviewInput = [
     "review_text" => "",
 ];
 
-if ($_SERVER["REQUEST_METHOD"] === "POST" && (string)($_POST["action"] ?? "") === "submit_review") {
-    $reviewInput["rating"] = trim((string)($_POST["rating"] ?? ""));
-    $reviewInput["review_text"] = trim((string)($_POST["review_text"] ?? ""));
-    $rating = (int)$reviewInput["rating"];
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    $action = (string)($_POST["action"] ?? "");
 
-    if ($userId <= 0) {
-        $reviewErrors[] = "Please sign in to write a review.";
-    }
-    if ($rating < 1 || $rating > 5) {
-        $reviewErrors[] = "Rating must be between 1 and 5.";
-    }
-    if (mb_strlen($reviewInput["review_text"]) < 5) {
-        $reviewErrors[] = "Please write at least 5 characters.";
-    }
+    if ($action === "submit_review") {
+        $reviewInput["rating"] = trim((string)($_POST["rating"] ?? ""));
+        $reviewInput["review_text"] = trim((string)($_POST["review_text"] ?? ""));
+        $rating = (int)$reviewInput["rating"];
 
-    if (empty($reviewErrors)) {
-        $reviewText = mb_substr($reviewInput["review_text"], 0, 1200);
-        $existingReviewId = 0;
-
-        $checkStmt = $conn->prepare("SELECT reviewID FROM reviews WHERE userID = ? AND productID = ? LIMIT 1");
-        if ($checkStmt) {
-            $checkStmt->bind_param("ii", $userId, $productId);
-            $checkStmt->execute();
-            $checkRes = $checkStmt->get_result();
-            $checkRow = $checkRes ? $checkRes->fetch_assoc() : null;
-            $existingReviewId = (int)($checkRow["reviewID"] ?? 0);
-            $checkStmt->close();
+        if ($userId <= 0) {
+            $reviewErrors[] = "Please sign in to write a review.";
+        }
+        if (!$canWriteReview) {
+            $reviewErrors[] = "Review is available only after the product is delivered and payment is confirmed.";
+        }
+        if ($rating < 1 || $rating > 5) {
+            $reviewErrors[] = "Rating must be between 1 and 5.";
         }
 
-        if ($existingReviewId > 0) {
-            $updateStmt = $conn->prepare(
-                "UPDATE reviews
-                 SET rating = ?, reviewText = ?, timestamp = NOW(), isVisible = 1
-                 WHERE reviewID = ? AND userID = ? AND productID = ?"
-            );
-            if ($updateStmt) {
-                $updateStmt->bind_param("isiii", $rating, $reviewText, $existingReviewId, $userId, $productId);
-                $ok = $updateStmt->execute();
-                $updateStmt->close();
-                if ($ok) {
-                    header("Location: product.php?id=" . $productId . "&review_status=saved#customer-reviews");
-                    exit;
-                }
+        if (empty($reviewErrors)) {
+            $reviewText = mb_substr($reviewInput["review_text"], 0, 1200);
+            $existingReviewId = 0;
+
+            $checkStmt = $conn->prepare("SELECT reviewID FROM reviews WHERE userID = ? AND productID = ? LIMIT 1");
+            if ($checkStmt) {
+                $checkStmt->bind_param("ii", $userId, $productId);
+                $checkStmt->execute();
+                $checkRes = $checkStmt->get_result();
+                $checkRow = $checkRes ? $checkRes->fetch_assoc() : null;
+                $existingReviewId = (int)($checkRow["reviewID"] ?? 0);
+                $checkStmt->close();
             }
-            $reviewErrors[] = "Could not update your review. Please try again.";
+
+            if ($existingReviewId > 0) {
+                $updateStmt = $conn->prepare(
+                    "UPDATE reviews
+                     SET rating = ?, reviewText = ?, timestamp = NOW(), isVisible = 1
+                     WHERE reviewID = ? AND userID = ? AND productID = ?"
+                );
+                if ($updateStmt) {
+                    $updateStmt->bind_param("isiii", $rating, $reviewText, $existingReviewId, $userId, $productId);
+                    $ok = $updateStmt->execute();
+                    $updateStmt->close();
+                    if ($ok) {
+                        header("Location: product.php?id=" . $productId . "&review_status=saved#customer-reviews");
+                        exit;
+                    }
+                }
+                $reviewErrors[] = "Could not update your review. Please try again.";
+            } else {
+                $insertStmt = $conn->prepare(
+                    "INSERT INTO reviews (userID, productID, rating, reviewText, isVisible)
+                     VALUES (?, ?, ?, ?, 1)"
+                );
+                if ($insertStmt) {
+                    $insertStmt->bind_param("iiis", $userId, $productId, $rating, $reviewText);
+                    $ok = $insertStmt->execute();
+                    $insertStmt->close();
+                    if ($ok) {
+                        header("Location: product.php?id=" . $productId . "&review_status=saved#customer-reviews");
+                        exit;
+                    }
+                }
+                $reviewErrors[] = "Could not save your review. Please try again.";
+            }
+        }
+    } elseif ($isAdmin && $action === "admin_delete_review") {
+        $reviewId = (int)($_POST["review_id"] ?? 0);
+        if ($reviewId <= 0) {
+            $reviewErrors[] = "Review not found.";
         } else {
-            $insertStmt = $conn->prepare(
-                "INSERT INTO reviews (userID, productID, rating, reviewText, isVisible)
-                 VALUES (?, ?, ?, ?, 1)"
-            );
-            if ($insertStmt) {
-                $insertStmt->bind_param("iiis", $userId, $productId, $rating, $reviewText);
-                $ok = $insertStmt->execute();
-                $insertStmt->close();
-                if ($ok) {
-                    header("Location: product.php?id=" . $productId . "&review_status=saved#customer-reviews");
+            $delStmt = $conn->prepare("UPDATE reviews SET isVisible = 0, timestamp = NOW() WHERE reviewID = ? AND productID = ?");
+            if ($delStmt) {
+                $delStmt->bind_param("ii", $reviewId, $productId);
+                $delStmt->execute();
+                $affected = $delStmt->affected_rows;
+                $delStmt->close();
+                if ($affected > 0) {
+                    header("Location: product.php?id=" . $productId . "&review_status=admin_deleted#customer-reviews");
                     exit;
                 }
             }
-            $reviewErrors[] = "Could not save your review. Please try again.";
+            $reviewErrors[] = "Could not delete this review.";
+        }
+    } elseif ($isAdmin && $action === "admin_reply_review") {
+        $reviewId = (int)($_POST["review_id"] ?? 0);
+        $adminReplyText = trim((string)($_POST["admin_reply_text"] ?? ""));
+        if ($reviewId <= 0) {
+            $reviewErrors[] = "Review not found.";
+        } elseif (mb_strlen($adminReplyText) < 2) {
+            $reviewErrors[] = "Admin reply must be at least 2 characters.";
+        } else {
+            $checkStmt = $conn->prepare("SELECT reviewID FROM reviews WHERE reviewID = ? AND productID = ? LIMIT 1");
+            if ($checkStmt) {
+                $checkStmt->bind_param("ii", $reviewId, $productId);
+                $checkStmt->execute();
+                $exists = $checkStmt->get_result();
+                $okReview = ($exists && $exists->num_rows > 0);
+                $checkStmt->close();
+                if (!$okReview) {
+                    $reviewErrors[] = "Review not found for this product.";
+                }
+            }
+
+            if (empty($reviewErrors)) {
+                $adminReplyText = mb_substr($adminReplyText, 0, 2500);
+                $replyStmt = $conn->prepare(
+                    "INSERT INTO review_admin_replies (reviewID, adminUserID, replyText, isVisible)
+                     VALUES (?, ?, ?, 1)
+                     ON DUPLICATE KEY UPDATE
+                        adminUserID = VALUES(adminUserID),
+                        replyText = VALUES(replyText),
+                        isVisible = 1,
+                        updatedAt = NOW()"
+                );
+                if ($replyStmt) {
+                    $replyStmt->bind_param("iis", $reviewId, $userId, $adminReplyText);
+                    $ok = $replyStmt->execute();
+                    $replyStmt->close();
+                    if ($ok) {
+                        header("Location: product.php?id=" . $productId . "&review_status=admin_reply_saved#customer-reviews");
+                        exit;
+                    }
+                }
+                $reviewErrors[] = "Could not save admin reply.";
+            }
+        }
+    } elseif ($isAdmin && $action === "admin_delete_reply") {
+        $reviewId = (int)($_POST["review_id"] ?? 0);
+        if ($reviewId <= 0) {
+            $reviewErrors[] = "Reply not found.";
+        } else {
+            $delReplyStmt = $conn->prepare("UPDATE review_admin_replies SET isVisible = 0, updatedAt = NOW() WHERE reviewID = ?");
+            if ($delReplyStmt) {
+                $delReplyStmt->bind_param("i", $reviewId);
+                $delReplyStmt->execute();
+                $affected = $delReplyStmt->affected_rows;
+                $delReplyStmt->close();
+                if ($affected > 0) {
+                    header("Location: product.php?id=" . $productId . "&review_status=admin_reply_deleted#customer-reviews");
+                    exit;
+                }
+            }
+            $reviewErrors[] = "Could not remove admin reply.";
         }
     }
 }
@@ -307,10 +439,24 @@ $reviewStmt = $conn->prepare(
                 JOIN orders o ON o.orderID = oi.orderID
                 WHERE oi.productID = r.productID
                   AND o.userID = r.userID
+                  AND LOWER(o.status) IN ('delivered')
+                  AND EXISTS (
+                    SELECT 1
+                    FROM payments p
+                    WHERE p.orderID = o.orderID
+                      AND LOWER(p.paymentStatus) IN ('paid', 'completed', 'captured', 'succeeded', 'confirmed')
+                    LIMIT 1
+                  )
                 LIMIT 1
-            ) AS isVerifiedPurchase
+            ) AS isVerifiedPurchase,
+            rr.replyID,
+            rr.replyText,
+            rr.updatedAt AS replyTimestamp,
+            COALESCE(NULLIF(TRIM(au.full_name), ''), 'Admin') AS adminReplyAuthor
      FROM reviews r
      LEFT JOIN users u ON u.userID = r.userID
+     LEFT JOIN review_admin_replies rr ON rr.reviewID = r.reviewID AND rr.isVisible = 1
+     LEFT JOIN users au ON au.userID = rr.adminUserID
      WHERE r.productID = ? AND r.isVisible = 1
      ORDER BY r.timestamp DESC, r.reviewID DESC"
 );
@@ -327,6 +473,10 @@ if ($reviewStmt) {
             "timestamp" => (string)$row["timestamp"],
             "reviewerName" => (string)$row["reviewerName"],
             "isVerifiedPurchase" => ((int)$row["isVerifiedPurchase"] === 1),
+            "replyID" => isset($row["replyID"]) ? (int)$row["replyID"] : 0,
+            "adminReplyText" => trim((string)($row["replyText"] ?? "")),
+            "adminReplyTimestamp" => (string)($row["replyTimestamp"] ?? ""),
+            "adminReplyAuthor" => (string)($row["adminReplyAuthor"] ?? "Admin"),
         ];
     }
     $reviewStmt->close();
@@ -354,7 +504,16 @@ if ($userId > 0) {
 }
 
 $reviewStatus = (string)($_GET["review_status"] ?? "");
-$reviewSuccessMessage = ($reviewStatus === "saved") ? "Your review was saved successfully." : "";
+$reviewSuccessMessage = "";
+if ($reviewStatus === "saved") {
+    $reviewSuccessMessage = "Your review was saved successfully.";
+} elseif ($reviewStatus === "admin_deleted") {
+    $reviewSuccessMessage = "Review was removed.";
+} elseif ($reviewStatus === "admin_reply_saved") {
+    $reviewSuccessMessage = "Admin reply saved.";
+} elseif ($reviewStatus === "admin_reply_deleted") {
+    $reviewSuccessMessage = "Admin reply removed.";
+}
 $defaultReviewRating = max(1, min(5, (int)$reviewInput["rating"]));
 $openReviewForm = !empty($reviewErrors) || ((string)($_GET["write_review"] ?? "") === "1");
 ?>
@@ -496,10 +655,12 @@ include __DIR__ . "/include/header.php";
     <section class="reviews-section" id="customer-reviews">
         <div class="reviews-head">
             <h2>Customer Reviews</h2>
-            <?php if ($userId > 0): ?>
+            <?php if ($userId > 0 && $canWriteReview): ?>
                 <button type="button" class="write-review-btn" id="write-review-btn">Write a Review</button>
+            <?php elseif ($userId > 0): ?>
+                <span class="write-review-btn is-disabled">Available After Delivery</span>
             <?php else: ?>
-                <a href="authentication/login.php" class="write-review-btn">Write a Review</a>
+                <a href="authentication/login.php" class="write-review-btn">Sign In to Review</a>
             <?php endif; ?>
         </div>
 
@@ -509,8 +670,13 @@ include __DIR__ . "/include/header.php";
         <?php if (!empty($reviewErrors)): ?>
             <div class="review-alert error"><?= htmlspecialchars(implode(" ", $reviewErrors)) ?></div>
         <?php endif; ?>
+        <?php if ($userId > 0 && !$canWriteReview): ?>
+            <div class="review-alert info">
+                Review opens only after your order is delivered and payment is confirmed.
+            </div>
+        <?php endif; ?>
 
-        <?php if ($userId > 0): ?>
+        <?php if ($userId > 0 && $canWriteReview): ?>
             <form method="post" class="review-form <?= $openReviewForm ? "is-open" : "" ?>" id="write-review-form">
                 <input type="hidden" name="action" value="submit_review">
                 <div class="review-form-title">Share your experience</div>
@@ -562,6 +728,51 @@ include __DIR__ . "/include/header.php";
                             <?php endfor; ?>
                         </div>
                         <p><?= nl2br(htmlspecialchars($review["text"] !== "" ? $review["text"] : "No comment provided.")) ?></p>
+
+                        <?php if ($review["adminReplyText"] !== ""): ?>
+                            <div class="review-admin-reply">
+                                <div class="review-admin-reply-head">
+                                    <strong><?= htmlspecialchars($review["adminReplyAuthor"]) ?></strong>
+                                    <?php if ($review["adminReplyTimestamp"] !== ""): ?>
+                                        <time datetime="<?= htmlspecialchars((string)date("c", strtotime($review["adminReplyTimestamp"]))) ?>">
+                                            <?= htmlspecialchars((string)date("Y-m-d", strtotime($review["adminReplyTimestamp"]))) ?>
+                                        </time>
+                                    <?php endif; ?>
+                                </div>
+                                <p><?= nl2br(htmlspecialchars($review["adminReplyText"])) ?></p>
+                            </div>
+                        <?php endif; ?>
+
+                        <?php if ($isAdmin): ?>
+                            <div class="review-admin-actions">
+                                <form method="post" onsubmit="return confirm('Remove this review?');">
+                                    <input type="hidden" name="action" value="admin_delete_review">
+                                    <input type="hidden" name="review_id" value="<?= (int)$review["id"] ?>">
+                                    <button type="submit" class="submit-review-btn review-admin-danger">Delete Review</button>
+                                </form>
+                                <?php if ($review["adminReplyText"] !== ""): ?>
+                                    <form method="post" onsubmit="return confirm('Remove this admin reply?');">
+                                        <input type="hidden" name="action" value="admin_delete_reply">
+                                        <input type="hidden" name="review_id" value="<?= (int)$review["id"] ?>">
+                                        <button type="submit" class="submit-review-btn review-admin-light">Remove Reply</button>
+                                    </form>
+                                <?php endif; ?>
+                            </div>
+                            <form method="post" class="review-admin-reply-form">
+                                <input type="hidden" name="action" value="admin_reply_review">
+                                <input type="hidden" name="review_id" value="<?= (int)$review["id"] ?>">
+                                <label class="review-label" for="admin_reply_<?= (int)$review["id"] ?>">Admin Reply</label>
+                                <textarea
+                                    id="admin_reply_<?= (int)$review["id"] ?>"
+                                    name="admin_reply_text"
+                                    rows="3"
+                                    maxlength="2500"
+                                    placeholder="Write an admin response..."><?= htmlspecialchars($review["adminReplyText"]) ?></textarea>
+                                <div class="review-form-actions">
+                                    <button type="submit" class="submit-review-btn">Save Reply</button>
+                                </div>
+                            </form>
+                        <?php endif; ?>
                     </article>
                 <?php endforeach; ?>
             <?php endif; ?>

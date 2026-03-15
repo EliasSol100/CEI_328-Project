@@ -404,6 +404,12 @@
     background: #f8f1ff;
 }
 
+.write-review-btn.is-disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
 .review-alert {
     border-radius: 12px;
     padding: 10px 12px;
@@ -421,6 +427,12 @@
     background: #ffe8e8;
     border: 1px solid #f5caca;
     color: #8f2222;
+}
+
+.review-alert.info {
+    background: #eaf3ff;
+    border: 1px solid #c8ddff;
+    color: #174a8b;
 }
 
 .review-form {
@@ -561,6 +573,68 @@
     font-size: 16px;
 }
 
+.review-admin-reply {
+    margin-top: 12px;
+    border-left: 4px solid #d5c3f3;
+    background: #faf7ff;
+    border-radius: 12px;
+    padding: 10px 12px;
+}
+
+.review-admin-reply-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.review-admin-reply-head strong {
+    font-size: 14px;
+    color: #322249;
+}
+
+.review-admin-reply-head time {
+    font-size: 12px;
+    color: #726188;
+}
+
+.review-admin-reply p {
+    margin: 0;
+    font-size: 14px;
+    color: #3f3357;
+}
+
+.review-admin-actions {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.review-admin-reply-form {
+    margin-top: 10px;
+    border-top: 1px dashed #dccdf0;
+    padding-top: 10px;
+}
+
+.review-admin-reply-form textarea {
+    width: 100%;
+    border: 1px solid #d9cced;
+    border-radius: 12px;
+    padding: 10px 12px;
+    font: inherit;
+    resize: vertical;
+}
+
+.submit-review-btn.review-admin-danger {
+    background: #be3d3d;
+}
+
+.submit-review-btn.review-admin-light {
+    background: #75639c;
+}
+
 .pd-toast {
     position: fixed;
     bottom: 20px;
@@ -658,3 +732,4 @@
         font-size: 20px;
     }
 }
+
