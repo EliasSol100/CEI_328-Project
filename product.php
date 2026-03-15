@@ -415,7 +415,6 @@ include __DIR__ . "/include/header.php";
             </p>
 
             <?php if (!empty($uniqueSizes)): ?>
-                <div class="section-title">Size</div>
                 <div class="size-row" id="size-row">
                     <?php foreach ($uniqueSizes as $idx => $sizeLabel): ?>
                         <button

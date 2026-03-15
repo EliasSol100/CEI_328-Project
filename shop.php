@@ -635,46 +635,10 @@ if ($revRes) {
     }
 
     document.querySelectorAll('.shop-atc-btn').forEach(btn => {
-        btn.addEventListener('click', function () {
+        btn.addEventListener('click', function (e) {
+            e.stopPropagation();
             const pid = parseInt(this.dataset.productId);
-            const hasVariants = parseInt(this.dataset.hasVariants);
-            const btn = this;
-
-            if (hasVariants) {
-                // Fetch variations first
-                fetch('cart_api.php?action=variations&product_id=' + pid)
-                .then(r => r.json())
-                .then(data => {
-                    const vars = data.variations || [];
-                    if (vars.length === 0) {
-                        // No rows in product_variations — add without variation
-                        addToCart(pid, null).then(d => {
-                            if (d && d.success) {
-                                btn.classList.add('atc-added');
-                                btn.innerHTML = '<i class="fas fa-check"></i> ' + t('Added!', 'Προστέθηκε!');
-                                setTimeout(() => {
-                                    btn.classList.remove('atc-added');
-                                    btn.innerHTML = '<i class="fas fa-cart-plus"></i> ' + t('Add to Cart', 'Προσθήκη στο Καλάθι');
-                                }, 1800);
-                            }
-                        });
-                    } else {
-                        varModal.open(pid, vars, btn);
-                    }
-                })
-                .catch(() => showToast('Network error.', true));
-            } else {
-                addToCart(pid, null).then(d => {
-                    if (d && d.success) {
-                        btn.classList.add('atc-added');
-                        btn.innerHTML = '<i class="fas fa-check"></i> ' + t('Added!', 'Προστέθηκε!');
-                        setTimeout(() => {
-                            btn.classList.remove('atc-added');
-                            btn.innerHTML = '<i class="fas fa-cart-plus"></i> ' + t('Add to Cart', 'Προσθήκη στο Καλάθι');
-                        }, 1800);
-                    }
-                });
-            }
+            window.location.href = 'product.php?id=' + pid;
         });
     });
     </script>
