@@ -261,7 +261,7 @@ body {
 /* ── Badges / Status ─────────────────────────────── */
 .badge {
   display: inline-flex; align-items: center;
-  min-width: 108px;
+  width: 140px;
   justify-content: center;
   padding: 3px 12px;
   border-radius: 20px;
@@ -274,7 +274,7 @@ body {
 /* Make the "Available"/"Globally Disabled" pills align perfectly with switches */
 .badge.badge-green,
 .badge.badge-red {
-  min-width: 140px;
+  width: 140px;
   padding: 4px 14px;
   font-weight: 600;
 }

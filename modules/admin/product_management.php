@@ -51,11 +51,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             mysqli_stmt_execute($stmt);
             $newProductID = mysqli_insert_id($conn);
 
-            if ($newProductID && isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
-                $photoData  = file_get_contents($_FILES['photo']['tmp_name']);
-                $stmtPhoto  = mysqli_prepare($conn, "INSERT INTO photos (photo, productID) VALUES (?, ?)");
-                mysqli_stmt_bind_param($stmtPhoto, 'si', $photoData, $newProductID);
-                mysqli_stmt_execute($stmtPhoto);
+            if ($newProductID && isset($_FILES['photos']) && is_array($_FILES['photos']['tmp_name'])) {
+                $added = 0;
+                foreach ($_FILES['photos']['tmp_name'] as $idx => $tmpName) {
+                    if ($added >= 4) break;
+                    if ($_FILES['photos']['error'][$idx] !== UPLOAD_ERR_OK) continue;
+                    $photoData = file_get_contents($tmpName);
+                    $stmtPhoto = mysqli_prepare($conn, "INSERT INTO photos (photo, productID) VALUES (?, ?)");
+                    mysqli_stmt_bind_param($stmtPhoto, 'si', $photoData, $newProductID);
+                    mysqli_stmt_execute($stmtPhoto);
+                    $added++;
+                }
             }
 
             $flash = 'ok:Product added successfully.';
@@ -94,22 +100,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
             mysqli_stmt_execute($stmt);
 
-            if (isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
-                $photoData = file_get_contents($_FILES['photo']['tmp_name']);
-                $chk = mysqli_query($conn, "SELECT imageID FROM photos WHERE productID=$id LIMIT 1");
-                if ($chk && mysqli_num_rows($chk) > 0) {
-                    $imgRow    = mysqli_fetch_assoc($chk);
-                    $stmtPhoto = mysqli_prepare($conn, "UPDATE photos SET photo=? WHERE imageID=?");
-                    mysqli_stmt_bind_param($stmtPhoto, 'si', $photoData, $imgRow['imageID']);
-                } else {
+            if (isset($_FILES['photos']) && is_array($_FILES['photos']['tmp_name'])) {
+                $cntRes = mysqli_query($conn, "SELECT COUNT(*) AS cnt FROM photos WHERE productID=$id");
+                $existing = (int)(mysqli_fetch_assoc($cntRes)['cnt'] ?? 0);
+                $canAdd   = max(0, 4 - $existing);
+                $added    = 0;
+                foreach ($_FILES['photos']['tmp_name'] as $idx => $tmpName) {
+                    if ($added >= $canAdd) break;
+                    if ($_FILES['photos']['error'][$idx] !== UPLOAD_ERR_OK) continue;
+                    $photoData = file_get_contents($tmpName);
                     $stmtPhoto = mysqli_prepare($conn, "INSERT INTO photos (photo, productID) VALUES (?,?)");
                     mysqli_stmt_bind_param($stmtPhoto, 'si', $photoData, $id);
+                    mysqli_stmt_execute($stmtPhoto);
+                    $added++;
                 }
-                mysqli_stmt_execute($stmtPhoto);
             }
 
             $flash = 'ok:Product updated successfully.';
         }
+    }
+
+    if ($action === 'delete_photo') {
+        $imageID   = (int)($_POST['imageID']   ?? 0);
+        $productID = (int)($_POST['productID'] ?? 0);
+        if ($imageID > 0 && $productID > 0) {
+            mysqli_query($conn, "DELETE FROM photos WHERE imageID=$imageID AND productID=$productID");
+        }
+        $q2 = trim((string)($_POST['q'] ?? ''));
+        $sf2 = trim((string)($_POST['status_filter'] ?? ''));
+        $qs = http_build_query(array_filter(['edit' => $productID, 'q' => $q2, 'status_filter' => $sf2]));
+        header("Location: product_management.php?" . $qs);
+        exit;
     }
 
     if ($action === 'delete') {
@@ -257,12 +278,12 @@ $availStatus = [
     'made_to_order' => ['label' => 'made to order', 'badge' => 'badge-muted'],
 ];
 
-/* ── Images keyed by productID ── */
+/* ── Images keyed by productID (all photos, up to 4) ── */
 $images = [];
-$r = mysqli_query($conn, "SELECT productID, imageID FROM photos GROUP BY productID");
+$r = mysqli_query($conn, "SELECT productID, imageID FROM photos ORDER BY imageID ASC");
 if ($r) {
     while ($row = mysqli_fetch_assoc($r)) {
-        $images[$row['productID']] = $row['imageID'];
+        $images[$row['productID']][] = (int)$row['imageID'];
     }
 }
 
@@ -374,8 +395,8 @@ $statusFilterOptions = [
               <tr>
                 <td>
                   <div class="prod-thumb">
-                    <?php if (isset($images[$p['productID']])): ?>
-                      <img src="ajax/product_image.php?id=<?= $images[$p['productID']] ?>" alt="">
+                    <?php if (!empty($images[$p['productID']])): ?>
+                      <img src="ajax/product_image.php?id=<?= $images[$p['productID']][0] ?>" alt="">
                     <?php else: ?>
                       <i class="fas fa-image"></i>
                     <?php endif; ?>
@@ -437,8 +458,9 @@ $statusFilterOptions = [
       <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
       <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
       <div class="form-group">
-        <label class="form-label">Product Photo</label>
-        <input type="file" name="photo" class="form-input" accept="image/*">
+        <label class="form-label">Product Photos <span class="text-muted">(up to 4)</span></label>
+        <input type="file" name="photos[]" class="form-input" accept="image/*" multiple>
+        <span class="form-hint">Hold Ctrl/Cmd to select multiple photos</span>
       </div>
       <div class="form-grid-2">
         <div class="form-group">
@@ -518,15 +540,33 @@ $statusFilterOptions = [
       <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
       <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
       <div class="form-group">
-        <label class="form-label">Product Photo</label>
-        <?php if (isset($images[$editProduct['productID']])): ?>
-          <div style="margin-bottom:8px;">
-            <img src="ajax/product_image.php?id=<?= $images[$editProduct['productID']] ?>"
-                 style="height:80px;border-radius:8px;object-fit:cover;border:1px solid #e5e7eb;" alt="Current photo">
-            <span class="text-muted" style="display:block;font-size:12px;margin-top:4px;">Current photo — upload a new one to replace it</span>
+        <label class="form-label">Product Photos <span class="text-muted">(up to 4)</span></label>
+        <?php $productPhotos = $images[$editProduct['productID']] ?? []; ?>
+        <?php if (!empty($productPhotos)): ?>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+            <?php foreach ($productPhotos as $imgID): ?>
+              <div style="position:relative;display:inline-block;">
+                <img src="ajax/product_image.php?id=<?= $imgID ?>"
+                     style="height:72px;width:72px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb;" alt="">
+                <form method="POST" style="position:absolute;top:-7px;right:-7px;margin:0;"
+                      onsubmit="return confirm('Delete this photo?')">
+                  <input type="hidden" name="action" value="delete_photo">
+                  <input type="hidden" name="imageID" value="<?= $imgID ?>">
+                  <input type="hidden" name="productID" value="<?= $editProduct['productID'] ?>">
+                  <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
+                  <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
+                  <button type="submit" title="Delete photo"
+                          style="background:#e74c3c;color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:13px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;">&times;</button>
+                </form>
+              </div>
+            <?php endforeach; ?>
           </div>
+          <span class="form-hint"><?= count($productPhotos) ?>/4 photos — click &times; to remove</span>
         <?php endif; ?>
-        <input type="file" name="photo" class="form-input" accept="image/*">
+        <?php if (count($productPhotos) < 4): ?>
+          <input type="file" name="photos[]" class="form-input" accept="image/*" multiple style="margin-top:8px;">
+          <span class="form-hint">Add up to <?= 4 - count($productPhotos) ?> more photo(s) — hold Ctrl/Cmd to select multiple</span>
+        <?php endif; ?>
       </div>
       <div class="form-grid-2">
         <div class="form-group">

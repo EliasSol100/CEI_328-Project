@@ -239,7 +239,7 @@ $sql = "
     SELECT p.productID, p.nameEN, p.nameGR, p.basePrice, p.inventory,
            p.cartStatus, p.category, p.hasVariants,
            COALESCE(pso.manual_total_sales, COALESCE(os.total_qty, 0)) AS totalSales,
-           MIN(ph.imageID) AS imageID
+           GROUP_CONCAT(ph.imageID ORDER BY ph.imageID ASC SEPARATOR ',') AS imageIDs
     FROM products p
     LEFT JOIN photos ph ON ph.productID = p.productID
     LEFT JOIN (
@@ -328,6 +328,29 @@ if ($revRes) {
     <link rel="stylesheet" href="assets/styling/header.css?v=5">
     <link rel="stylesheet" href="assets/styling/shopstyle.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>
+    .shop-carousel,
+    .shop-carousel .carousel-inner,
+    .shop-carousel .carousel-item {
+        height: 100%;
+    }
+    .shop-carousel .carousel-item img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .shop-carousel .carousel-control-prev,
+    .shop-carousel .carousel-control-next {
+        width: 30px;
+        opacity: 0;
+        transition: opacity 0.2s;
+    }
+    .shop-product-card:hover .shop-carousel .carousel-control-prev,
+    .shop-product-card:hover .shop-carousel .carousel-control-next {
+        opacity: 0.7;
+    }
+    </style>
     <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/translations.js') ?>" defer></script>
 </head>
 <body class="site-page">
@@ -449,10 +472,7 @@ if ($revRes) {
                             $isOutStock = ((string)$p['cartStatus'] === 'out_of_stock') || ((int)$p['inventory'] <= 0 && (string)$p['cartStatus'] !== 'made_to_order');
                             $isLowStock = ((string)$p['cartStatus'] === 'low_stock') || (!$isOutStock && (int)$p['inventory'] > 0 && (int)$p['inventory'] <= 3);
                             $catName   = $p['category'] ?? '';
-                            $imgStyle  = '';
-                            if ($p['imageID']) {
-                                $imgStyle = 'background-image:url(modules/admin/ajax/product_image.php?id=' . (int)$p['imageID'] . ');background-size:cover;background-position:center;';
-                            }
+                            $imageIDs = !empty($p['imageIDs']) ? array_map('intval', explode(',', $p['imageIDs'])) : [];
                             $rev    = $reviewData[$pid] ?? ['cnt' => 0, 'avg' => 0.0];
                             $stars  = '';
                             $filled = (int)round($rev['avg']);
@@ -468,8 +488,27 @@ if ($revRes) {
                                  tabindex="0"
                                  role="link"
                                  aria-label="View <?= htmlspecialchars($p['nameEN']) ?>">
-                            <div class="shop-product-image" style="<?= $imgStyle ?>">
-                                <form method="post" action="shop.php">
+                            <div class="shop-product-image">
+                                <?php if (!empty($imageIDs)): ?>
+                                <div id="carousel-<?= $pid ?>" class="carousel slide shop-carousel" data-bs-ride="carousel" data-bs-interval="3000">
+                                    <div class="carousel-inner">
+                                        <?php foreach ($imageIDs as $cidx => $imgID): ?>
+                                        <div class="carousel-item <?= $cidx === 0 ? 'active' : '' ?>">
+                                            <img src="modules/admin/ajax/product_image.php?id=<?= $imgID ?>" alt="<?= htmlspecialchars($p['nameEN']) ?>">
+                                        </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                    <?php if (count($imageIDs) > 1): ?>
+                                    <button class="carousel-control-prev" type="button" data-bs-target="#carousel-<?= $pid ?>" data-bs-slide="prev">
+                                        <span class="carousel-control-prev-icon"></span>
+                                    </button>
+                                    <button class="carousel-control-next" type="button" data-bs-target="#carousel-<?= $pid ?>" data-bs-slide="next">
+                                        <span class="carousel-control-next-icon"></span>
+                                    </button>
+                                    <?php endif; ?>
+                                </div>
+                                <?php endif; ?>
+                                <form method="post" action="shop.php" style="position:absolute;top:8px;right:8px;z-index:10;">
                                     <input type="hidden" name="action" value="toggle_wishlist_item">
                                     <input type="hidden" name="product_id" value="<?= $pid ?>">
                                     <button type="submit" class="shop-fav <?= $inWishlist ? 'is-active' : '' ?>" title="<?= $inWishlist ? 'Remove from wishlist' : 'Add to wishlist' ?>">
@@ -559,6 +598,7 @@ if ($revRes) {
         updatePriceLabel();
     })();
     </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="assets/js/wishlist-live.js" defer></script>
     <script>
     document.querySelectorAll('.shop-product-card.is-clickable').forEach(card => {
