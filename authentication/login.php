@@ -97,7 +97,7 @@ require_once "database.php";
 
                             // Ενημερώνει το last_login στη DB με την τωρινή ώρα
                             $updateLogin = $conn->prepare("UPDATE users SET last_login = NOW() WHERE userID = ?");
-                            $updateLogin->bind_param("i", $user['id']);
+                            $updateLogin->bind_param("i", $user['id']); //bind_param san to pdo
                             $updateLogin->execute();
                             $updateLogin->close();
 
@@ -107,11 +107,14 @@ require_once "database.php";
                                 !empty($user["city"])     &&
                                 !empty($user["address"])  &&
                                 !empty($user["postcode"]) &&
-                                !empty($user["dob"])      &&
+                                !empty($user["dob"])      && //date of birth
                                 !empty($user["phone"]);
 
                             // Ελέγχει αν το email έχει επαληθευτεί (0 ή 1 στη DB)
                             $isVerified = ((int)($user["is_verified"] ?? 0) === 1);
+                            //$user["is_verified"] = "1"  → (int)"1" = 1 → 1 === 1 → true
+                            //$user["is_verified"] = "0"  → (int)"0" = 0 → 0 === 1 → false
+                            //$user["is_verified"] = null → ?? 0       → 0 === 1 → false
 
                             // Δημιουργεί το session — αυτό είναι το "login"
                             $_SESSION["user"] = [
