@@ -75,6 +75,7 @@ try {
 
     $cartStatus  = (string)$product['cartStatus'];
     $hasVariants = ((int)$product['hasVariants'] === 1);
+    $hasStoredVariations = $hasVariants ? productHasVariationRows($conn, $productId) : false;
 
     if ($cartStatus !== 'active' && $cartStatus !== 'made_to_order' && $cartStatus !== 'low_stock') {
         badRequest('Product is not available for cart.');
@@ -82,8 +83,8 @@ try {
 
     $variation = null;
     $customVariation = null;
-    $effectiveHasVariants = $hasVariants;
-    if ($hasVariants) {
+    $effectiveHasVariants = $hasVariants && $hasStoredVariations;
+    if ($effectiveHasVariants) {
         if ($variationId !== null && $variationId > 0) {
             $variation = fetchVariationById($conn, $variationId, $productId);
         } elseif ($colorId !== null && $colorId > 0) {
@@ -325,6 +326,16 @@ function fetchProduct(mysqli $conn, int $productId): ?array {
     $row = $st->get_result()->fetch_assoc();
     $st->close();
     return $row ?: null;
+}
+function productHasVariationRows(mysqli $conn, int $productId): bool {
+    $sql = "SELECT 1 FROM product_variations WHERE productID = ? LIMIT 1";
+    $st = $conn->prepare($sql);
+    if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
+    $st->bind_param("i", $productId);
+    $st->execute();
+    $row = $st->get_result()->fetch_assoc();
+    $st->close();
+    return (bool)$row;
 }
 function fetchVariationById(mysqli $conn, int $variationId, int $productId): ?array {
     $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, c.colorName

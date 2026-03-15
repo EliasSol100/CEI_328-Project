@@ -575,6 +575,7 @@ include __DIR__ . "/include/header.php";
     var productId = <?= (int)$product["productID"] ?>;
     var hasVariants = <?= (int)$product["hasVariants"] ?> === 1;
     var variations = <?= json_encode($variations, JSON_UNESCAPED_UNICODE) ?>;
+    var hasSelectableVariations = hasVariants && Array.isArray(variations) && variations.length > 0;
     var cartStatus = <?= json_encode((string)$product["cartStatus"], JSON_UNESCAPED_UNICODE) ?>;
     var productInventory = <?= (int)$product["inventory"] ?>;
 
@@ -604,7 +605,7 @@ include __DIR__ . "/include/header.php";
         if (cartStatus === "made_to_order") {
             return 999;
         }
-        if (hasVariants && Array.isArray(variations) && variations.length > 0) {
+        if (hasSelectableVariations) {
             var v = findSelectedVariation();
             return v ? Number(v.stock || 0) : 0;
         }
@@ -639,6 +640,13 @@ include __DIR__ . "/include/header.php";
         return String(value || "").trim().toLowerCase();
     }
 
+    var variationUsesSize = hasSelectableVariations && variations.some(function (item) {
+        return normalize(item.size) !== "";
+    });
+    var variationUsesColor = hasSelectableVariations && variations.some(function (item) {
+        return Number(item.colorID || 0) > 0;
+    });
+
     var sizeChips = Array.prototype.slice.call(document.querySelectorAll(".size-chip"));
     var colorDots = Array.prototype.slice.call(document.querySelectorAll(".color-dot"));
     var colorStockEl = document.getElementById("color-stock");
@@ -646,7 +654,7 @@ include __DIR__ . "/include/header.php";
     var addCartBtn = document.getElementById("add-cart-btn");
     var colorStockMap = {};
 
-    if (hasVariants && Array.isArray(variations)) {
+    if (hasSelectableVariations) {
         variations.forEach(function (item) {
             var colorId = Number(item.colorID || 0);
             if (!colorId) {
@@ -659,6 +667,13 @@ include __DIR__ . "/include/header.php";
 
     function updateColorDots() {
         if (!colorDots.length) {
+            return;
+        }
+        if (!hasSelectableVariations || !variationUsesColor) {
+            colorDots.forEach(function (dot) {
+                dot.dataset.colorStock = String(Number(productInventory || 0));
+                dot.classList.remove("is-out");
+            });
             return;
         }
         colorDots.forEach(function (dot) {
@@ -690,20 +705,23 @@ include __DIR__ . "/include/header.php";
     }
 
     function findSelectedVariation() {
-        if (!Array.isArray(variations) || variations.length === 0) {
+        if (!hasSelectableVariations) {
             return null;
         }
 
+        var sizeFilterEnabled = variationUsesSize && !!selectedSize;
+        var colorFilterEnabled = variationUsesColor && !!selectedColorId;
+
         var exact = variations.find(function (item) {
-            var sizeOk = !selectedSize || normalize(item.size) === normalize(selectedSize);
-            var colorOk = !selectedColorId || Number(item.colorID || 0) === Number(selectedColorId || 0);
+            var sizeOk = !sizeFilterEnabled || normalize(item.size) === normalize(selectedSize);
+            var colorOk = !colorFilterEnabled || Number(item.colorID || 0) === Number(selectedColorId || 0);
             return sizeOk && colorOk;
         });
         if (exact) {
             return exact;
         }
 
-        if (selectedSize) {
+        if (sizeFilterEnabled) {
             var bySize = variations.find(function (item) {
                 return normalize(item.size) === normalize(selectedSize);
             });
@@ -712,7 +730,7 @@ include __DIR__ . "/include/header.php";
             }
         }
 
-        if (selectedColorId) {
+        if (colorFilterEnabled) {
             var byColor = variations.find(function (item) {
                 return Number(item.colorID || 0) === Number(selectedColorId || 0);
             });
@@ -739,10 +757,12 @@ include __DIR__ . "/include/header.php";
     function updateAddToCartState() {
         var available = true;
         var selectedVariation = findSelectedVariation();
-        var requireExact = (sizeChips.length > 0 || colorDots.length > 0);
+        var requireSizeSelection = variationUsesSize && sizeChips.length > 0;
+        var requireColorSelection = variationUsesColor && colorDots.length > 0;
+        var requireExact = (requireSizeSelection || requireColorSelection);
 
-        if (hasVariants && Array.isArray(variations) && variations.length > 0) {
-            if (selectedColorId && cartStatus !== "made_to_order") {
+        if (hasSelectableVariations) {
+            if (requireColorSelection && selectedColorId && cartStatus !== "made_to_order") {
                 var colorStock = Number(colorStockMap[selectedColorId] || 0);
                 if (colorStock <= 0) {
                     available = false;
@@ -750,8 +770,8 @@ include __DIR__ . "/include/header.php";
                 }
             }
             if (selectedVariation) {
-                var sizeExact = !selectedSize || normalize(selectedVariation.size) === normalize(selectedSize);
-                var colorExact = !selectedColorId || Number(selectedVariation.colorID || 0) === Number(selectedColorId || 0);
+                var sizeExact = !requireSizeSelection || (!!selectedSize && normalize(selectedVariation.size) === normalize(selectedSize));
+                var colorExact = !requireColorSelection || (!!selectedColorId && Number(selectedVariation.colorID || 0) === Number(selectedColorId || 0));
                 if (requireExact && (!sizeExact || !colorExact)) {
                     available = false;
                     setVariantStatus("Please select a valid size and color.", true);
@@ -870,7 +890,7 @@ include __DIR__ . "/include/header.php";
                 showToast("Please select an available option.", true);
                 return;
             }
-            if (hasVariants && (!state.selectedVariation || !state.selectedVariation.variationID)) {
+            if (hasSelectableVariations && (!state.selectedVariation || !state.selectedVariation.variationID)) {
                 showToast("Please select a valid size and color.", true);
                 return;
             }
@@ -885,12 +905,12 @@ include __DIR__ . "/include/header.php";
                 }
             };
 
-            if (hasVariants) {
+            if (hasSelectableVariations) {
                 payload.variation = {};
-                if (selectedColorId) {
+                if (variationUsesColor && selectedColorId) {
                     payload.variation.color_id = selectedColorId;
                 }
-                if (selectedSize) {
+                if (variationUsesSize && selectedSize) {
                     payload.variation.size = selectedSize;
                 }
                 if (state.selectedVariation && state.selectedVariation.yarnType) {
