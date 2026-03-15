@@ -491,12 +491,10 @@ if ($revRes) {
                                         <span class="shop-stock" data-translate="inStock">In Stock</span>
                                     <?php endif; ?>
                                 </div>
-                                <?php if ($rev['cnt'] > 0): ?>
                                 <div class="shop-rating">
                                     <?= $stars ?>
                                     <span class="shop-review-count">(<?= $rev['cnt'] ?>)</span>
                                 </div>
-                                <?php endif; ?>
                                 <div class="shop-review-count" style="margin-top:4px;display:block;">
                                     <?= (int)($p['totalSales'] ?? 0) ?> sold
                                 </div>
