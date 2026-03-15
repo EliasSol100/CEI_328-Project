@@ -145,6 +145,7 @@ $listSql = '
         o.totalAmount,
         DATE_FORMAT(o.createdAt, "%m/%d/%Y") AS date,
         COUNT(oi.orderItemID) AS item_count,
+        o.userID,
         COALESCE(NULLIF(u.full_name, ""), "Guest") AS customer,
         COALESCE(u.email, o.email, "-") AS email,
         COALESCE(lp.paymentStatus, "-") AS paymentStatus
@@ -162,6 +163,7 @@ $listSql = '
     ) lp ON lp.orderID = o.orderID
     GROUP BY
         o.orderID, o.orderNumber, o.status, o.totalAmount, o.createdAt,
+        o.userID,
         COALESCE(NULLIF(u.full_name, ""), "Guest"),
         COALESCE(u.email, o.email, "-"),
         lp.paymentStatus
@@ -282,6 +284,7 @@ $receiptStatuses = ['paid', 'completed', 'captured', 'succeeded'];
               <tr>
                 <th>Order #</th>
                 <th>Customer</th>
+                <th>Role</th>
                 <th>Items</th>
                 <th>Total</th>
                 <th>Date</th>
@@ -303,6 +306,13 @@ $receiptStatuses = ['paid', 'completed', 'captured', 'succeeded'];
                 <td>
                   <div><?= htmlspecialchars((string)$o['customer']) ?></div>
                   <div class="text-sm text-muted"><?= htmlspecialchars((string)$o['email']) ?></div>
+                </td>
+                <td>
+                  <?php if ($o['userID']): ?>
+                    <span class="user-type-badge user-type-member"><i class="fas fa-user"></i> Member</span>
+                  <?php else: ?>
+                    <span class="user-type-badge user-type-guest"><i class="fas fa-user-secret"></i> Guest</span>
+                  <?php endif; ?>
                 </td>
                 <td><?= (int)$o['item_count'] ?></td>
                 <td class="font-600">EUR <?= number_format((float)$o['totalAmount'], 2) ?></td>
