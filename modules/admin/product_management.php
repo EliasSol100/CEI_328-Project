@@ -405,11 +405,9 @@ $statusFilterOptions = [
                 <td class="font-600"><?= htmlspecialchars($p['nameEN']) ?></td>
                 <td class="text-muted"><?= htmlspecialchars($p['category'] ?? '—') ?></td>
                 <td>
-                  <?php if ($p['costPrice'] > 0 && $p['basePrice'] !== $p['costPrice']): ?>
-                    <span class="price-old">€<?= number_format($p['costPrice'],2) ?></span>
-                    <span class="price-new">€<?= number_format($p['basePrice'],2) ?></span>
-                  <?php else: ?>
-                    <span class="price-new">€<?= number_format($p['basePrice'],2) ?></span>
+                  <span class="price-new">€<?= number_format($p['basePrice'],2) ?></span>
+                  <?php if ((float)$p['costPrice'] > 0): ?>
+                    <div class="text-sm text-muted">Cost: €<?= number_format((float)$p['costPrice'], 2) ?></div>
                   <?php endif; ?>
                 </td>
                 <td><span class="badge <?= $st['badge'] ?>"><?= $st['label'] ?></span></td>
@@ -482,13 +480,13 @@ $statusFilterOptions = [
       </div>
       <div class="form-grid-2">
         <div class="form-group">
-          <label class="form-label">Base Price (€) *</label>
+          <label class="form-label">Selling Price (€) *</label>
           <input name="basePrice" type="number" step="0.01" min="0" class="form-input" required placeholder="0.00">
         </div>
         <div class="form-group">
-          <label class="form-label">Cost Price (€) <span class="text-muted">(admin only)</span></label>
+          <label class="form-label">Material Cost (€) <span class="text-muted">(internal)</span></label>
           <input name="costPrice" type="number" step="0.01" min="0" class="form-input" placeholder="0.00">
-          <span class="form-hint">Not shown to customers</span>
+          <span class="form-hint">Used for profitability tracking. Customers only see selling price.</span>
         </div>
       </div>
       <div class="form-grid-2">
@@ -588,11 +586,11 @@ $statusFilterOptions = [
       </div>
       <div class="form-grid-2">
         <div class="form-group">
-          <label class="form-label">Base Price (€) *</label>
+          <label class="form-label">Selling Price (€) *</label>
           <input name="basePrice" type="number" step="0.01" class="form-input" required value="<?= $editProduct['basePrice'] ?>">
         </div>
         <div class="form-group">
-          <label class="form-label">Cost Price (€)</label>
+          <label class="form-label">Material Cost (€) <span class="text-muted">(internal)</span></label>
           <input name="costPrice" type="number" step="0.01" class="form-input" value="<?= $editProduct['costPrice'] ?>">
         </div>
       </div>

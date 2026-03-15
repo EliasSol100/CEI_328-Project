@@ -1,9 +1,116 @@
-<?php
+﻿<?php
 session_start();
 require_once __DIR__ . "/authentication/database.php";
 require_once __DIR__ . "/authentication/get_config.php";
 
 $systemTitle = getSystemConfig("site_title") ?: "Creations by Athina";
+
+function ensurePromotionCouponColumn(mysqli $conn): void {
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $tableCheck = $conn->query("SHOW TABLES LIKE 'promotions'");
+    if (!$tableCheck || $tableCheck->num_rows === 0) {
+        return;
+    }
+
+    $check = $conn->query("SHOW COLUMNS FROM promotions LIKE 'couponCode'");
+    $exists = ($check && $check->num_rows > 0);
+    if (!$exists) {
+        $conn->query("ALTER TABLE promotions ADD COLUMN couponCode VARCHAR(64) NULL AFTER promotionName");
+    }
+}
+
+function normalizeCouponCode(string $code): string {
+    $code = strtoupper(trim($code));
+    $code = preg_replace('/[^A-Z0-9_-]/', '', $code);
+    return (string)$code;
+}
+
+function findActiveCouponPromotion(mysqli $conn, string $couponCode): ?array {
+    if ($couponCode === '') {
+        return null;
+    }
+
+    $sql = "
+        SELECT p.promotionID, p.promotionName, p.discountType, p.discountValue, p.scope, p.categoryID, c.categoryName
+        FROM promotions p
+        LEFT JOIN categories c ON c.categoryID = p.categoryID
+        WHERE p.isActive = 1
+          AND UPPER(TRIM(COALESCE(p.couponCode, ''))) = ?
+          AND (p.startDate IS NULL OR p.startDate <= CURDATE())
+          AND (p.endDate IS NULL OR p.endDate >= CURDATE())
+        ORDER BY p.createdAt DESC, p.promotionID DESC
+        LIMIT 1
+    ";
+    $st = $conn->prepare($sql);
+    if (!$st) {
+        return null;
+    }
+    $st->bind_param("s", $couponCode);
+    $st->execute();
+    $res = $st->get_result();
+    $row = $res ? $res->fetch_assoc() : null;
+    $st->close();
+    return $row ?: null;
+}
+
+function evaluateProductCoupon(mysqli $conn, float $basePrice, string $productCategory, string $couponCode): array {
+    ensurePromotionCouponColumn($conn);
+    $couponCode = normalizeCouponCode($couponCode);
+    $result = [
+        'valid' => false,
+        'coupon_code' => $couponCode,
+        'promotion_name' => '',
+        'discount_amount' => 0.0,
+        'discounted_price' => round(max(0, $basePrice), 2),
+        'message' => '',
+    ];
+
+    if ($couponCode === '') {
+        $result['message'] = 'Enter a coupon code.';
+        return $result;
+    }
+
+    $promotion = findActiveCouponPromotion($conn, $couponCode);
+    if (!$promotion) {
+        $result['message'] = 'Invalid or expired coupon code.';
+        return $result;
+    }
+
+    $scope = strtolower(trim((string)($promotion['scope'] ?? 'store')));
+    $isCategoryScope = strpos($scope, 'category') !== false;
+    if ($isCategoryScope) {
+        $targetCategory = trim((string)($promotion['categoryName'] ?? ''));
+        if ($targetCategory === '' || strcasecmp($targetCategory, $productCategory) !== 0) {
+            $result['message'] = 'Coupon is not applicable to this product.';
+            return $result;
+        }
+    }
+
+    $discountType = strtolower(trim((string)($promotion['discountType'] ?? 'percentage')));
+    $discountValue = max(0.0, (float)($promotion['discountValue'] ?? 0));
+    if ($discountType === 'fixed') {
+        $discountAmount = min($basePrice, $discountValue);
+    } else {
+        $discountAmount = min($basePrice, $basePrice * ($discountValue / 100));
+    }
+    $discountAmount = round(max(0, $discountAmount), 2);
+    if ($discountAmount <= 0) {
+        $result['message'] = 'Coupon is not applicable to this product.';
+        return $result;
+    }
+
+    $result['valid'] = true;
+    $result['promotion_name'] = (string)($promotion['promotionName'] ?? $couponCode);
+    $result['discount_amount'] = $discountAmount;
+    $result['discounted_price'] = round(max(0, $basePrice - $discountAmount), 2);
+    $result['message'] = 'Valid coupon.';
+    return $result;
+}
 
 $conn->query("
     CREATE TABLE IF NOT EXISTS product_sales_overrides (
@@ -51,7 +158,7 @@ function userCanReviewDeliveredProduct(mysqli $conn, int $userId, int $productId
          INNER JOIN order_items oi ON oi.orderID = o.orderID
          WHERE o.userID = ?
            AND oi.productID = ?
-           AND LOWER(o.status) IN ('delivered')
+           AND LOWER(o.status) IN ('delivered', 'completed')
            AND EXISTS (
                SELECT 1
                FROM payments p
@@ -260,6 +367,42 @@ if (!$product) {
     exit;
 }
 
+$baseProductPrice = (float)($product["basePrice"] ?? 0);
+$productCategory = trim((string)($product["category"] ?? ""));
+$storedCouponCode = normalizeCouponCode((string)($_SESSION["cart_coupon_code"] ?? ""));
+$initialCouponEvaluation = [
+    'valid' => false,
+    'coupon_code' => '',
+    'promotion_name' => '',
+    'discount_amount' => 0.0,
+    'discounted_price' => round(max(0, $baseProductPrice), 2),
+    'message' => '',
+];
+if ($storedCouponCode !== '') {
+    $initialCouponEvaluation = evaluateProductCoupon($conn, $baseProductPrice, $productCategory, $storedCouponCode);
+}
+
+if (isset($_GET['coupon_preview']) && (string)$_GET['coupon_preview'] === '1') {
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        $couponCode = normalizeCouponCode((string)($_POST['coupon_code'] ?? ''));
+        $preview = evaluateProductCoupon($conn, $baseProductPrice, $productCategory, $couponCode);
+        echo json_encode($preview, JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode([
+            'valid' => false,
+            'coupon_code' => normalizeCouponCode((string)($_POST['coupon_code'] ?? '')),
+            'promotion_name' => '',
+            'discount_amount' => 0.0,
+            'discounted_price' => round(max(0, $baseProductPrice), 2),
+            'message' => 'Coupon preview failed. Please try again.',
+            'error' => $e->getMessage(),
+        ], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 $photos = [];
 $photoStmt = $conn->prepare("SELECT imageID FROM photos WHERE productID = ? ORDER BY imageID ASC");
 if ($photoStmt) {
@@ -339,95 +482,7 @@ foreach ($variations as $variation) {
     ];
 }
 
-if (empty($uniqueColors)) {
-    $categoryName = trim((string)($product["category"] ?? ""));
-    if ($categoryName !== "") {
-        $catColorStmt = $conn->prepare(
-            "SELECT c.colorID, c.colorName
-             FROM category_colors cc
-             JOIN categories cat ON cat.categoryID = cc.categoryID
-             JOIN colors c ON c.colorID = cc.colorID
-             WHERE cc.isEnabled = 1
-               AND c.isActive = 1
-               AND cat.categoryName = ?
-             ORDER BY c.colorName ASC"
-        );
-        if ($catColorStmt) {
-            $catColorStmt->bind_param("s", $categoryName);
-            $catColorStmt->execute();
-            $catColorRes = $catColorStmt->get_result();
-            while ($catColorRes && ($row = $catColorRes->fetch_assoc())) {
-                $colorId = (int)$row["colorID"];
-                if ($colorId <= 0 || isset($uniqueColors[$colorId])) {
-                    continue;
-                }
-                $colorName = trim((string)$row["colorName"]);
-                $uniqueColors[$colorId] = [
-                    "id" => $colorId,
-                    "name" => $colorName !== "" ? $colorName : ("Color " . $colorId),
-                    "hex" => $colorHexMap[strtolower($colorName)] ?? "#ece6f6",
-                ];
-            }
-            $catColorStmt->close();
-        }
-    }
-
-    if (empty($uniqueColors)) {
-        $allColorRes = $conn->query("SELECT colorID, colorName FROM colors WHERE isActive = 1 ORDER BY colorName ASC");
-        if ($allColorRes) {
-            while ($row = $allColorRes->fetch_assoc()) {
-                $colorId = (int)$row["colorID"];
-                if ($colorId <= 0 || isset($uniqueColors[$colorId])) {
-                    continue;
-                }
-                $colorName = trim((string)$row["colorName"]);
-                $uniqueColors[$colorId] = [
-                    "id" => $colorId,
-                    "name" => $colorName !== "" ? $colorName : ("Color " . $colorId),
-                    "hex" => $colorHexMap[strtolower($colorName)] ?? "#ece6f6",
-                ];
-            }
-        }
-    }
-}
-
 $uniqueColors = array_values($uniqueColors);
-
-if (empty($uniqueSizes) && (int)$product["hasVariants"] === 1) {
-    $sizeStmt = $conn->prepare(
-        "SELECT DISTINCT size
-         FROM product_variations
-         WHERE size IS NOT NULL AND TRIM(size) <> ''
-         ORDER BY size ASC"
-    );
-    if ($sizeStmt) {
-        $sizeStmt->execute();
-        $sizeRes = $sizeStmt->get_result();
-        while ($sizeRes && ($row = $sizeRes->fetch_assoc())) {
-            $sizeLabel = trim((string)$row["size"]);
-            if ($sizeLabel !== "" && !in_array($sizeLabel, $uniqueSizes, true)) {
-                $uniqueSizes[] = $sizeLabel;
-            }
-        }
-        $sizeStmt->close();
-    }
-}
-
-if (empty($uniqueSizes) && (int)$product["hasVariants"] === 1) {
-    $sizeConfig = trim((string)getSystemConfig("default_product_sizes"));
-    if ($sizeConfig !== "") {
-        $parts = array_map("trim", explode(",", $sizeConfig));
-        foreach ($parts as $sizeLabel) {
-            if ($sizeLabel !== "" && !in_array($sizeLabel, $uniqueSizes, true)) {
-                $uniqueSizes[] = $sizeLabel;
-            }
-        }
-    }
-}
-
-if (empty($uniqueSizes) && (int)$product["hasVariants"] === 1) {
-    $uniqueSizes = ["Small (15cm)", "Medium (25cm)", "Large (35cm)"];
-}
 
 $reviews = [];
 $reviewStmt = $conn->prepare(
@@ -439,7 +494,7 @@ $reviewStmt = $conn->prepare(
                 JOIN orders o ON o.orderID = oi.orderID
                 WHERE oi.productID = r.productID
                   AND o.userID = r.userID
-                  AND LOWER(o.status) IN ('delivered')
+                  AND LOWER(o.status) IN ('delivered', 'completed')
                   AND EXISTS (
                     SELECT 1
                     FROM payments p
@@ -515,7 +570,21 @@ if ($reviewStatus === "saved") {
     $reviewSuccessMessage = "Admin reply removed.";
 }
 $defaultReviewRating = max(1, min(5, (int)$reviewInput["rating"]));
-$openReviewForm = !empty($reviewErrors) || ((string)($_GET["write_review"] ?? "") === "1");
+$openReviewForm = $canWriteReview && (!empty($reviewErrors) || ((string)($_GET["write_review"] ?? "") === "1"));
+$couponFeedbackText = "If valid, the discount will be applied during checkout.";
+$couponFeedbackIsError = false;
+if ($storedCouponCode !== '') {
+    if (!empty($initialCouponEvaluation['valid'])) {
+        $couponFeedbackText = sprintf(
+            "Valid coupon applied: %s (-€%0.2f)",
+            (string)($initialCouponEvaluation['promotion_name'] ?? $storedCouponCode),
+            (float)($initialCouponEvaluation['discount_amount'] ?? 0)
+        );
+    } else {
+        $couponFeedbackText = (string)($initialCouponEvaluation['message'] ?? 'Invalid or expired coupon code.');
+        $couponFeedbackIsError = true;
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -529,6 +598,30 @@ $openReviewForm = !empty($reviewErrors) || ((string)($_GET["write_review"] ?? ""
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . "/assets/js/translations.js") ?>" defer></script>
     <script src="assets/js/wishlist-live.js" defer></script>
+    <style>
+        .price-row {
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+        }
+        .price-row .price-current {
+            color: #7c2de2;
+            font-weight: 800;
+        }
+        .price-row .price-original {
+            display: none;
+            color: #8f7dad;
+            text-decoration: line-through;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+        .price-row.is-discounted .price-current {
+            color: #1f8d40;
+        }
+        .price-row.is-discounted .price-original {
+            display: inline;
+        }
+    </style>
 </head>
 <body class="site-page">
 <?php
@@ -567,7 +660,10 @@ include __DIR__ . "/include/header.php";
                 <?= (int)($product["totalSales"] ?? 0) ?> sold
             </div>
 
-            <div class="price-row">&euro;<?= number_format((float)$product["basePrice"], 2) ?></div>
+            <div class="price-row <?= !empty($initialCouponEvaluation['valid']) ? 'is-discounted' : '' ?>" id="price-row" data-base-price="<?= htmlspecialchars(number_format($baseProductPrice, 2, '.', '')) ?>">
+                <span class="price-original" id="price-original">&euro;<?= number_format($baseProductPrice, 2) ?></span>
+                <span class="price-current" id="price-current">&euro;<?= number_format(!empty($initialCouponEvaluation['valid']) ? (float)$initialCouponEvaluation['discounted_price'] : $baseProductPrice, 2) ?></span>
+            </div>
 
             <p class="desc-text">
                 <?= nl2br(htmlspecialchars((string)($product["descriptionEN"] ?: "Handmade item by Creations by Athina."))) ?>
@@ -617,6 +713,16 @@ include __DIR__ . "/include/header.php";
                 <label class="gift-note-label">Gift Note</label>
                 <textarea id="gift-note" rows="3" placeholder="Add a personal message..."></textarea>
                 <p class="gift-hint">Selected gift options and message will appear in Cart, Checkout and Receipt.</p>
+            </div>
+
+            <div class="gift-box" style="margin-top:12px;">
+                <h3>Coupon Code</h3>
+                <input type="text" id="coupon-code" value="<?= htmlspecialchars($storedCouponCode) ?>" placeholder="Enter coupon code (optional)" style="width:100%;min-height:42px;border:1px solid #d8cceb;border-radius:10px;padding:10px 12px;">
+                <div style="display:flex;gap:8px;margin-top:8px;">
+                    <button type="button" id="coupon-apply-btn" style="border:1px solid #8f54d9;background:#8f54d9;color:#fff;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;">Apply</button>
+                    <button type="button" id="coupon-remove-btn" style="border:1px solid #d6c7ea;background:#fff;color:#4b3569;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;">Remove</button>
+                </div>
+                <p class="gift-hint" id="coupon-feedback" data-is-error="<?= $couponFeedbackIsError ? '1' : '0' ?>"><?= htmlspecialchars($couponFeedbackText) ?></p>
             </div>
 
             <div class="action-row">
@@ -1094,6 +1200,175 @@ include __DIR__ . "/include/header.php";
         }, 2200);
     }
 
+    var couponInput = document.getElementById("coupon-code");
+    var couponApplyBtn = document.getElementById("coupon-apply-btn");
+    var couponRemoveBtn = document.getElementById("coupon-remove-btn");
+    var couponFeedback = document.getElementById("coupon-feedback");
+    var priceRow = document.getElementById("price-row");
+    var priceCurrent = document.getElementById("price-current");
+    var priceOriginal = document.getElementById("price-original");
+    var basePrice = Number(priceRow ? priceRow.getAttribute("data-base-price") : 0);
+    var appliedCouponCode = <?= json_encode(!empty($initialCouponEvaluation['valid']) ? $storedCouponCode : "") ?>;
+
+    function formatMoney(value) {
+        return "\u20AC" + Number(value || 0).toFixed(2);
+    }
+
+    function normalizeCouponInput() {
+        if (!couponInput) {
+            return "";
+        }
+        var code = String(couponInput.value || "").trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "");
+        couponInput.value = code;
+        return code;
+    }
+
+    function setCouponFeedback(message, isError) {
+        if (couponFeedback) {
+            couponFeedback.textContent = message;
+            couponFeedback.style.color = isError ? "#b42318" : "#6f5f85";
+        }
+    }
+
+    function renderPrice(discountedPrice, hasDiscount) {
+        if (!priceRow || !priceCurrent) {
+            return;
+        }
+        if (hasDiscount) {
+            priceRow.classList.add("is-discounted");
+            priceCurrent.textContent = formatMoney(discountedPrice);
+            if (priceOriginal) {
+                priceOriginal.textContent = formatMoney(basePrice);
+            }
+            return;
+        }
+        priceRow.classList.remove("is-discounted");
+        priceCurrent.textContent = formatMoney(basePrice);
+    }
+
+    function parseJsonResponse(response) {
+        return response.text().then(function (raw) {
+            var clean = String(raw || "").replace(/^\uFEFF+/, "").trim();
+            if (!clean) {
+                return {};
+            }
+            try {
+                return JSON.parse(clean);
+            } catch (err) {
+                return {
+                    success: false,
+                    valid: false,
+                    message: "Unexpected server response while validating coupon."
+                };
+            }
+        });
+    }
+
+    function persistCoupon(action, code) {
+        var payload = { action: action || "remove_coupon" };
+        if (action === "set_coupon") {
+            payload.coupon_code = code || "";
+        }
+        return fetch("cart_api.php", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        })
+            .then(parseJsonResponse)
+            .then(function (data) {
+                if (!data || !data.success) {
+                    return false;
+                }
+                return true;
+            })
+            .catch(function () {
+                return false;
+            });
+    }
+
+    function validateCouponForProduct(code) {
+        var body = new URLSearchParams();
+        body.set("coupon_code", code || "");
+        return fetch("product.php?id=" + encodeURIComponent(String(productId)) + "&coupon_preview=1", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+            body: body.toString()
+        })
+            .then(parseJsonResponse)
+            .catch(function () {
+                return {
+                    valid: false,
+                    message: "Network error while validating coupon."
+                };
+            });
+    }
+
+    function applyCoupon() {
+        if (!couponInput) {
+            return;
+        }
+        var couponCode = normalizeCouponInput();
+        if (!couponCode) {
+            renderPrice(basePrice, false);
+            appliedCouponCode = "";
+            setCouponFeedback("Enter a coupon code first.", true);
+            showToast("Enter a coupon code first.", true);
+            persistCoupon("remove_coupon");
+            return;
+        }
+
+        validateCouponForProduct(couponCode).then(function (preview) {
+            if (!preview || !preview.valid) {
+                renderPrice(basePrice, false);
+                appliedCouponCode = "";
+                setCouponFeedback((preview && preview.message) || "Invalid or expired coupon code.", true);
+                showToast((preview && preview.message) || "Invalid or expired coupon code.", true);
+                persistCoupon("remove_coupon");
+                return;
+            }
+
+            persistCoupon("set_coupon", couponCode).then(function (saved) {
+                if (!saved) {
+                    setCouponFeedback("Coupon is valid, but could not be saved. Please try again.", true);
+                    showToast("Could not save coupon.", true);
+                    return;
+                }
+                appliedCouponCode = couponCode;
+                renderPrice(Number(preview.discounted_price || basePrice), true);
+                var amount = Number(preview.discount_amount || 0).toFixed(2);
+                var promoName = String(preview.promotion_name || couponCode);
+                setCouponFeedback("Valid coupon applied: " + promoName + " (-" + formatMoney(amount) + ")", false);
+                showToast("Coupon applied successfully.");
+            });
+        });
+    }
+
+    function removeCoupon() {
+        if (couponInput) {
+            couponInput.value = "";
+        }
+        appliedCouponCode = "";
+        renderPrice(basePrice, false);
+        setCouponFeedback("Coupon removed.", false);
+        showToast("Coupon removed.");
+        persistCoupon("remove_coupon");
+    }
+
+    if (couponFeedback && couponFeedback.getAttribute("data-is-error") === "1") {
+        couponFeedback.style.color = "#b42318";
+    }
+
+    if (couponApplyBtn) {
+        couponApplyBtn.addEventListener("click", function () {
+            applyCoupon();
+        });
+    }
+    if (couponRemoveBtn) {
+        couponRemoveBtn.addEventListener("click", function () {
+            removeCoupon();
+        });
+    }
+
     if (addCartBtn) {
         addCartBtn.addEventListener("click", function () {
             var state = updateAddToCartState();
@@ -1115,6 +1390,9 @@ include __DIR__ . "/include/header.php";
                     message: (document.getElementById("gift-note") && document.getElementById("gift-note").value || "").trim()
                 }
             };
+            if (appliedCouponCode) {
+                payload.coupon_code = appliedCouponCode;
+            }
 
             if (hasSelectableVariations) {
                 payload.variation = {};

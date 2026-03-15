@@ -10,8 +10,6 @@ $nav = [
 
     // NEW: Customer Management (above Order Management)
     ['id' => 'customer_management',    'label' => 'Customer Management',    'icon' => 'fa-user',           'file' => 'customer_management.php'],
-    ['id' => 'customer_order_history', 'label' => 'Customer Order History', 'icon' => 'fa-clock-rotate-left', 'file' => 'customer_order_history.php'],
-
     ['id' => 'order_management',       'label' => 'Order Management',       'icon' => 'fa-shopping-cart',  'file' => 'order_management.php'],
     ['id' => 'custom_orders',          'label' => 'Custom Orders',          'icon' => 'fa-star',           'file' => 'custom_orders.php'],
     ['id' => 'discounts_promotions',   'label' => 'Discounts & Promotions', 'icon' => 'fa-percent',        'file' => 'discounts_promotions.php'],

@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 session_start();
 
 require_once __DIR__ . "/authentication/database.php";
@@ -61,7 +61,7 @@ function isOrderReviewEligible(mysqli $conn, int $orderId): bool {
         "SELECT 1
          FROM orders o
          WHERE o.orderID = ?
-           AND LOWER(o.status) IN ('delivered')
+           AND LOWER(o.status) IN ('delivered', 'completed')
            AND EXISTS (
                SELECT 1
                FROM payments p
@@ -166,7 +166,7 @@ function orderContainsProduct(mysqli $conn, int $orderId, int $productId): bool 
          INNER JOIN order_items oi ON oi.orderID = o.orderID
          WHERE o.orderID = ?
            AND oi.productID = ?
-           AND LOWER(o.status) IN ('delivered')
+           AND LOWER(o.status) IN ('delivered', 'completed')
            AND EXISTS (
                SELECT 1
                FROM payments p
@@ -197,7 +197,7 @@ function userPurchasedProduct(mysqli $conn, int $userId, int $productId): bool {
          INNER JOIN orders o ON o.orderID = oi.orderID
          WHERE o.userID = ?
            AND oi.productID = ?
-           AND LOWER(o.status) IN ('delivered')
+           AND LOWER(o.status) IN ('delivered', 'completed')
            AND EXISTS (
                SELECT 1
                FROM payments p
@@ -267,7 +267,7 @@ function fetchReviewProducts(mysqli $conn, int $loggedUserId, bool $isAdmin, boo
                  INNER JOIN order_items oi ON oi.orderID = o.orderID
                  INNER JOIN products p ON p.productID = oi.productID
                  WHERE o.orderID = ?
-                   AND LOWER(o.status) IN ('delivered')
+                   AND LOWER(o.status) IN ('delivered', 'completed')
                    AND EXISTS (
                        SELECT 1
                        FROM payments pay
@@ -288,7 +288,7 @@ function fetchReviewProducts(mysqli $conn, int $loggedUserId, bool $isAdmin, boo
                  INNER JOIN products p ON p.productID = oi.productID
                  WHERE o.orderID = ?
                    AND o.userID = ?
-                   AND LOWER(o.status) IN ('delivered')
+                   AND LOWER(o.status) IN ('delivered', 'completed')
                    AND EXISTS (
                        SELECT 1
                        FROM payments pay
@@ -331,7 +331,7 @@ function fetchReviewProducts(mysqli $conn, int $loggedUserId, bool $isAdmin, boo
          INNER JOIN order_items oi ON oi.orderID = o.orderID
          INNER JOIN products p ON p.productID = oi.productID
          WHERE o.userID = ?
-           AND LOWER(o.status) IN ('delivered')
+           AND LOWER(o.status) IN ('delivered', 'completed')
            AND EXISTS (
                SELECT 1
                FROM payments pay

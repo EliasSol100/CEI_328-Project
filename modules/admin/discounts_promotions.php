@@ -5,12 +5,33 @@ require_once __DIR__ . '/includes/db.php';
 $current_page = 'discounts_promotions';
 $flash = '';
 
+function ensurePromotionCouponColumn(mysqli $conn): void {
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $check = $conn->query("SHOW COLUMNS FROM promotions LIKE 'couponCode'");
+    $exists = ($check && $check->num_rows > 0);
+    if (!$exists) {
+        $conn->query("ALTER TABLE promotions ADD COLUMN couponCode VARCHAR(64) NULL AFTER promotionName");
+    }
+}
+
+ensurePromotionCouponColumn($conn);
+
 /* ── Handle POST ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
     if ($action === 'add' || $action === 'edit') {
         $name      = trim($_POST['promotionName'] ?? '');
+        $couponCode = strtoupper(trim((string)($_POST['couponCode'] ?? '')));
+        $couponCode = preg_replace('/[^A-Z0-9_-]/', '', $couponCode);
+        if ($couponCode === '') {
+            $couponCode = null;
+        }
         $type      = $_POST['discountType']  ?? 'percentage';
         $value     = (float)($_POST['discountValue'] ?? 0);
         $scope     = $_POST['scope']         ?? 'store';
@@ -21,17 +42,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($action === 'add') {
             $stmt = mysqli_prepare($conn,
-                "INSERT INTO promotions (promotionName, discountType, discountValue, scope, categoryID, startDate, endDate, isActive)
-                 VALUES (?,?,?,?,?,?,?,?)");
-            mysqli_stmt_bind_param($stmt, 'ssdsissi', $name, $type, $value, $scope, $catID, $startDate, $endDate, $isActive);
+                "INSERT INTO promotions (promotionName, couponCode, discountType, discountValue, scope, categoryID, startDate, endDate, isActive)
+                 VALUES (?,?,?,?,?,?,?,?,?)");
+            mysqli_stmt_bind_param($stmt, 'sssdsissi', $name, $couponCode, $type, $value, $scope, $catID, $startDate, $endDate, $isActive);
             mysqli_stmt_execute($stmt);
             $flash = 'ok:Promotion created.';
         } else {
             $id = (int)($_POST['promotionID'] ?? 0);
             $stmt = mysqli_prepare($conn,
-                "UPDATE promotions SET promotionName=?, discountType=?, discountValue=?, scope=?, categoryID=?, startDate=?, endDate=?, isActive=?
+                "UPDATE promotions SET promotionName=?, couponCode=?, discountType=?, discountValue=?, scope=?, categoryID=?, startDate=?, endDate=?, isActive=?
                  WHERE promotionID=?");
-            mysqli_stmt_bind_param($stmt, 'ssdsissii', $name, $type, $value, $scope, $catID, $startDate, $endDate, $isActive, $id);
+            mysqli_stmt_bind_param($stmt, 'sssdsissii', $name, $couponCode, $type, $value, $scope, $catID, $startDate, $endDate, $isActive, $id);
             mysqli_stmt_execute($stmt);
             $flash = 'ok:Promotion updated.';
         }
@@ -117,6 +138,7 @@ if (isset($_GET['edit'])) {
           <thead>
             <tr>
               <th>Promotion Name</th>
+              <th>Coupon Code</th>
               <th>Type</th>
               <th>Scope</th>
               <th>Start Date</th>
@@ -129,6 +151,7 @@ if (isset($_GET['edit'])) {
             <?php foreach ($promotions as $promo): ?>
             <tr>
               <td class="font-600"><?= htmlspecialchars($promo['promotionName']) ?></td>
+              <td><?= htmlspecialchars((string)($promo['couponCode'] ?? '—')) ?></td>
               <td>
                 <?php if ($promo['discountType'] === 'percentage'): ?>
                   <?= number_format($promo['discountValue'],0) ?>%
@@ -171,7 +194,7 @@ if (isset($_GET['edit'])) {
             </tr>
             <?php endforeach; ?>
             <?php if (empty($promotions)): ?>
-              <tr><td colspan="7" class="text-muted" style="text-align:center;padding:32px 0">No promotions yet.</td></tr>
+              <tr><td colspan="8" class="text-muted" style="text-align:center;padding:32px 0">No promotions yet.</td></tr>
             <?php endif; ?>
           </tbody>
         </table>
@@ -185,6 +208,9 @@ if (isset($_GET['edit'])) {
         </p>
         <p class="alert-text" style="margin-bottom:8px">
           <strong>Category:</strong> The discount only applies to products in the selected category.
+        </p>
+        <p class="alert-text" style="margin-bottom:8px">
+          <strong>Coupon Code:</strong> Add a coupon code so customers can apply this promotion at checkout.
         </p>
         <p class="alert-text">
           <strong>Activation:</strong> Use the toggle to activate or deactivate promotions without deleting them.
@@ -206,6 +232,10 @@ if (isset($_GET['edit'])) {
       <div class="form-group">
         <label class="form-label">Promotion Name *</label>
         <input name="promotionName" class="form-input" required placeholder="e.g. Valentine's Day Sale">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Coupon Code</label>
+        <input name="couponCode" class="form-input" placeholder="e.g. SPRING10">
       </div>
       <div class="form-grid-2">
         <div class="form-group">
@@ -274,6 +304,10 @@ if (isset($_GET['edit'])) {
       <div class="form-group">
         <label class="form-label">Promotion Name *</label>
         <input name="promotionName" class="form-input" required value="<?= htmlspecialchars($editPromo['promotionName']) ?>">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Coupon Code</label>
+        <input name="couponCode" class="form-input" value="<?= htmlspecialchars((string)($editPromo['couponCode'] ?? '')) ?>">
       </div>
       <div class="form-grid-2">
         <div class="form-group">

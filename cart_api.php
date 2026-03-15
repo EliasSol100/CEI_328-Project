@@ -56,8 +56,42 @@ try {
 
     $payload = readRequestPayload();
 
+    $action = strtolower(trim((string)($payload['action'] ?? '')));
+    if ($action === 'set_coupon') {
+        $couponCode = normalizeCouponCode((string)($payload['coupon_code'] ?? ''));
+        if ($couponCode === '') {
+            badRequest('Enter a coupon code.');
+        }
+        $_SESSION['cart_coupon_code'] = $couponCode;
+        $cart = &getOrInitCart();
+        echo json_encode([
+            'success' => true,
+            'message' => 'Coupon saved for checkout.',
+            'coupon_code' => $couponCode,
+            'cart' => $cart,
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    if ($action === 'remove_coupon' || $action === 'clear_coupon') {
+        unset($_SESSION['cart_coupon_code']);
+        $cart = &getOrInitCart();
+        echo json_encode([
+            'success' => true,
+            'message' => 'Coupon removed.',
+            'coupon_code' => '',
+            'cart' => $cart,
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     $productId = toInt($payload['product_id'] ?? null);
     $qty       = toInt($payload['quantity'] ?? null);
+    $couponCode = normalizeCouponCode((string)($payload['coupon_code'] ?? ''));
+    if ($couponCode !== '') {
+        $_SESSION['cart_coupon_code'] = $couponCode;
+    } elseif (array_key_exists('coupon_code', $payload)) {
+        unset($_SESSION['cart_coupon_code']);
+    }
 
     if ($productId === null || $productId <= 0) badRequest('Invalid product_id.');
     if ($qty === null || $qty <= 0) badRequest('Invalid quantity. Must be >= 1.');
@@ -245,6 +279,11 @@ function normalizeAddons($a): array {
     $message = trim((string)($a['message'] ?? $a['giftMessage'] ?? ''));
     if (mb_strlen($message) > 255) $message = mb_substr($message, 0, 255);
     return ['gift_wrapping'=>(bool)$giftWrapping,'gift_bag'=>(bool)$giftBag,'message'=>$message];
+}
+function normalizeCouponCode(string $code): string {
+    $code = strtoupper(trim($code));
+    $code = preg_replace('/[^A-Z0-9_-]/', '', $code);
+    return (string)$code;
 }
 function &getOrInitCart(): array {
     if (!isset($_SESSION['cart']) || !is_array($_SESSION['cart'])) {

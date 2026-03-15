@@ -8,6 +8,106 @@ if (!isset($conn) || !($conn instanceof mysqli)) {
     exit;
 }
 
+function ensureOrderShippingSchema(mysqli $conn): void {
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $requiredColumns = [
+        'shippingAddress' => "ALTER TABLE orders ADD COLUMN shippingAddress VARCHAR(255) NULL AFTER email",
+        'shippingCity' => "ALTER TABLE orders ADD COLUMN shippingCity VARCHAR(120) NULL AFTER shippingAddress",
+        'shippingPostalCode' => "ALTER TABLE orders ADD COLUMN shippingPostalCode VARCHAR(20) NULL AFTER shippingCity",
+        'shippingCountry' => "ALTER TABLE orders ADD COLUMN shippingCountry VARCHAR(120) NULL AFTER shippingPostalCode",
+        'shippingLabel' => "ALTER TABLE orders ADD COLUMN shippingLabel VARCHAR(120) NULL AFTER shippingCountry",
+        'courierCode' => "ALTER TABLE orders ADD COLUMN courierCode VARCHAR(60) NULL AFTER shippingLabel",
+        'shippingPriority' => "ALTER TABLE orders ADD COLUMN shippingPriority VARCHAR(20) NULL AFTER courierCode",
+        'fulfillmentMode' => "ALTER TABLE orders ADD COLUMN fulfillmentMode VARCHAR(20) NULL AFTER shippingPriority",
+    ];
+
+    foreach ($requiredColumns as $columnName => $alterSql) {
+        $safeCol = $conn->real_escape_string($columnName);
+        $check = $conn->query("SHOW COLUMNS FROM orders LIKE '{$safeCol}'");
+        $exists = ($check && $check->num_rows > 0);
+        if (!$exists) {
+            $conn->query($alterSql);
+        }
+    }
+}
+
+function tableExists(mysqli $conn, string $tableName): bool {
+    $safe = $conn->real_escape_string($tableName);
+    $res = $conn->query("SHOW TABLES LIKE '{$safe}'");
+    return $res && $res->num_rows > 0;
+}
+
+function fallbackShippingLabelForUser(mysqli $conn, int $userId): string {
+    if ($userId <= 0 || !tableExists($conn, 'user_addresses')) {
+        return '';
+    }
+
+    $st = $conn->prepare("
+        SELECT label
+        FROM user_addresses
+        WHERE user_id = ?
+          AND TRIM(COALESCE(label, '')) <> ''
+        ORDER BY is_default DESC, created_at DESC, id DESC
+        LIMIT 1
+    ");
+    if (!$st) {
+        return '';
+    }
+    $st->bind_param('i', $userId);
+    $st->execute();
+    $res = $st->get_result();
+    $row = $res ? $res->fetch_assoc() : null;
+    $st->close();
+    return trim((string)($row['label'] ?? ''));
+}
+
+function courierLabelFromCode(string $courierCode): string {
+    $map = [
+        'akis_express' => 'Akis Express',
+        'boxnow' => 'BoxNow',
+        'acs' => 'ACS',
+        'elta_courier' => 'ELTA Courier',
+        'speedex' => 'Speedex',
+        'geniki' => 'Geniki Taxydromiki',
+    ];
+    $key = strtolower(trim($courierCode));
+    return $map[$key] ?? ($courierCode !== '' ? $courierCode : 'Not specified');
+}
+
+function inferCourierCode(string $courierCode, string $shipmentCourierName): string {
+    $code = strtolower(trim($courierCode));
+    if ($code !== '') {
+        return $code;
+    }
+    $probe = strtolower($shipmentCourierName);
+    if (strpos($probe, 'boxnow') !== false) {
+        return 'boxnow';
+    }
+    if (strpos($probe, 'acs') !== false) {
+        return 'acs';
+    }
+    if (strpos($probe, 'akis') !== false) {
+        return 'akis_express';
+    }
+    if (strpos($probe, 'elta') !== false) {
+        return 'elta_courier';
+    }
+    if (strpos($probe, 'speedex') !== false) {
+        return 'speedex';
+    }
+    if (strpos($probe, 'geniki') !== false || strpos($probe, 'taxydromiki') !== false) {
+        return 'geniki';
+    }
+    return '';
+}
+
+ensureOrderShippingSchema($conn);
+
 $sessionUserId = null;
 if (isset($_SESSION["user"]) && is_array($_SESSION["user"])) {
     if (isset($_SESSION["user"]["id"])) {
@@ -42,11 +142,21 @@ $orderSql = "
         o.shippingCost,
         o.totalAmount,
         o.createdAt,
+        o.shippingAddress,
+        o.shippingCity,
+        o.shippingPostalCode,
+        o.shippingCountry,
+        o.shippingLabel,
+        o.courierCode,
+        o.shippingPriority,
         u.full_name AS customerName,
         u.email AS customerEmail,
-        u.phone AS customerPhone
+        u.phone AS customerPhone,
+        COALESCE(s.courierName, '') AS shipmentCourierName,
+        COALESCE(s.trackingCode, '') AS trackingCode
     FROM orders o
     LEFT JOIN users u ON u.userID = o.userID
+    LEFT JOIN shipments s ON s.orderID = o.orderID
     WHERE o.orderID = ?
     LIMIT 1
 ";
@@ -161,6 +271,21 @@ if ($customerName === "") {
 
 $generatedAt = date("d/m/Y H:i");
 $backLink = $isAdmin ? "admin/order_management.php?view=" . $orderId : "../profile/account.php?tab=orders";
+$courierCode = inferCourierCode((string)($order["courierCode"] ?? ""), (string)($order["shipmentCourierName"] ?? ""));
+$courierLabel = courierLabelFromCode($courierCode);
+$shippingPriority = trim((string)($order["shippingPriority"] ?? "standard"));
+$shippingLabel = trim((string)($order["shippingLabel"] ?? ""));
+if ($shippingLabel === '') {
+    $shippingLabel = fallbackShippingLabelForUser($conn, (int)($order["userID"] ?? 0));
+}
+$trackingCode = trim((string)($order["trackingCode"] ?? ""));
+$shippingAddressParts = array_filter([
+    trim((string)($order["shippingAddress"] ?? "")),
+    trim((string)($order["shippingCity"] ?? "")),
+    trim((string)($order["shippingPostalCode"] ?? "")),
+    trim((string)($order["shippingCountry"] ?? "")),
+], static function ($value) { return $value !== ""; });
+$shippingAddressText = !empty($shippingAddressParts) ? implode(", ", $shippingAddressParts) : "Not provided";
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -341,6 +466,11 @@ $backLink = $isAdmin ? "admin/order_management.php?view=" . $orderId : "../profi
                     <?php else: ?>
                         <span class="muted">Phone not available</span>
                     <?php endif; ?>
+                    <br>
+                    <span class="muted">Shipping: <?= htmlspecialchars($shippingAddressText) ?></span><br>
+                    <span class="muted">Label: <?= htmlspecialchars($shippingLabel !== "" ? $shippingLabel : "None") ?></span><br>
+                    <span class="muted">Courier: <?= htmlspecialchars($courierLabel) ?> (<?= htmlspecialchars($shippingPriority) ?>)</span><br>
+                    <span class="muted">Tracking: <?= htmlspecialchars($trackingCode !== "" ? $trackingCode : "Not assigned yet") ?></span>
                 </p>
             </div>
             <div class="box">

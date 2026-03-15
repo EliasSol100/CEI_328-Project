@@ -36,6 +36,7 @@ if ($project === '' || $project === '.') {
 }
 
 $orderDetails = null;
+$orderItems = [];
 if (isset($result['order_id'])) {
     // Schema-aligned read query: orderID/order_items.orderID.
     $stmt = $conn->prepare("SELECT o.*, (SELECT COUNT(*) FROM order_items WHERE orderID = o.orderID) AS item_count FROM orders o WHERE o.orderID = ?");
@@ -45,6 +46,33 @@ if (isset($result['order_id'])) {
         $orderResult = $stmt->get_result();
         $orderDetails = $orderResult->fetch_assoc();
         $stmt->close();
+    }
+
+    $itemsStmt = $conn->prepare("
+        SELECT oi.quantity, p.nameEN, p.nameGR
+        FROM order_items oi
+        LEFT JOIN products p ON p.productID = oi.productID
+        WHERE oi.orderID = ?
+        ORDER BY oi.orderItemID ASC
+    ");
+    if ($itemsStmt) {
+        $itemsStmt->bind_param("i", $result['order_id']);
+        $itemsStmt->execute();
+        $itemsRes = $itemsStmt->get_result();
+        while ($itemsRes && ($row = $itemsRes->fetch_assoc())) {
+            $label = trim((string)($row['nameEN'] ?? ''));
+            if ($label === '') {
+                $label = trim((string)($row['nameGR'] ?? ''));
+            }
+            if ($label === '') {
+                $label = 'Product';
+            }
+            $orderItems[] = [
+                'name' => $label,
+                'quantity' => max(1, (int)($row['quantity'] ?? 1)),
+            ];
+        }
+        $itemsStmt->close();
     }
 }
 
@@ -62,7 +90,7 @@ function isOrderReviewEligible(mysqli $conn, int $orderId): bool {
         "SELECT 1
          FROM orders o
          WHERE o.orderID = ?
-           AND LOWER(o.status) IN ('delivered')
+           AND LOWER(o.status) IN ('delivered', 'completed')
            AND EXISTS (
                SELECT 1
                FROM payments p
@@ -98,11 +126,15 @@ function isOrderReviewEligible(mysqli $conn, int $orderId): bool {
         .success-icon { width: 100px; height: 100px; background: #28a745; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 25px; }
         .success-icon i { color: #fff; font-size: 52px; line-height: 1; }
         .order-number { font-size: 24px; font-weight: 700; color: #007bff; margin: 10px 0; padding: 10px 20px; background: #f0f8ff; display: inline-block; border-radius: 50px; }
-        .shipping-message { background: #d4edda; color: #155724; padding: 15px; border-radius: 8px; margin: 25px 0; }
         .account-box { background: #cce5ff; color: #004085; padding: 25px; border-radius: 8px; margin: 25px 0; text-align: left; }
         .password-box { background: #fff; padding: 15px; border: 1px dashed #007bff; font-family: monospace; font-size: 20px; text-align: center; margin: 15px 0; }
         .order-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; text-align: left; }
         .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #e9ecef; }
+        .items-dropdown { margin-top: 14px; }
+        .items-dropdown details { border: 1px solid #dbe2ea; border-radius: 8px; background: #fff; padding: 8px 10px; }
+        .items-dropdown summary { cursor: pointer; font-weight: 600; color: #3a4b61; }
+        .items-dropdown ul { margin: 10px 0 4px; padding-left: 18px; color: #334155; }
+        .items-dropdown li { margin: 4px 0; }
         .btn { display: inline-block; padding: 14px 28px; border: none; border-radius: 6px; font-size: 16px; font-weight: 600; text-decoration: none; margin: 5px; }
         .btn-primary { background: #007bff; color: white; }
         .btn-success { background: #28a745; color: white; }
@@ -127,10 +159,6 @@ if (file_exists($headerPath)) {
         <p style="color:#666; font-size:18px;">Your order has been placed successfully.</p>
         <div class="order-number">Order #<?= htmlspecialchars((string)($result['order_number'] ?? $result['order_id'])) ?></div>
 
-        <?php if (!empty($result['shipping_message'])): ?>
-            <div class="shipping-message"><?= htmlspecialchars($result['shipping_message']) ?></div>
-        <?php endif; ?>
-
         <?php if (!empty($result['account_created']) && $tempPassword): ?>
             <div class="account-box">
                 <h3 style="margin-top:0;">Account Created</h3>
@@ -150,6 +178,19 @@ if (file_exists($headerPath)) {
             <div class="detail-row"><span class="detail-label">Subtotal:</span> <span>&euro;<?= number_format((float)$orderDetails['subtotal'], 2) ?></span></div>
             <div class="detail-row"><span class="detail-label">Shipping:</span> <span>&euro;<?= number_format((float)$orderDetails['shippingCost'], 2) ?></span></div>
             <div class="detail-row" style="font-size:18px; font-weight:bold; color:#28a745;"><span class="detail-label">Total Paid:</span> <span>&euro;<?= number_format((float)$orderDetails['totalAmount'],2) ?></span></div>
+
+            <?php if (!empty($orderItems)): ?>
+                <div class="items-dropdown">
+                    <details>
+                        <summary>View purchased items</summary>
+                        <ul>
+                            <?php foreach ($orderItems as $item): ?>
+                                <li><?= htmlspecialchars($item['name']) ?> x<?= (int)$item['quantity'] ?></li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </details>
+                </div>
+            <?php endif; ?>
         </div>
         <?php endif; ?>
 

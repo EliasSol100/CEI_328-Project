@@ -22,6 +22,244 @@ if (!$conn || $conn->connect_error) {
     die("Database connection failed: " . ($conn->connect_error ?? 'Unknown error'));
 }
 
+function ensurePromotionCouponColumn(mysqli $conn): void {
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $check = $conn->query("SHOW COLUMNS FROM promotions LIKE 'couponCode'");
+    $exists = ($check && $check->num_rows > 0);
+    if (!$exists) {
+        $conn->query("ALTER TABLE promotions ADD COLUMN couponCode VARCHAR(64) NULL AFTER promotionName");
+    }
+}
+
+function normalizeCouponCode(string $code): string {
+    $code = strtoupper(trim($code));
+    $code = preg_replace('/[^A-Z0-9_-]/', '', $code);
+    return (string)$code;
+}
+
+function findActiveCouponPromotion(mysqli $conn, string $couponCode): ?array {
+    if ($couponCode === '') {
+        return null;
+    }
+
+    $sql = "
+        SELECT p.promotionID, p.promotionName, p.discountType, p.discountValue, p.scope, p.categoryID, c.categoryName
+        FROM promotions p
+        LEFT JOIN categories c ON c.categoryID = p.categoryID
+        WHERE p.isActive = 1
+          AND UPPER(TRIM(COALESCE(p.couponCode, ''))) = ?
+          AND (p.startDate IS NULL OR p.startDate <= CURDATE())
+          AND (p.endDate IS NULL OR p.endDate >= CURDATE())
+        ORDER BY p.createdAt DESC, p.promotionID DESC
+        LIMIT 1
+    ";
+    $st = $conn->prepare($sql);
+    if (!$st) {
+        return null;
+    }
+    $st->bind_param("s", $couponCode);
+    $st->execute();
+    $res = $st->get_result();
+    $row = $res ? $res->fetch_assoc() : null;
+    $st->close();
+    return $row ?: null;
+}
+
+function cartLineTotalsWithCategory(mysqli $conn, array $cartItems): array {
+    $lineTotals = [];
+    $productIds = [];
+    foreach ($cartItems as $item) {
+        $productId = (int)($item['product']['id'] ?? $item['productID'] ?? $item['product_id'] ?? 0);
+        $qty = max(1, (int)($item['quantity'] ?? 1));
+        $basePrice = (float)($item['product']['basePrice'] ?? 0);
+        $addonsCost = (float)($item['addons']['addonsCost'] ?? 0);
+        if ($addonsCost <= 0) {
+            if (!empty($item['addons']['giftWrapping'])) $addonsCost += 2.0;
+            if (!empty($item['addons']['giftBagFlag'])) $addonsCost += 1.5;
+        }
+        $unit = (float)($item['price'] ?? $item['pricing']['unitTotal'] ?? ($basePrice + $addonsCost));
+        $lineTotals[] = [
+            'product_id' => $productId,
+            'line_total' => $unit * $qty,
+            'category' => '',
+        ];
+        if ($productId > 0) {
+            $productIds[$productId] = true;
+        }
+    }
+
+    $categoryByProduct = [];
+    if (!empty($productIds)) {
+        $ids = implode(',', array_map('intval', array_keys($productIds)));
+        $res = $conn->query("SELECT productID, COALESCE(category, '') AS category FROM products WHERE productID IN ({$ids})");
+        if ($res) {
+            while ($row = $res->fetch_assoc()) {
+                $categoryByProduct[(int)$row['productID']] = (string)$row['category'];
+            }
+        }
+    }
+
+    foreach ($lineTotals as &$line) {
+        $pid = (int)$line['product_id'];
+        $line['category'] = $categoryByProduct[$pid] ?? '';
+    }
+    unset($line);
+
+    return $lineTotals;
+}
+
+function computePromotionDiscount(mysqli $conn, array $cartItems, array $promotion): float {
+    $discountType = strtolower(trim((string)($promotion['discountType'] ?? 'percentage')));
+    $discountValue = max(0, (float)($promotion['discountValue'] ?? 0));
+    $scope = strtolower(trim((string)($promotion['scope'] ?? 'store')));
+
+    $lines = cartLineTotalsWithCategory($conn, $cartItems);
+    $eligibleSubtotal = 0.0;
+
+    if ($scope === 'category') {
+        $targetCategory = trim((string)($promotion['categoryName'] ?? ''));
+        foreach ($lines as $line) {
+            if ($targetCategory !== '' && strcasecmp((string)$line['category'], $targetCategory) === 0) {
+                $eligibleSubtotal += (float)$line['line_total'];
+            }
+        }
+    } else {
+        foreach ($lines as $line) {
+            $eligibleSubtotal += (float)$line['line_total'];
+        }
+    }
+
+    if ($eligibleSubtotal <= 0) {
+        return 0.0;
+    }
+
+    if ($discountType === 'fixed') {
+        return min($eligibleSubtotal, $discountValue);
+    }
+
+    return min($eligibleSubtotal, ($eligibleSubtotal * $discountValue) / 100);
+}
+
+function checkoutNormalizeCountry(string $country, array $availableCountries): string {
+    $country = trim($country);
+    foreach ($availableCountries as $allowed) {
+        if (strcasecmp($country, (string)$allowed) === 0) {
+            return (string)$allowed;
+        }
+    }
+    return (string)($availableCountries[0] ?? 'Cyprus');
+}
+
+function checkoutCountryCouriers(string $country, array $countryCouriers): array {
+    return $countryCouriers[$country] ?? [];
+}
+
+function checkoutIsCourierAllowed(string $country, string $courierCode, array $countryCouriers): bool {
+    if ($courierCode === '') {
+        return false;
+    }
+    $allowed = checkoutCountryCouriers($country, $countryCouriers);
+    return array_key_exists($courierCode, $allowed);
+}
+
+function checkoutShippingCost(
+    string $country,
+    string $speed,
+    float $cartTotal,
+    float $freeShippingThreshold,
+    array $shippingRatesByCountry
+): float {
+    if ($cartTotal >= $freeShippingThreshold) {
+        return 0.0;
+    }
+    if (!isset($shippingRatesByCountry[$country])) {
+        return 0.0;
+    }
+    if (!isset($shippingRatesByCountry[$country][$speed])) {
+        return 0.0;
+    }
+    return (float)$shippingRatesByCountry[$country][$speed];
+}
+
+function checkoutTableExists(mysqli $conn, string $tableName): bool {
+    $safe = $conn->real_escape_string($tableName);
+    $res = $conn->query("SHOW TABLES LIKE '{$safe}'");
+    return $res && $res->num_rows > 0;
+}
+
+function checkoutLoadDefaultAddress(mysqli $conn, int $userId): array {
+    $default = [
+        'address' => '',
+        'city' => '',
+        'postal_code' => '',
+        'country' => '',
+        'label' => '',
+        'source' => '',
+    ];
+    if ($userId <= 0) {
+        return $default;
+    }
+
+    if (checkoutTableExists($conn, 'user_addresses')) {
+        $addressStmt = $conn->prepare("
+            SELECT label, country, city, address, postcode
+            FROM user_addresses
+            WHERE user_id = ? AND is_default = 1
+            ORDER BY created_at ASC, id ASC
+            LIMIT 1
+        ");
+        if ($addressStmt) {
+            $addressStmt->bind_param('i', $userId);
+            $addressStmt->execute();
+            $res = $addressStmt->get_result();
+            $row = $res ? $res->fetch_assoc() : null;
+            $addressStmt->close();
+
+            if ($row) {
+                $default['address'] = trim((string)($row['address'] ?? ''));
+                $default['city'] = trim((string)($row['city'] ?? ''));
+                $default['postal_code'] = trim((string)($row['postcode'] ?? ''));
+                $default['country'] = trim((string)($row['country'] ?? ''));
+                $default['label'] = trim((string)($row['label'] ?? ''));
+                $default['source'] = 'address_book';
+                return $default;
+            }
+        }
+    }
+
+    $profileStmt = $conn->prepare("
+        SELECT country, city, address, postcode
+        FROM users
+        WHERE userID = ?
+        LIMIT 1
+    ");
+    if (!$profileStmt) {
+        return $default;
+    }
+    $profileStmt->bind_param('i', $userId);
+    $profileStmt->execute();
+    $res = $profileStmt->get_result();
+    $row = $res ? $res->fetch_assoc() : null;
+    $profileStmt->close();
+
+    if ($row) {
+        $default['address'] = trim((string)($row['address'] ?? ''));
+        $default['city'] = trim((string)($row['city'] ?? ''));
+        $default['postal_code'] = trim((string)($row['postcode'] ?? ''));
+        $default['country'] = trim((string)($row['country'] ?? ''));
+        $default['source'] = 'registration';
+    }
+
+    return $default;
+}
+
+ensurePromotionCouponColumn($conn);
+
 // Build project root for URLs dynamically so the page works in nested folders too.
 $project = rtrim(str_replace('\\', '/', dirname(dirname($_SERVER['SCRIPT_NAME'] ?? ''))), '/');
 if ($project === '' || $project === '.') {
@@ -66,207 +304,387 @@ if (empty($cartItems)) {
     exit;
 }
 
-// ----- SHIPPING -----
-$freeShippingThreshold = 100;
-$freeShippingEligible = $cartTotal >= $freeShippingThreshold;
-$shippingDifference = max(0, $freeShippingThreshold - $cartTotal);
-$shippingRates = [
-    'akis_express' => ['standard' => 3.50, 'express' => 5.50],
-    'boxnow'       => ['standard' => 2.50, 'express' => 4.50],
-    'acs'          => ['standard' => 3.00, 'express' => 5.00]
-];
-
-// Initial shipping/total shown on page (before submit).
-$selectedCourier = (string)($_POST['courier'] ?? '');
-$selectedSpeed = (string)($_POST['shipping_speed'] ?? 'standard');
-$displayShippingCost = 0.0;
-if (!$freeShippingEligible && isset($shippingRates[$selectedCourier][$selectedSpeed])) {
-    $displayShippingCost = (float)$shippingRates[$selectedCourier][$selectedSpeed];
+$couponAction = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $couponAction = strtolower(trim((string)($_POST['coupon_action'] ?? '')));
+    if (!in_array($couponAction, ['apply', 'remove'], true)) {
+        $couponAction = '';
+    }
+    if ($couponAction === 'remove') {
+        $_POST['coupon_code'] = '';
+    }
 }
-$displayTotal = $cartTotal + $displayShippingCost;
+
+$selectedCouponCode = normalizeCouponCode((string)($_POST['coupon_code'] ?? ($_SESSION['cart_coupon_code'] ?? '')));
+$activeCoupon = null;
+$couponDiscount = 0.0;
+$couponMessage = '';
+if ($selectedCouponCode !== '') {
+    $activeCoupon = findActiveCouponPromotion($conn, $selectedCouponCode);
+    if ($activeCoupon) {
+        $couponDiscount = round(computePromotionDiscount($conn, $cartItems, $activeCoupon), 2);
+        if ($couponDiscount > 0) {
+            $_SESSION['cart_coupon_code'] = $selectedCouponCode;
+            $couponMessage = 'Coupon applied: ' . (string)($activeCoupon['promotionName'] ?? $selectedCouponCode);
+        } else {
+            unset($_SESSION['cart_coupon_code']);
+        }
+    } else {
+        unset($_SESSION['cart_coupon_code']);
+    }
+} else {
+    unset($_SESSION['cart_coupon_code']);
+}
+
+// ----- SHIPPING -----
+$countryCouriers = [
+    'Cyprus' => [
+        'akis_express' => 'Akis Express',
+        'boxnow' => 'BoxNow',
+        'acs' => 'ACS',
+    ],
+    'Greece' => [
+        'elta_courier' => 'ELTA Courier',
+        'speedex' => 'Speedex',
+        'geniki' => 'Geniki Taxydromiki',
+    ],
+];
+$shippingRatesByCountry = [
+    'Cyprus' => ['standard' => 2.00, 'express' => 5.00],
+    'Greece' => ['standard' => 4.00, 'express' => 10.00],
+];
+$fulfillmentModes = ['delivery', 'pickup'];
+$shippingSpeeds = ['standard', 'express'];
+$shippingModeLabels = [
+    'delivery' => 'Deliver to my address',
+    'pickup' => 'Pickup from courier point',
+];
+$freeShippingThreshold = 100.0;
+$freeShippingEligible = $cartTotal >= $freeShippingThreshold;
+$shippingDifference = max(0.0, $freeShippingThreshold - $cartTotal);
+$availableCountries = array_keys($countryCouriers);
+$defaultAddress = $isLoggedIn && $userId > 0 ? checkoutLoadDefaultAddress($conn, $userId) : [
+    'address' => '',
+    'city' => '',
+    'postal_code' => '',
+    'country' => '',
+    'label' => '',
+    'source' => '',
+];
+$hasDefaultAddressData = (
+    trim((string)$defaultAddress['address']) !== '' ||
+    trim((string)$defaultAddress['city']) !== '' ||
+    trim((string)$defaultAddress['postal_code']) !== '' ||
+    trim((string)$defaultAddress['country']) !== ''
+);
 
 // ----- FORM HANDLING -----
 $errors = [];
 $error = '';
 $formData = $_POST;
+if (!isset($formData['coupon_code']) && $selectedCouponCode !== '') {
+    $formData['coupon_code'] = $selectedCouponCode;
+}
+if (!isset($formData['shipping_speed']) || !in_array((string)$formData['shipping_speed'], $shippingSpeeds, true)) {
+    $formData['shipping_speed'] = 'standard';
+}
+if (!isset($formData['fulfillment_mode']) || !in_array((string)$formData['fulfillment_mode'], $fulfillmentModes, true)) {
+    $formData['fulfillment_mode'] = 'delivery';
+}
+if (!isset($formData['shipping_label'])) {
+    $formData['shipping_label'] = '';
+}
+if (!isset($formData['shipping_country']) || trim((string)$formData['shipping_country']) === '') {
+    $fallbackCountry = trim((string)($defaultAddress['country'] ?? '')) !== ''
+        ? (string)$defaultAddress['country']
+        : (string)($availableCountries[0] ?? 'Cyprus');
+    $formData['shipping_country'] = checkoutNormalizeCountry($fallbackCountry, $availableCountries);
+}
+
+if ($isLoggedIn) {
+    if (!isset($formData['use_saved_address'])) {
+        $formData['use_saved_address'] = ($_SERVER['REQUEST_METHOD'] === 'POST')
+            ? '0'
+            : ($hasDefaultAddressData ? '1' : '0');
+    }
+    if ((string)$formData['use_saved_address'] === '1' && $hasDefaultAddressData) {
+        if (trim((string)($formData['shipping_address'] ?? '')) === '') {
+            $formData['shipping_address'] = (string)$defaultAddress['address'];
+        }
+        if (trim((string)($formData['shipping_city'] ?? '')) === '') {
+            $formData['shipping_city'] = (string)$defaultAddress['city'];
+        }
+        if (trim((string)($formData['shipping_postal_code'] ?? '')) === '') {
+            $formData['shipping_postal_code'] = (string)$defaultAddress['postal_code'];
+        }
+        if (trim((string)($formData['shipping_country'] ?? '')) === '') {
+            $formData['shipping_country'] = checkoutNormalizeCountry((string)$defaultAddress['country'], $availableCountries);
+        }
+        if (trim((string)($formData['shipping_label'] ?? '')) === '') {
+            $formData['shipping_label'] = (string)$defaultAddress['label'];
+        }
+    }
+}
+
+$selectedCountry = checkoutNormalizeCountry((string)($formData['shipping_country'] ?? ''), $availableCountries);
+$formData['shipping_country'] = $selectedCountry;
+$selectedSpeed = (string)$formData['shipping_speed'];
+$countryCourierOptions = checkoutCountryCouriers($selectedCountry, $countryCouriers);
+$selectedCourier = (string)($formData['courier'] ?? '');
+if (!checkoutIsCourierAllowed($selectedCountry, $selectedCourier, $countryCouriers)) {
+    $selectedCourier = (string)(array_key_first($countryCourierOptions) ?? '');
+}
+$formData['courier'] = $selectedCourier;
+$displayShippingCost = checkoutShippingCost(
+    $selectedCountry,
+    $selectedSpeed,
+    (float)$cartTotal,
+    (float)$freeShippingThreshold,
+    $shippingRatesByCountry
+);
+$displayTotal = max(0, ($cartTotal - $couponDiscount) + $displayShippingCost);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
         die('Invalid CSRF token');
     }
 
-    $required = [
-        'shipping_address'    => 'Shipping address',
-        'shipping_city'       => 'City',
-        'shipping_postal_code' => 'Postal code',
-        'shipping_country'    => 'Country',
-        'courier'             => 'Courier',
-        'payment_method'      => 'Payment method'
-    ];
-    foreach ($required as $field => $label) {
-        if (empty($_POST[$field])) $errors[$field] = "$label is required";
-    }
-
-    if (!$isLoggedIn) {
-        if (empty($_POST['full_name'])) {
-            $errors['full_name'] = 'Full name is required';
-        } elseif (str_word_count(trim($_POST['full_name'])) < 2) {
-            $errors['full_name'] = 'Enter first and last name';
-        }
-        if (empty($_POST['email'])) {
-            $errors['email'] = 'Email is required';
-        } elseif (!filter_var($_POST['email'], FILTER_VALIDATE_EMAIL)) {
-            $errors['email'] = 'Invalid email format';
-        }
-        if (empty($_POST['phone'])) {
-            $errors['phone'] = 'Phone is required';
-        }
-    }
-
-    if (!empty($_POST['shipping_postal_code'])) {
-        $postal = preg_replace('/[^0-9]/', '', (string)$_POST['shipping_postal_code']);
-        $country = trim((string)($_POST['shipping_country'] ?? ''));
-        $isPostalValid = false;
-        $postalError = 'Postal code must be 4 or 5 digits.';
-
-        if ($country === 'Cyprus') {
-            $isPostalValid = (bool)preg_match('/^[0-9]{4}$/', $postal);
-            $postalError = 'Cyprus postal code must be exactly 4 digits.';
-        } elseif ($country === 'Greece') {
-            $isPostalValid = (bool)preg_match('/^[0-9]{5}$/', $postal);
-            $postalError = 'Greece postal code must be exactly 5 digits.';
+    $isCouponOnlyPost = ($couponAction !== '');
+    if ($isCouponOnlyPost) {
+        if ($couponAction === 'remove') {
+            unset($_SESSION['cart_coupon_code']);
+            $selectedCouponCode = '';
+            $activeCoupon = null;
+            $couponDiscount = 0.0;
+            $couponMessage = 'Coupon removed.';
+            $_POST['coupon_code'] = '';
+            $formData['coupon_code'] = '';
         } else {
-            // "Other EU" allows either 4 or 5 digits.
-            $isPostalValid = (bool)preg_match('/^[0-9]{4,5}$/', $postal);
-        }
-
-        if (!$isPostalValid) {
-            $errors['shipping_postal_code'] = $postalError;
-        }
-
-        // Keep sanitized numeric value in-memory for re-render and order payload.
-        $_POST['shipping_postal_code'] = $postal;
-        $formData['shipping_postal_code'] = $postal;
-    }
-
-    if (empty($_POST['accept_terms'])) {
-        $errors['accept_terms'] = 'You must accept Terms & Conditions';
-    }
-
-    if (empty($errors)) {
-        try {
-            $conn->begin_transaction();
-
-            if ($freeShippingEligible) {
-                $shippingCost = 0;
-                $freeShippingFlag = 1;
-                $shippingMessage = "Free Shipping Applied!";
+            $formData['coupon_code'] = $selectedCouponCode;
+            if ($selectedCouponCode === '') {
+                unset($_SESSION['cart_coupon_code']);
+                $errors['coupon_code'] = 'Enter a coupon code to apply.';
+            } elseif (!$activeCoupon || $couponDiscount <= 0) {
+                unset($_SESSION['cart_coupon_code']);
+                $errors['coupon_code'] = 'Coupon code is invalid, expired, or not applicable to your cart.';
+                $couponMessage = '';
             } else {
-                $courier = $_POST['courier'];
-                $speed = $_POST['shipping_speed'] ?? 'standard';
-                if (!isset($shippingRates[$courier][$speed])) {
-                    throw new Exception('Invalid shipping option');
-                }
-                $shippingCost = $shippingRates[$courier][$speed];
-                $freeShippingFlag = 0;
-                $shippingMessage = "Add €{$shippingDifference} more for free delivery!";
+                $couponMessage = 'Coupon applied: ' . (string)($activeCoupon['promotionName'] ?? $selectedCouponCode);
+            }
+        }
+        $displayTotal = max(0, ($cartTotal - $couponDiscount) + $displayShippingCost);
+    } else {
+        $required = [
+            'shipping_address' => 'Shipping address',
+            'shipping_city' => 'City',
+            'shipping_postal_code' => 'Postal code',
+            'shipping_country' => 'Country',
+            'courier' => 'Courier',
+            'fulfillment_mode' => 'Delivery method',
+            'payment_method' => 'Payment method',
+        ];
+        foreach ($required as $field => $label) {
+            if (empty($_POST[$field])) $errors[$field] = "$label is required";
+        }
+
+        $allowedPaymentMethods = ['stripe', 'paypal'];
+        $paymentMethod = trim((string)($_POST['payment_method'] ?? ''));
+        if ($paymentMethod !== '' && !in_array($paymentMethod, $allowedPaymentMethods, true)) {
+            $errors['payment_method'] = 'Selected payment method is not available.';
+        }
+
+        $shippingCountry = checkoutNormalizeCountry((string)($_POST['shipping_country'] ?? ''), $availableCountries);
+        $_POST['shipping_country'] = $shippingCountry;
+        $formData['shipping_country'] = $shippingCountry;
+
+        $shippingSpeed = trim((string)($_POST['shipping_speed'] ?? 'standard'));
+        if (!in_array($shippingSpeed, $shippingSpeeds, true)) {
+            $errors['shipping_speed'] = 'Please select a valid shipping speed.';
+        }
+
+        $fulfillmentMode = trim((string)($_POST['fulfillment_mode'] ?? 'delivery'));
+        if (!in_array($fulfillmentMode, $fulfillmentModes, true)) {
+            $errors['fulfillment_mode'] = 'Please select delivery or pickup.';
+        }
+
+        $courier = trim((string)($_POST['courier'] ?? ''));
+        if (!checkoutIsCourierAllowed($shippingCountry, $courier, $countryCouriers)) {
+            $errors['courier'] = 'Selected courier is not available for the chosen country.';
+        }
+
+        if (!$isLoggedIn) {
+            if (empty($_POST['full_name'])) {
+                $errors['full_name'] = 'Full name is required';
+            } elseif (str_word_count(trim($_POST['full_name'])) < 2) {
+                $errors['full_name'] = 'Enter first and last name';
+            }
+            if (empty($_POST['email'])) {
+                $errors['email'] = 'Email is required';
+            } elseif (!filter_var($_POST['email'], FILTER_VALIDATE_EMAIL)) {
+                $errors['email'] = 'Invalid email format';
+            }
+            if (empty($_POST['phone'])) {
+                $errors['phone'] = 'Phone is required';
+            }
+        }
+
+        if (!empty($_POST['shipping_postal_code'])) {
+            $postal = preg_replace('/[^0-9]/', '', (string)$_POST['shipping_postal_code']);
+            $country = $shippingCountry;
+            $isPostalValid = false;
+            $postalError = 'Postal code is invalid.';
+
+            if ($country === 'Cyprus') {
+                $isPostalValid = (bool)preg_match('/^[0-9]{4}$/', $postal);
+                $postalError = 'Cyprus postal code must be exactly 4 digits.';
+            } elseif ($country === 'Greece') {
+                $isPostalValid = (bool)preg_match('/^[0-9]{5}$/', $postal);
+                $postalError = 'Greece postal code must be exactly 5 digits.';
             }
 
-            $totalAmount = $cartTotal + $shippingCost;
+            if (!$isPostalValid) {
+                $errors['shipping_postal_code'] = $postalError;
+            }
 
-            // Centralized Place Order module call:
-            // creates order header, order lines, payment row and shipment summary.
-            $placed = placeOrder($conn, [
-                'payment_confirmed' => true,
-                'items' => $cartItems,
-                'user_id' => $userId > 0 ? $userId : null,
-                'is_guest' => $isLoggedIn ? 0 : 1,
-                'email' => $isLoggedIn ? $userEmail : trim((string)($_POST['email'] ?? '')),
-                'order_status' => 'accepted',
-                'payment_status' => 'paid',
-                'payment_provider' => trim((string)($_POST['payment_method'] ?? 'manual')),
-                'subtotal' => $cartTotal,
-                'discount_total' => 0.0,
-                'shipping_cost' => $shippingCost,
-                'total_amount' => $totalAmount,
-                'courier' => trim((string)($_POST['courier'] ?? '')),
-                'shipping_priority' => trim((string)($_POST['shipping_speed'] ?? 'standard')),
-            ]);
-            $orderId = (int)$placed['order_id'];
-            $orderNumber = (string)$placed['order_number'];
+            // Keep sanitized numeric value in-memory for re-render and order payload.
+            $_POST['shipping_postal_code'] = $postal;
+            $formData['shipping_postal_code'] = $postal;
+        }
 
-            $accountCreated = false;
-            if (!$isLoggedIn && !empty($_POST['create_account']) && $_POST['create_account'] === 'yes') {
-                $tempPassword = bin2hex(random_bytes(5));
-                $hash = password_hash($tempPassword, PASSWORD_DEFAULT);
-                $nameParts = explode(' ', trim($_POST['full_name']), 2);
-                $first = $nameParts[0];
-                $last = $nameParts[1] ?? '';
+        if (empty($_POST['accept_terms'])) {
+            $errors['accept_terms'] = 'You must accept Terms & Conditions';
+        }
+        if ($selectedCouponCode !== '' && (!$activeCoupon || $couponDiscount <= 0)) {
+            $errors['coupon_code'] = 'Coupon code is invalid, expired, or not applicable to your cart.';
+        }
 
-                        $check = $conn->prepare("SELECT userID FROM users WHERE email = ?");
-                $check->bind_param("s", $_POST['email']);
-                $check->execute();
-                $check->store_result();
-                if ($check->num_rows == 0) {
-                    // Keep new-account creation aligned with the current users table constraints.
-                    $username = strtolower(preg_replace('/[^a-z0-9]/', '', strstr($_POST['email'], '@', true) ?: 'user')) . rand(100, 999);
-                    $fullName = trim($first . ' ' . $last);
-                    $insert = $conn->prepare("INSERT INTO users (full_name, email, username, password, phone, role) VALUES (?,?,?,?,?,'user')");
-                    $insert->bind_param("sssss", $fullName, $_POST['email'], $username, $hash, $_POST['phone']);
-                    if ($insert->execute()) {
-                        $newUserId = $insert->insert_id;
-                        $upd = $conn->prepare("UPDATE orders SET userID = ?, isGuestFlag = 0 WHERE orderID = ?");
-                        $upd->bind_param("ii", $newUserId, $orderId);
-                        $upd->execute();
-                        $upd->close();
-                        $_SESSION['temp_password'] = $tempPassword;
-                        $accountCreated = true;
+        if (empty($errors)) {
+            try {
+                $conn->begin_transaction();
+
+                $shippingCost = checkoutShippingCost(
+                    $shippingCountry,
+                    $shippingSpeed,
+                    (float)$cartTotal,
+                    (float)$freeShippingThreshold,
+                    $shippingRatesByCountry
+                );
+                $freeShippingFlag = $shippingCost <= 0 ? 1 : 0;
+                $shippingMessage = $freeShippingFlag
+                    ? "Free Shipping Applied!"
+                    : "Add €" . number_format($shippingDifference, 2) . " more for free delivery!";
+
+                $totalAmount = max(0, ($cartTotal - $couponDiscount) + $shippingCost);
+
+                // Centralized Place Order module call:
+                // creates order header, order lines, payment row and shipment summary.
+                $placed = placeOrder($conn, [
+                    'payment_confirmed' => true,
+                    'items' => $cartItems,
+                    'user_id' => $userId > 0 ? $userId : null,
+                    'is_guest' => $isLoggedIn ? 0 : 1,
+                    'email' => $isLoggedIn ? $userEmail : trim((string)($_POST['email'] ?? '')),
+                    'order_status' => 'pending',
+                    'payment_status' => 'paid',
+                    'payment_provider' => trim((string)($_POST['payment_method'] ?? 'manual')),
+                    'subtotal' => $cartTotal,
+                    'discount_total' => $couponDiscount,
+                    'shipping_cost' => $shippingCost,
+                    'total_amount' => $totalAmount,
+                    'shipping_address' => trim((string)($_POST['shipping_address'] ?? '')),
+                    'shipping_city' => trim((string)($_POST['shipping_city'] ?? '')),
+                    'shipping_postal_code' => trim((string)($_POST['shipping_postal_code'] ?? '')),
+                    'shipping_country' => $shippingCountry,
+                    'shipping_label' => trim((string)($_POST['shipping_label'] ?? '')),
+                    'courier' => $courier,
+                    'shipping_priority' => $shippingSpeed,
+                    'fulfillment_mode' => $fulfillmentMode,
+                ]);
+                $orderId = (int)$placed['order_id'];
+                $orderNumber = (string)$placed['order_number'];
+
+                $accountCreated = false;
+                if (!$isLoggedIn && !empty($_POST['create_account']) && $_POST['create_account'] === 'yes') {
+                    $tempPassword = bin2hex(random_bytes(5));
+                    $hash = password_hash($tempPassword, PASSWORD_DEFAULT);
+                    $nameParts = explode(' ', trim($_POST['full_name']), 2);
+                    $first = $nameParts[0];
+                    $last = $nameParts[1] ?? '';
+
+                            $check = $conn->prepare("SELECT userID FROM users WHERE email = ?");
+                    $check->bind_param("s", $_POST['email']);
+                    $check->execute();
+                    $check->store_result();
+                    if ($check->num_rows == 0) {
+                        // Keep new-account creation aligned with the current users table constraints.
+                        $username = strtolower(preg_replace('/[^a-z0-9]/', '', strstr($_POST['email'], '@', true) ?: 'user')) . rand(100, 999);
+                        $fullName = trim($first . ' ' . $last);
+                        $insert = $conn->prepare("INSERT INTO users (full_name, email, username, password, phone, role) VALUES (?,?,?,?,?,'user')");
+                        $insert->bind_param("sssss", $fullName, $_POST['email'], $username, $hash, $_POST['phone']);
+                        if ($insert->execute()) {
+                            $newUserId = $insert->insert_id;
+                            $upd = $conn->prepare("UPDATE orders SET userID = ?, isGuestFlag = 0 WHERE orderID = ?");
+                            $upd->bind_param("ii", $newUserId, $orderId);
+                            $upd->execute();
+                            $upd->close();
+                            $_SESSION['temp_password'] = $tempPassword;
+                            $accountCreated = true;
+                        }
+                        $insert->close();
                     }
-                    $insert->close();
+                    $check->close();
                 }
-                $check->close();
+
+                $conn->commit();
+
+                // Send customer confirmation email only after DB commit succeeds.
+                // If email fails, order is still valid and stored.
+                $confirmationEmailTo = $isLoggedIn ? (string)$userEmail : trim((string)($_POST['email'] ?? ''));
+                $confirmationName = $isLoggedIn ? (string)$userFullName : trim((string)($_POST['full_name'] ?? 'Customer'));
+                $emailResult = sendOrderConfirmationEmail([
+                    'to_email' => $confirmationEmailTo,
+                    'customer_name' => $confirmationName,
+                    'order_id' => $orderId,
+                    'order_number' => $orderNumber,
+                    'total' => $totalAmount,
+                    'shipping_cost' => $shippingCost,
+                    'shipping_address' => trim((string)($_POST['shipping_address'] ?? '')),
+                    'shipping_city' => trim((string)($_POST['shipping_city'] ?? '')),
+                    'shipping_postal_code' => trim((string)($_POST['shipping_postal_code'] ?? '')),
+                    'shipping_country' => $shippingCountry,
+                    'shipping_label' => trim((string)($_POST['shipping_label'] ?? '')),
+                    'courier' => $courier,
+                    'shipping_priority' => $shippingSpeed,
+                    'fulfillment_mode' => $fulfillmentMode,
+                    'items' => $cartItems,
+                ]);
+
+                unset($_SESSION['cart']);
+                unset($_SESSION['cart_coupon_code']);
+
+                $_SESSION['checkout_result'] = [
+                    'order_id'         => $orderId,
+                    'order_number'     => $orderNumber,
+                    'total'            => $totalAmount,
+                    'shipping_message' => $shippingMessage,
+                    'free_shipping'    => $freeShippingEligible,
+                    'account_created'  => $accountCreated,
+                    'discount_total'   => $couponDiscount,
+                    'coupon_code'      => $selectedCouponCode,
+                    'confirmation_email_to' => $confirmationEmailTo,
+                    'confirmation_email_sent' => (bool)($emailResult['sent'] ?? false),
+                    'confirmation_email_error' => (string)($emailResult['error'] ?? '')
+                ];
+
+                // NOTE: underscore filename is the actual file in this project.
+                header('Location: ' . $project . '/modules/checkout_success.php');
+                exit;
+
+            } catch (Exception $e) {
+                $conn->rollback();
+                $error = 'Order failed: ' . $e->getMessage();
+                error_log("Checkout error: " . $e->getMessage());
             }
-
-            $conn->commit();
-
-            // Send customer confirmation email only after DB commit succeeds.
-            // If email fails, order is still valid and stored.
-            $confirmationEmailTo = $isLoggedIn ? (string)$userEmail : trim((string)($_POST['email'] ?? ''));
-            $confirmationName = $isLoggedIn ? (string)$userFullName : trim((string)($_POST['full_name'] ?? 'Customer'));
-            $emailResult = sendOrderConfirmationEmail([
-                'to_email' => $confirmationEmailTo,
-                'customer_name' => $confirmationName,
-                'order_id' => $orderId,
-                'order_number' => $orderNumber,
-                'total' => $totalAmount,
-                'shipping_cost' => $shippingCost,
-                'courier' => trim((string)($_POST['courier'] ?? '')),
-                'shipping_priority' => trim((string)($_POST['shipping_speed'] ?? 'standard')),
-                'items' => $cartItems,
-            ]);
-
-            unset($_SESSION['cart']);
-
-            $_SESSION['checkout_result'] = [
-                'order_id'         => $orderId,
-                'order_number'     => $orderNumber,
-                'total'            => $totalAmount,
-                'shipping_message' => $shippingMessage,
-                'free_shipping'    => $freeShippingEligible,
-                'account_created'  => $accountCreated,
-                'confirmation_email_to' => $confirmationEmailTo,
-                'confirmation_email_sent' => (bool)($emailResult['sent'] ?? false),
-                'confirmation_email_error' => (string)($emailResult['error'] ?? '')
-            ];
-
-            // NOTE: underscore filename is the actual file in this project.
-            header('Location: ' . $project . '/modules/checkout_success.php');
-            exit;
-
-        } catch (Exception $e) {
-            $conn->rollback();
-            $error = 'Order failed: ' . $e->getMessage();
-            error_log("Checkout error: " . $e->getMessage());
         }
     }
 }
@@ -280,6 +698,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link rel="stylesheet" href="<?= $project ?>/assets/styling/styles.css">
     <link rel="stylesheet" href="<?= $project ?>/assets/styling/header.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="<?= $project ?>/assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/translations.js') ?>" defer></script>
     <style>
         .checkout-container {
@@ -399,6 +819,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             line-height: 1.35;
         }
 
+        .coupon-row {
+            display: flex;
+            gap: 10px;
+            align-items: stretch;
+        }
+
+        .coupon-row input[type="text"] {
+            flex: 1;
+        }
+
+        .coupon-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .btn-inline {
+            border: 1px solid #d4c3eb;
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            background: #fff;
+            color: #45286d;
+        }
+
+        .btn-inline.btn-apply {
+            border-color: #7f46cf;
+            background: #7f46cf;
+            color: #fff;
+        }
+
         .error {
             display: block;
             margin-top: 7px;
@@ -497,6 +950,76 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             color: #2f1d49;
             font-size: 24px;
             line-height: 1.2;
+        }
+
+        .courier-map-card {
+            margin-top: 14px;
+            border: 1px solid #e5dbf2;
+            border-radius: 16px;
+            padding: 14px;
+            background: #fff;
+            box-shadow: 0 10px 24px rgba(61, 30, 98, 0.08);
+        }
+
+        .courier-map-card h3 {
+            margin: 0 0 8px;
+            font-size: 16px;
+            color: #2f1d49;
+        }
+
+        .courier-map-card p {
+            margin: 0 0 10px;
+            font-size: 12px;
+            color: #6f5f85;
+            line-height: 1.4;
+        }
+
+        .courier-map-frame {
+            width: 100%;
+            height: 220px;
+            border: 1px solid #dfd3ef;
+            border-radius: 10px;
+            background: #f8f4ff;
+            overflow: hidden;
+        }
+
+        .courier-map-links {
+            margin-top: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .courier-map-links a {
+            font-size: 12px;
+            color: #5c2ea0;
+            text-decoration: underline;
+            font-weight: 600;
+        }
+
+        .courier-map-points {
+            margin-top: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .courier-map-points span {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: #f2ebff;
+            color: #4f3774;
+            font-size: 11px;
+            font-weight: 600;
+            border: 1px solid #ddd1f0;
+        }
+
+        .courier-map-points span.is-closest {
+            background: #e2d3ff;
+            border-color: #b99cf2;
+            color: #34185f;
         }
 
         .order-item {
@@ -625,15 +1148,24 @@ if (file_exists($headerPath)) {
 
                 <fieldset>
                     <legend data-translate="checkoutShipping">Shipping</legend>
+                    <?php if ($isLoggedIn && $hasDefaultAddressData): ?>
+                    <div class="form-group">
+                        <label class="option-label">
+                            <input type="checkbox" id="use_saved_address" name="use_saved_address" value="1" <?= (($formData['use_saved_address'] ?? '0') === '1') ? 'checked' : '' ?>>
+                            Auto-fill with my default address
+                        </label>
+                        <span class="form-helper">Uses your default address from My Account. You can still edit every field manually.</span>
+                    </div>
+                    <?php endif; ?>
                     <div class="form-group">
                         <label><span data-translate="checkoutAddress">Address</span> *</label>
-                        <input type="text" name="shipping_address" value="<?= htmlspecialchars($formData['shipping_address']??'') ?>" class="<?= isset($errors['shipping_address'])?'error-field':'' ?>" required>
+                        <input type="text" id="shipping_address" name="shipping_address" value="<?= htmlspecialchars($formData['shipping_address']??'') ?>" class="<?= isset($errors['shipping_address'])?'error-field':'' ?>" required>
                         <?php if (isset($errors['shipping_address'])): ?><span class="error"><?= $errors['shipping_address'] ?></span><?php endif; ?>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label><span data-translate="checkoutCity">City</span> *</label>
-                            <input type="text" name="shipping_city" value="<?= htmlspecialchars($formData['shipping_city']??'') ?>" class="<?= isset($errors['shipping_city'])?'error-field':'' ?>" required>
+                            <input type="text" id="shipping_city" name="shipping_city" value="<?= htmlspecialchars($formData['shipping_city']??'') ?>" class="<?= isset($errors['shipping_city'])?'error-field':'' ?>" required>
                             <?php if (isset($errors['shipping_city'])): ?><span class="error"><?= $errors['shipping_city'] ?></span><?php endif; ?>
                         </div>
                         <div class="form-group">
@@ -657,32 +1189,47 @@ if (file_exists($headerPath)) {
                         <label><span data-translate="checkoutCountry">Country</span> *</label>
                         <select id="shipping_country" name="shipping_country" class="<?= isset($errors['shipping_country'])?'error-field':'' ?>" required>
                             <option value="" data-translate="checkoutSelect">Select</option>
-                            <option value="Greece" <?= ($formData['shipping_country']??'')=='Greece'?'selected':'' ?>>Greece</option>
-                            <option value="Cyprus" <?= ($formData['shipping_country']??'')=='Cyprus'?'selected':'' ?>>Cyprus</option>
-                            <option value="Other" <?= ($formData['shipping_country']??'')=='Other'?'selected':'' ?>>Other EU</option>
+                            <?php foreach ($availableCountries as $countryOption): ?>
+                                <option value="<?= htmlspecialchars($countryOption) ?>" <?= ($formData['shipping_country']??'')===$countryOption ? 'selected' : '' ?>><?= htmlspecialchars($countryOption) ?></option>
+                            <?php endforeach; ?>
                         </select>
                         <?php if (isset($errors['shipping_country'])): ?><span class="error"><?= $errors['shipping_country'] ?></span><?php endif; ?>
+                    </div>
+                    <div class="form-group">
+                        <label>Label (optional)</label>
+                        <input type="text" id="shipping_label" name="shipping_label" value="<?= htmlspecialchars($formData['shipping_label']??'') ?>" placeholder="Home, Office, Gift address...">
                     </div>
                 </fieldset>
 
                 <fieldset>
                     <legend data-translate="checkoutShippingMethod">Shipping Method</legend>
                     <div class="form-group">
+                        <label>Delivery Option *</label>
+                        <div class="form-options">
+                            <?php foreach ($shippingModeLabels as $modeKey => $modeLabel): ?>
+                                <label class="option-label"><input type="radio" name="fulfillment_mode" value="<?= htmlspecialchars($modeKey) ?>" <?= (($formData['fulfillment_mode'] ?? 'delivery') === $modeKey) ? 'checked' : '' ?>> <?= htmlspecialchars($modeLabel) ?></label>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php if (isset($errors['fulfillment_mode'])): ?><span class="error"><?= $errors['fulfillment_mode'] ?></span><?php endif; ?>
+                    </div>
+                    <div class="form-group">
                         <label><span data-translate="checkoutCourier">Courier</span> *</label>
-                        <select name="courier" class="<?= isset($errors['courier'])?'error-field':'' ?>" required>
+                        <select id="courier_select" name="courier" class="<?= isset($errors['courier'])?'error-field':'' ?>" required>
                             <option value="" data-translate="checkoutSelect">Select</option>
-                            <option value="akis_express" <?= ($formData['courier']??'')=='akis_express'?'selected':'' ?>>Akis Express</option>
-                            <option value="boxnow" <?= ($formData['courier']??'')=='boxnow'?'selected':'' ?>>BoxNow</option>
-                            <option value="acs" <?= ($formData['courier']??'')=='acs'?'selected':'' ?>>ACS</option>
+                            <?php foreach ($countryCourierOptions as $courierCode => $courierName): ?>
+                                <option value="<?= htmlspecialchars($courierCode) ?>" <?= ($formData['courier']??'')===$courierCode ? 'selected' : '' ?>><?= htmlspecialchars($courierName) ?></option>
+                            <?php endforeach; ?>
                         </select>
+                        <span class="form-helper">Couriers update automatically based on the selected country.</span>
                         <?php if (isset($errors['courier'])): ?><span class="error"><?= $errors['courier'] ?></span><?php endif; ?>
                     </div>
                     <div class="form-group">
                         <label data-translate="checkoutSpeed">Speed</label>
                         <div class="form-options">
-                            <label class="option-label"><input type="radio" name="shipping_speed" value="standard" <?= ($formData['shipping_speed']??'standard')=='standard'?'checked':'' ?>> <span data-translate="checkoutStandard">Standard</span></label>
-                            <label class="option-label"><input type="radio" name="shipping_speed" value="express" <?= ($formData['shipping_speed']??'')=='express'?'checked':'' ?>> <span data-translate="checkoutExpress">Express</span> (+&euro;2)</label>
+                            <label class="option-label"><input type="radio" name="shipping_speed" value="standard" <?= ($formData['shipping_speed']??'standard')=='standard'?'checked':'' ?>> <span data-translate="checkoutStandard">Standard</span> <span id="standard-cost-label"></span></label>
+                            <label class="option-label"><input type="radio" name="shipping_speed" value="express" <?= ($formData['shipping_speed']??'')=='express'?'checked':'' ?>> <span data-translate="checkoutExpress">Express</span> <span id="express-cost-label"></span></label>
                         </div>
+                        <?php if (isset($errors['shipping_speed'])): ?><span class="error"><?= $errors['shipping_speed'] ?></span><?php endif; ?>
                     </div>
                 </fieldset>
 
@@ -691,10 +1238,24 @@ if (file_exists($headerPath)) {
                     <div class="form-options form-options-column">
                         <label class="option-label"><input type="radio" name="payment_method" value="stripe" <?= ($formData['payment_method']??'stripe')=='stripe'?'checked':'' ?> required> Credit Card (Stripe)</label>
                         <label class="option-label"><input type="radio" name="payment_method" value="paypal" <?= ($formData['payment_method']??'')=='paypal'?'checked':'' ?>> PayPal</label>
-                        <label class="option-label"><input type="radio" name="payment_method" value="cash_on_delivery" <?= ($formData['payment_method']??'')=='cash_on_delivery'?'checked':'' ?>> Cash on Delivery</label>
-                        <label class="option-label"><input type="radio" name="payment_method" value="bank_transfer" <?= ($formData['payment_method']??'')=='bank_transfer'?'checked':'' ?>> Bank Transfer</label>
                     </div>
                     <?php if (isset($errors['payment_method'])): ?><span class="error"><?= $errors['payment_method'] ?></span><?php endif; ?>
+                </fieldset>
+
+                <fieldset>
+                    <legend>Coupon</legend>
+                    <div class="form-group">
+                        <label>Coupon Code</label>
+                        <div class="coupon-row">
+                            <input type="text" name="coupon_code" value="<?= htmlspecialchars($formData['coupon_code'] ?? '') ?>" placeholder="Enter coupon code (if available)">
+                        </div>
+                        <div class="coupon-actions">
+                            <button type="submit" name="coupon_action" value="apply" class="btn-inline btn-apply" formnovalidate>Apply</button>
+                            <button type="submit" name="coupon_action" value="remove" class="btn-inline" formnovalidate>Remove</button>
+                        </div>
+                        <?php if ($couponMessage !== ''): ?><span class="form-helper"><?= htmlspecialchars($couponMessage) ?></span><?php endif; ?>
+                        <?php if (isset($errors['coupon_code'])): ?><span class="error"><?= $errors['coupon_code'] ?></span><?php endif; ?>
+                    </div>
                 </fieldset>
 
                 <?php if (!$isLoggedIn): ?>
@@ -713,39 +1274,50 @@ if (file_exists($headerPath)) {
             </form>
         </div>
 
-        <div class="order-summary">
-            <h2><span data-translate="checkoutYourOrder">Your Order</span> (<?= $cartCount ?>)</h2>
-            <?php foreach ($cartItems as $item): 
-                $name = $item['name'] ?? $item['product']['nameEN'] ?? $item['product']['nameGR'] ?? 'Product';
-                $basePrice = (float)($item['product']['basePrice'] ?? 0);
-                $addonsCost = (float)($item['addons']['addonsCost'] ?? 0);
-                if ($addonsCost <= 0) {
-                    if (!empty($item['addons']['giftWrapping'])) $addonsCost += 2.0;
-                    if (!empty($item['addons']['giftBagFlag'])) $addonsCost += 1.5;
-                }
-                $price = (float)($item['price'] ?? $item['pricing']['unitTotal'] ?? ($basePrice + $addonsCost));
-                $qty = (int)($item['quantity'] ?? 1);
-                $giftBits = [];
-                if (!empty($item['addons']['giftWrapping'])) $giftBits[] = 'Gift Wrapping (+€2.00)';
-                if (!empty($item['addons']['giftBagFlag'])) $giftBits[] = 'Gift Bag (+€1.50)';
-                if (!empty($item['addons']['giftMessage'])) $giftBits[] = 'Note: ' . (string)$item['addons']['giftMessage'];
-            ?>
-            <div class="order-item">
-                <div class="order-item-main">
-                    <span><?= htmlspecialchars($name) ?> x<?= $qty ?></span>
-                    <span>&euro;<?= number_format($price*$qty,2) ?></span>
+        <div>
+            <div class="order-summary">
+                <h2><span data-translate="checkoutYourOrder">Your Order</span> (<?= $cartCount ?>)</h2>
+                <?php foreach ($cartItems as $item): 
+                    $name = $item['name'] ?? $item['product']['nameEN'] ?? $item['product']['nameGR'] ?? 'Product';
+                    $basePrice = (float)($item['product']['basePrice'] ?? 0);
+                    $addonsCost = (float)($item['addons']['addonsCost'] ?? 0);
+                    if ($addonsCost <= 0) {
+                        if (!empty($item['addons']['giftWrapping'])) $addonsCost += 2.0;
+                        if (!empty($item['addons']['giftBagFlag'])) $addonsCost += 1.5;
+                    }
+                    $price = (float)($item['price'] ?? $item['pricing']['unitTotal'] ?? ($basePrice + $addonsCost));
+                    $qty = (int)($item['quantity'] ?? 1);
+                    $giftBits = [];
+                    if (!empty($item['addons']['giftWrapping'])) $giftBits[] = 'Gift Wrapping (+€2.00)';
+                    if (!empty($item['addons']['giftBagFlag'])) $giftBits[] = 'Gift Bag (+€1.50)';
+                    if (!empty($item['addons']['giftMessage'])) $giftBits[] = 'Note: ' . (string)$item['addons']['giftMessage'];
+                ?>
+                <div class="order-item">
+                    <div class="order-item-main">
+                        <span><?= htmlspecialchars($name) ?> x<?= $qty ?></span>
+                        <span>&euro;<?= number_format($price*$qty,2) ?></span>
+                    </div>
+                    <?php if (!empty($giftBits)): ?>
+                    <div class="order-item-addons">
+                        <?= htmlspecialchars(implode(' | ', $giftBits)) ?>
+                    </div>
+                    <?php endif; ?>
                 </div>
-                <?php if (!empty($giftBits)): ?>
-                <div class="order-item-addons">
-                    <?= htmlspecialchars(implode(' | ', $giftBits)) ?>
-                </div>
-                <?php endif; ?>
+                <?php endforeach; ?>
+                <hr class="summary-divider">
+                <div class="summary-row"><span data-translate="subtotal">Subtotal</span><span>&euro;<span id="orderSubtotal"><?= number_format($cartTotal,2) ?></span></span></div>
+                <div class="summary-row"><span>Discount</span><span>-&euro;<span id="orderDiscount"><?= number_format($couponDiscount,2) ?></span></span></div>
+                <div class="summary-row"><span data-translate="shipping">Shipping</span><span id="orderShipping"><?= $freeShippingEligible ? 'FREE' : ('€' . number_format($displayShippingCost,2)) ?></span></div>
+                <div class="summary-row summary-row-total"><span data-translate="total">Total</span><span>&euro;<span id="orderTotal"><?= number_format($displayTotal,2) ?></span></span></div>
             </div>
-            <?php endforeach; ?>
-            <hr class="summary-divider">
-            <div class="summary-row"><span data-translate="subtotal">Subtotal</span><span>&euro;<span id="orderSubtotal"><?= number_format($cartTotal,2) ?></span></span></div>
-            <div class="summary-row"><span data-translate="shipping">Shipping</span><span id="orderShipping"><?= $freeShippingEligible ? 'FREE' : ('€' . number_format($displayShippingCost,2)) ?></span></div>
-            <div class="summary-row summary-row-total"><span data-translate="total">Total</span><span>&euro;<span id="orderTotal"><?= number_format($displayTotal,2) ?></span></span></div>
+
+            <div class="courier-map-card" id="courier-map-card">
+                <h3 id="courier-map-title">Courier Locations</h3>
+                <p id="courier-map-hint">Select a courier to preview pickup spots.</p>
+                <div id="courier-map-frame" class="courier-map-frame" aria-label="Courier pickup spot map"></div>
+                <div class="courier-map-links" id="courier-map-links"></div>
+                <div class="courier-map-points" id="courier-map-points"></div>
+            </div>
         </div>
     </div>
 </div>
@@ -753,33 +1325,500 @@ if (file_exists($headerPath)) {
 (function () {
     var freeThreshold = <?= json_encode((float)$freeShippingThreshold) ?>;
     var subtotal = <?= json_encode((float)$cartTotal) ?>;
-    var shippingRates = <?= json_encode($shippingRates) ?>;
-    var courierEl = document.querySelector('select[name="courier"]');
+    var discount = <?= json_encode((float)$couponDiscount) ?>;
+    var shippingRatesByCountry = <?= json_encode($shippingRatesByCountry) ?>;
+    var countryCouriers = <?= json_encode($countryCouriers) ?>;
+    var defaultAddress = <?= json_encode($defaultAddress) ?>;
+
+    var countryBounds = {
+        Cyprus: [[34.56, 32.15], [35.75, 34.95]],
+        Greece: [[34.76, 19.34], [41.82, 29.89]]
+    };
+
+    var cityCenters = {
+        Cyprus: {
+            nicosia: { lat: 35.1856, lng: 33.3823 },
+            lefkosia: { lat: 35.1856, lng: 33.3823 },
+            limassol: { lat: 34.6841, lng: 33.0379 },
+            lemesos: { lat: 34.6841, lng: 33.0379 },
+            larnaca: { lat: 34.9167, lng: 33.6290 },
+            paphos: { lat: 34.7754, lng: 32.4257 },
+            pafos: { lat: 34.7754, lng: 32.4257 },
+            paralimni: { lat: 35.0396, lng: 33.9819 },
+            famagusta: { lat: 35.0396, lng: 33.9819 }
+        },
+        Greece: {
+            athens: { lat: 37.9838, lng: 23.7275 },
+            athina: { lat: 37.9838, lng: 23.7275 },
+            thessaloniki: { lat: 40.6401, lng: 22.9444 },
+            patra: { lat: 38.2466, lng: 21.7346 },
+            patras: { lat: 38.2466, lng: 21.7346 },
+            heraklion: { lat: 35.3387, lng: 25.1442 },
+            iraklio: { lat: 35.3387, lng: 25.1442 },
+            larissa: { lat: 39.6390, lng: 22.4191 },
+            volos: { lat: 39.3610, lng: 22.9420 },
+            ioannina: { lat: 39.6650, lng: 20.8537 },
+            chania: { lat: 35.5138, lng: 24.0180 }
+        }
+    };
+
+    var countryDefaults = {
+        Cyprus: { lat: 35.1400, lng: 33.3600 },
+        Greece: { lat: 38.1200, lng: 23.7200 }
+    };
+
+    var mapConfigs = {
+        akis_express: {
+            title: 'Akis Express Pickup Spots',
+            country: 'Cyprus',
+            color: '#8a4dd6',
+            points: [
+                { name: 'Akis Express Latsia Hub', city: 'Nicosia', postal: '2235', country: 'Cyprus', lat: 35.1032, lng: 33.3838 },
+                { name: 'Akis Express Limassol Center', city: 'Limassol', postal: '3012', country: 'Cyprus', lat: 34.6841, lng: 33.0379 },
+                { name: 'Akis Express Larnaca Drosia', city: 'Larnaca', postal: '6035', country: 'Cyprus', lat: 34.9157, lng: 33.6142 },
+                { name: 'Akis Express Paphos Kiniras', city: 'Paphos', postal: '8011', country: 'Cyprus', lat: 34.7736, lng: 32.4260 },
+                { name: 'Akis Express Paphos Hellados', city: 'Paphos', postal: '8020', country: 'Cyprus', lat: 34.7664, lng: 32.4215 }
+            ],
+            links: [
+                { href: 'https://akisexpress.com.cy/', label: 'Akis Express Official' }
+            ]
+        },
+        boxnow: {
+            title: 'BoxNow Locker Pickup Spots',
+            country: 'Cyprus',
+            color: '#f58f3d',
+            points: [
+                { name: 'BoxNow Locker Strovolos', city: 'Nicosia', postal: '2018', country: 'Cyprus', lat: 35.1285, lng: 33.3450 },
+                { name: 'BoxNow Locker Mesa Geitonia', city: 'Limassol', postal: '4003', country: 'Cyprus', lat: 34.6935, lng: 33.0547 },
+                { name: 'BoxNow Locker Finikoudes', city: 'Larnaca', postal: '6022', country: 'Cyprus', lat: 34.9140, lng: 33.6350 },
+                { name: 'BoxNow Locker Paphos Center', city: 'Paphos', postal: '8010', country: 'Cyprus', lat: 34.7748, lng: 32.4245 },
+                { name: 'BoxNow Locker Paralimni', city: 'Paralimni', postal: '5290', country: 'Cyprus', lat: 35.0396, lng: 33.9819 }
+            ],
+            links: [
+                { href: 'https://boxnow.cy/en/locker-finder', label: 'BoxNow Cyprus Locker Finder' }
+            ]
+        },
+        acs: {
+            title: 'ACS Pickup Spots',
+            country: 'Cyprus',
+            color: '#2c7be5',
+            points: [
+                { name: 'ACS Strovolos Branch', city: 'Nicosia', postal: '2018', country: 'Cyprus', lat: 35.1487, lng: 33.3416 },
+                { name: 'ACS Agia Zoni Branch', city: 'Limassol', postal: '3031', country: 'Cyprus', lat: 34.6830, lng: 33.0441 },
+                { name: 'ACS Aradippou Branch', city: 'Larnaca', postal: '7101', country: 'Cyprus', lat: 34.9498, lng: 33.5911 },
+                { name: 'ACS Mesogi Branch', city: 'Paphos', postal: '8280', country: 'Cyprus', lat: 34.8217, lng: 32.4622 },
+                { name: 'ACS Chloraka Branch', city: 'Paphos', postal: '8010', country: 'Cyprus', lat: 34.7929, lng: 32.4068 }
+            ],
+            links: [
+                { href: 'https://www.acscourier.net/en/home', label: 'ACS Official' }
+            ]
+        },
+        elta_courier: {
+            title: 'ELTA Courier Pickup Spots',
+            country: 'Greece',
+            color: '#3fa77b',
+            points: [
+                { name: 'ELTA Athens Central', city: 'Athens', postal: '10557', country: 'Greece', lat: 37.9755, lng: 23.7348 },
+                { name: 'ELTA Thessaloniki Center', city: 'Thessaloniki', postal: '54624', country: 'Greece', lat: 40.6380, lng: 22.9444 },
+                { name: 'ELTA Patra Center', city: 'Patra', postal: '26221', country: 'Greece', lat: 38.2460, lng: 21.7350 },
+                { name: 'ELTA Heraklion Center', city: 'Heraklion', postal: '71202', country: 'Greece', lat: 35.3393, lng: 25.1333 },
+                { name: 'ELTA Larissa Center', city: 'Larissa', postal: '41222', country: 'Greece', lat: 39.6390, lng: 22.4191 },
+                { name: 'ELTA Ioannina Center', city: 'Ioannina', postal: '45444', country: 'Greece', lat: 39.6651, lng: 20.8520 }
+            ],
+            links: [
+                { href: 'https://www.elta-courier.gr/', label: 'ELTA Courier Official' }
+            ]
+        },
+        speedex: {
+            title: 'Speedex Pickup Spots',
+            country: 'Greece',
+            color: '#d96459',
+            points: [
+                { name: 'Speedex Athens Hub', city: 'Athens', postal: '10437', country: 'Greece', lat: 37.9860, lng: 23.7207 },
+                { name: 'Speedex Thessaloniki Hub', city: 'Thessaloniki', postal: '54627', country: 'Greece', lat: 40.6420, lng: 22.9285 },
+                { name: 'Speedex Patra Point', city: 'Patra', postal: '26222', country: 'Greece', lat: 38.2445, lng: 21.7252 },
+                { name: 'Speedex Heraklion Point', city: 'Heraklion', postal: '71306', country: 'Greece', lat: 35.3235, lng: 25.1312 },
+                { name: 'Speedex Larissa Point', city: 'Larissa', postal: '41334', country: 'Greece', lat: 39.6320, lng: 22.4225 },
+                { name: 'Speedex Chania Point', city: 'Chania', postal: '73134', country: 'Greece', lat: 35.5098, lng: 24.0323 }
+            ],
+            links: [
+                { href: 'https://www.speedex.gr/', label: 'Speedex Official' }
+            ]
+        },
+        geniki: {
+            title: 'Geniki Taxydromiki Pickup Spots',
+            country: 'Greece',
+            color: '#5661d9',
+            points: [
+                { name: 'Geniki Athens Hub', city: 'Athens', postal: '17778', country: 'Greece', lat: 37.9641, lng: 23.6978 },
+                { name: 'Geniki Thessaloniki Hub', city: 'Thessaloniki', postal: '54628', country: 'Greece', lat: 40.6507, lng: 22.9346 },
+                { name: 'Geniki Patra Point', city: 'Patra', postal: '26223', country: 'Greece', lat: 38.2490, lng: 21.7427 },
+                { name: 'Geniki Heraklion Point', city: 'Heraklion', postal: '71307', country: 'Greece', lat: 35.3321, lng: 25.1288 },
+                { name: 'Geniki Larissa Point', city: 'Larissa', postal: '41335', country: 'Greece', lat: 39.6375, lng: 22.4140 },
+                { name: 'Geniki Ioannina Point', city: 'Ioannina', postal: '45445', country: 'Greece', lat: 39.6630, lng: 20.8453 }
+            ],
+            links: [
+                { href: 'https://www.taxydromiki.com/', label: 'Geniki Taxydromiki Official' }
+            ]
+        }
+    };
+
+    var courierEl = document.getElementById('courier_select');
     var speedEls = document.querySelectorAll('input[name="shipping_speed"]');
+    var modeEls = document.querySelectorAll('input[name="fulfillment_mode"]');
     var shippingOut = document.getElementById('orderShipping');
     var totalOut = document.getElementById('orderTotal');
     var btnTotalOut = document.getElementById('placeOrderTotal');
+    var standardCostLabelEl = document.getElementById('standard-cost-label');
+    var expressCostLabelEl = document.getElementById('express-cost-label');
+    var courierMapFrame = document.getElementById('courier-map-frame');
+    var courierMapTitle = document.getElementById('courier-map-title');
+    var courierMapHint = document.getElementById('courier-map-hint');
+    var courierMapLinks = document.getElementById('courier-map-links');
+    var courierMapPoints = document.getElementById('courier-map-points');
     var countryEl = document.getElementById('shipping_country');
     var postalEl = document.getElementById('shipping_postal_code');
+    var useSavedAddressEl = document.getElementById('use_saved_address');
+    var shippingAddressEl = document.getElementById('shipping_address');
+    var shippingCityEl = document.getElementById('shipping_city');
+    var shippingLabelEl = document.getElementById('shipping_label');
+    var map = null;
+    var mapLayer = null;
+
+    if (typeof L !== 'undefined' && courierMapFrame) {
+        map = L.map(courierMapFrame, {
+            zoomControl: true,
+            scrollWheelZoom: false
+        });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+        mapLayer = L.layerGroup().addTo(map);
+    }
+
+    function normalizeCountry(country) {
+        var keys = Object.keys(countryCouriers || {});
+        var target = (country || '').trim().toLowerCase();
+        for (var i = 0; i < keys.length; i++) {
+            if (keys[i].toLowerCase() === target) {
+                return keys[i];
+            }
+        }
+        return keys.length ? keys[0] : 'Cyprus';
+    }
+
+    function normalizeKey(value) {
+        return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    }
+
+    function selectedCountry() {
+        return normalizeCountry(countryEl ? countryEl.value : '');
+    }
 
     function selectedSpeed() {
         var checked = document.querySelector('input[name="shipping_speed"]:checked');
         return checked ? checked.value : 'standard';
     }
 
-    function updateTotals() {
-        var shippingCost = 0;
-        if (subtotal < freeThreshold) {
-            var courier = courierEl ? courierEl.value : '';
-            var speed = selectedSpeed();
-            if (shippingRates[courier] && typeof shippingRates[courier][speed] !== 'undefined') {
-                shippingCost = Number(shippingRates[courier][speed]) || 0;
-            }
+    function selectedMode() {
+        var checked = document.querySelector('input[name="fulfillment_mode"]:checked');
+        return checked ? checked.value : 'delivery';
+    }
+
+    function getCountryRates(country) {
+        return shippingRatesByCountry[country] || { standard: 0, express: 0 };
+    }
+
+    function formatMoney(value) {
+        return '\u20AC' + Number(value || 0).toFixed(2);
+    }
+
+    function shippingCost(country, speed) {
+        if (subtotal >= freeThreshold) {
+            return 0;
         }
-        var total = subtotal + shippingCost;
-        if (shippingOut) shippingOut.textContent = shippingCost === 0 ? 'FREE' : ('€' + shippingCost.toFixed(2));
+        var rates = getCountryRates(country);
+        return Number(rates[speed] || 0);
+    }
+
+    function updateTotals() {
+        var country = selectedCountry();
+        var speed = selectedSpeed();
+        var currentShippingCost = shippingCost(country, speed);
+        if (shippingOut) shippingOut.textContent = currentShippingCost === 0 ? 'FREE' : formatMoney(currentShippingCost);
+        var total = Math.max(0, subtotal - discount + currentShippingCost);
         if (totalOut) totalOut.textContent = total.toFixed(2);
         if (btnTotalOut) btnTotalOut.textContent = total.toFixed(2);
+    }
+
+    function updateSpeedLabels() {
+        var country = selectedCountry();
+        var rates = getCountryRates(country);
+        var freeText = '(FREE over \u20AC' + Number(freeThreshold).toFixed(0) + ')';
+        if (standardCostLabelEl) {
+            standardCostLabelEl.textContent = subtotal >= freeThreshold ? freeText : '(' + formatMoney(rates.standard || 0) + ')';
+        }
+        if (expressCostLabelEl) {
+            expressCostLabelEl.textContent = subtotal >= freeThreshold ? freeText : '(' + formatMoney(rates.express || 0) + ')';
+        }
+    }
+
+    function refreshCourierOptions() {
+        if (!courierEl) {
+            return;
+        }
+
+        var country = selectedCountry();
+        var previous = courierEl.value;
+        var options = countryCouriers[country] || {};
+        var keys = Object.keys(options);
+
+        courierEl.innerHTML = '';
+        var placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'Select';
+        courierEl.appendChild(placeholder);
+
+        keys.forEach(function (code, index) {
+            var option = document.createElement('option');
+            option.value = code;
+            option.textContent = options[code];
+            if (code === previous || (!previous && index === 0)) {
+                option.selected = true;
+            }
+            courierEl.appendChild(option);
+        });
+
+        if (!courierEl.value && keys.length > 0) {
+            courierEl.value = keys[0];
+        }
+    }
+
+    function getCityCenter(country, cityValue) {
+        var lookup = cityCenters[country] || {};
+        var key = normalizeKey(cityValue);
+        if (key !== '' && lookup[key]) {
+            return lookup[key];
+        }
+        return null;
+    }
+
+    function getPostalCenter(country, postalValue) {
+        var digits = String(postalValue || '').replace(/\D/g, '');
+        if (digits === '') {
+            return null;
+        }
+
+        if (country === 'Cyprus') {
+            var first = Number(digits.charAt(0));
+            if (first === 1 || first === 2) return cityCenters.Cyprus.nicosia;
+            if (first === 3 || first === 4) return cityCenters.Cyprus.limassol;
+            if (first === 8) return cityCenters.Cyprus.paphos;
+            if (first === 5 || first === 6 || first === 7) return cityCenters.Cyprus.larnaca;
+            return cityCenters.Cyprus.nicosia;
+        }
+
+        if (country === 'Greece') {
+            var prefix = Number(digits.slice(0, 2));
+            if (prefix >= 10 && prefix <= 19) return cityCenters.Greece.athens;
+            if (prefix >= 20 && prefix <= 29) return cityCenters.Greece.patras;
+            if (prefix >= 30 && prefix <= 39) return cityCenters.Greece.volos;
+            if (prefix >= 40 && prefix <= 43) return cityCenters.Greece.larissa;
+            if (prefix >= 45 && prefix <= 46) return cityCenters.Greece.ioannina;
+            if (prefix >= 54 && prefix <= 57) return cityCenters.Greece.thessaloniki;
+            if (prefix >= 70 && prefix <= 72) return cityCenters.Greece.heraklion;
+            if (prefix === 73) return cityCenters.Greece.chania;
+            if (prefix === 74) return cityCenters.Greece.heraklion;
+            return cityCenters.Greece.athens;
+        }
+
+        return null;
+    }
+
+    function resolveTargetPoint(country) {
+        var cityPoint = getCityCenter(country, shippingCityEl ? shippingCityEl.value : '');
+        if (cityPoint) {
+            return cityPoint;
+        }
+
+        var postalPoint = getPostalCenter(country, postalEl ? postalEl.value : '');
+        if (postalPoint) {
+            return postalPoint;
+        }
+
+        return countryDefaults[country] || { lat: 35.14, lng: 33.36 };
+    }
+
+    function toRad(deg) {
+        return deg * (Math.PI / 180);
+    }
+
+    function haversineKm(a, b) {
+        var earth = 6371;
+        var dLat = toRad(b.lat - a.lat);
+        var dLng = toRad(b.lng - a.lng);
+        var lat1 = toRad(a.lat);
+        var lat2 = toRad(b.lat);
+        var h = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1) * Math.cos(lat2) *
+            Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        return 2 * earth * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+    }
+
+    function pointKey(point) {
+        return [point.name, point.city, point.postal].join('|');
+    }
+
+    function findClosestPoint(points, targetPoint) {
+        if (!Array.isArray(points) || points.length === 0) {
+            return null;
+        }
+        if (!targetPoint) {
+            return points[0];
+        }
+
+        var closest = points[0];
+        var shortest = Infinity;
+        points.forEach(function (point) {
+            var distance = haversineKm(targetPoint, point);
+            if (distance < shortest) {
+                shortest = distance;
+                closest = point;
+            }
+        });
+        return closest;
+    }
+
+    function formatPointLabel(point) {
+        if (!point) return '';
+        return point.name + ' - ' + point.city + ' ' + point.postal;
+    }
+
+    function buildCourierConfig() {
+        var country = selectedCountry();
+        var courier = courierEl ? courierEl.value : '';
+        var mode = selectedMode();
+        var courierOptions = countryCouriers[country] || {};
+
+        if (!courier || !courierOptions[courier]) {
+            courier = Object.keys(courierOptions)[0] || '';
+        }
+
+        var base = courier ? mapConfigs[courier] : null;
+        if (!base) {
+            return {
+                title: 'Courier Pickup Spots',
+                hint: 'Select a courier to preview pickup spots.',
+                color: '#8a4dd6',
+                links: [],
+                points: [],
+                closestPoint: null,
+                mode: mode,
+                coverage: countryBounds[country] || null
+            };
+        }
+
+        var points = (base.points || []).filter(function (point) {
+            return normalizeCountry(point.country || country) === country;
+        });
+
+        var target = resolveTargetPoint(country);
+        var closest = findClosestPoint(points, target);
+        var mapPoints = points.slice();
+
+        if (mode === 'delivery') {
+            mapPoints = closest ? [closest] : (points.length > 0 ? [points[0]] : []);
+        }
+
+        return {
+            title: base.title,
+            hint: mode === 'delivery'
+                ? 'Showing the closest pickup point for the selected courier.'
+                : 'Showing pickup points for the selected courier.',
+            color: base.color,
+            links: base.links || [],
+            points: mapPoints,
+            closestPoint: closest,
+            mode: mode,
+            coverage: countryBounds[country] || null
+        };
+    }
+
+    function renderMap(config) {
+        if (courierMapTitle) courierMapTitle.textContent = config.title || 'Courier Pickup Spots';
+        if (courierMapHint) courierMapHint.textContent = config.hint || '';
+
+        if (courierMapLinks) {
+            courierMapLinks.innerHTML = '';
+            (config.links || []).forEach(function (link) {
+                var a = document.createElement('a');
+                a.href = link.href;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                a.textContent = link.label;
+                courierMapLinks.appendChild(a);
+            });
+        }
+
+        if (courierMapPoints) {
+            courierMapPoints.innerHTML = '';
+
+            if (!config.points || config.points.length === 0) {
+                var emptyChip = document.createElement('span');
+                emptyChip.textContent = 'No pickup points available for this courier.';
+                courierMapPoints.appendChild(emptyChip);
+            } else if (config.mode === 'delivery' && config.closestPoint) {
+                var closestOnly = document.createElement('span');
+                closestOnly.classList.add('is-closest');
+                closestOnly.textContent = 'Closest: ' + formatPointLabel(config.closestPoint);
+                courierMapPoints.appendChild(closestOnly);
+            } else {
+                var closestKey = config.closestPoint ? pointKey(config.closestPoint) : '';
+                (config.points || []).forEach(function (point) {
+                    var chip = document.createElement('span');
+                    if (closestKey !== '' && pointKey(point) === closestKey) {
+                        chip.classList.add('is-closest');
+                        chip.textContent = formatPointLabel(point) + ' (Closest)';
+                    } else {
+                        chip.textContent = formatPointLabel(point);
+                    }
+                    courierMapPoints.appendChild(chip);
+                });
+            }
+        }
+
+        if (!map || !mapLayer) {
+            return;
+        }
+
+        mapLayer.clearLayers();
+        var bounds = [];
+
+        (config.points || []).forEach(function (point) {
+            var marker = L.circleMarker([point.lat, point.lng], {
+                radius: 6,
+                color: config.color || '#8a4dd6',
+                fillColor: '#ffffff',
+                fillOpacity: 1,
+                weight: 2
+            });
+            marker.bindPopup('<strong>' + point.name + '</strong><br>' + point.city + ' ' + point.postal + ', ' + point.country);
+            marker.addTo(mapLayer);
+            bounds.push([point.lat, point.lng]);
+        });
+
+        if (bounds.length === 1) {
+            map.setView(bounds[0], 11);
+        } else if (bounds.length > 1) {
+            map.fitBounds(bounds, { padding: [18, 18] });
+        } else {
+            map.setView([35.15, 33.35], 6);
+        }
+    }
+
+    function updateCourierMap() {
+        var config = buildCourierConfig();
+        renderMap(config);
     }
 
     function getPostalRule(country) {
@@ -791,18 +1830,10 @@ if (file_exists($headerPath)) {
             };
         }
 
-        if (country === 'Greece') {
-            return {
-                pattern: '[0-9]{5}',
-                maxLength: 5,
-                error: 'Greece postal code must be exactly 5 digits.'
-            };
-        }
-
         return {
-            pattern: '[0-9]{4,5}',
+            pattern: '[0-9]{5}',
             maxLength: 5,
-            error: 'Postal code must be 4 or 5 digits.'
+            error: 'Greece postal code must be exactly 5 digits.'
         };
     }
 
@@ -826,7 +1857,7 @@ if (file_exists($headerPath)) {
             return true;
         }
 
-        var country = countryEl ? countryEl.value : '';
+        var country = selectedCountry();
         var rule = getPostalRule(country);
         var isValid = new RegExp('^' + rule.pattern + '$').test(code);
         postalEl.setCustomValidity(isValid ? '' : rule.error);
@@ -835,7 +1866,7 @@ if (file_exists($headerPath)) {
 
     function applyPostalRule() {
         if (!postalEl) return;
-        var country = countryEl ? countryEl.value : '';
+        var country = selectedCountry();
         var rule = getPostalRule(country);
         postalEl.maxLength = rule.maxLength;
         postalEl.setAttribute('pattern', rule.pattern);
@@ -844,19 +1875,97 @@ if (file_exists($headerPath)) {
         validatePostalCode();
     }
 
-    if (courierEl) courierEl.addEventListener('change', updateTotals);
-    speedEls.forEach(function (el) { el.addEventListener('change', updateTotals); });
-    if (countryEl) countryEl.addEventListener('change', applyPostalRule);
+    function applySavedAddress(forceFill) {
+        if (!useSavedAddressEl || !useSavedAddressEl.checked) {
+            return;
+        }
+        if (!defaultAddress) {
+            return;
+        }
+
+        var savedCountry = normalizeCountry(defaultAddress.country || '');
+        if (countryEl && (forceFill || !countryEl.value)) {
+            countryEl.value = savedCountry;
+        }
+        if (shippingAddressEl && defaultAddress.address && (forceFill || shippingAddressEl.value.trim() === '')) {
+            shippingAddressEl.value = defaultAddress.address;
+        }
+        if (shippingCityEl && defaultAddress.city && (forceFill || shippingCityEl.value.trim() === '')) {
+            shippingCityEl.value = defaultAddress.city;
+        }
+        if (postalEl && defaultAddress.postal_code && (forceFill || postalEl.value.trim() === '')) {
+            postalEl.value = String(defaultAddress.postal_code).replace(/\D/g, '');
+        }
+        if (shippingLabelEl && defaultAddress.label && (forceFill || shippingLabelEl.value.trim() === '')) {
+            shippingLabelEl.value = defaultAddress.label;
+        }
+
+        refreshCourierOptions();
+        updateSpeedLabels();
+        applyPostalRule();
+        updateTotals();
+        updateCourierMap();
+    }
+
+    if (useSavedAddressEl) {
+        useSavedAddressEl.addEventListener('change', function () {
+            if (useSavedAddressEl.checked) {
+                applySavedAddress(true);
+            }
+        });
+    }
+
+    if (countryEl) {
+        countryEl.addEventListener('change', function () {
+            refreshCourierOptions();
+            updateSpeedLabels();
+            applyPostalRule();
+            updateTotals();
+            updateCourierMap();
+        });
+    }
+
+    if (courierEl) {
+        courierEl.addEventListener('change', function () {
+            updateTotals();
+            updateCourierMap();
+        });
+    }
+
+    speedEls.forEach(function (el) {
+        el.addEventListener('change', function () {
+            updateTotals();
+            updateCourierMap();
+        });
+    });
+
+    modeEls.forEach(function (el) {
+        el.addEventListener('change', updateCourierMap);
+    });
+
     if (postalEl) {
         postalEl.addEventListener('input', function () {
             sanitizePostalInput();
             validatePostalCode();
+            updateCourierMap();
         });
-        postalEl.addEventListener('blur', validatePostalCode);
+        postalEl.addEventListener('blur', function () {
+            validatePostalCode();
+            updateCourierMap();
+        });
     }
 
+    if (shippingCityEl) {
+        shippingCityEl.addEventListener('input', updateCourierMap);
+        shippingCityEl.addEventListener('blur', updateCourierMap);
+    }
+
+    refreshCourierOptions();
+    updateSpeedLabels();
     applyPostalRule();
     updateTotals();
+    applySavedAddress(false);
+    updateCourierMap();
 })();
 </script>
 <?php
@@ -867,4 +1976,6 @@ if (file_exists($footerPath)) {
     echo "</body></html>";
 }
 ?>
+
+
 

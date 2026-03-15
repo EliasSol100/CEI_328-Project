@@ -46,6 +46,59 @@ function notifyAdminNewOrder(mysqli $conn, string $message): void {
 }
 
 /**
+ * Ensure required shipping/order columns exist on orders table.
+ *
+ * @param mysqli $conn
+ * @return void
+ */
+function ensureOrderShippingSchema(mysqli $conn): void {
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $requiredColumns = [
+        'shippingAddress' => "ALTER TABLE orders ADD COLUMN shippingAddress VARCHAR(255) NULL AFTER email",
+        'shippingCity' => "ALTER TABLE orders ADD COLUMN shippingCity VARCHAR(120) NULL AFTER shippingAddress",
+        'shippingPostalCode' => "ALTER TABLE orders ADD COLUMN shippingPostalCode VARCHAR(20) NULL AFTER shippingCity",
+        'shippingCountry' => "ALTER TABLE orders ADD COLUMN shippingCountry VARCHAR(120) NULL AFTER shippingPostalCode",
+        'shippingLabel' => "ALTER TABLE orders ADD COLUMN shippingLabel VARCHAR(120) NULL AFTER shippingCountry",
+        'courierCode' => "ALTER TABLE orders ADD COLUMN courierCode VARCHAR(60) NULL AFTER shippingLabel",
+        'shippingPriority' => "ALTER TABLE orders ADD COLUMN shippingPriority VARCHAR(20) NULL AFTER courierCode",
+        'fulfillmentMode' => "ALTER TABLE orders ADD COLUMN fulfillmentMode VARCHAR(20) NULL AFTER shippingPriority",
+    ];
+
+    foreach ($requiredColumns as $columnName => $alterSql) {
+        $safeCol = $conn->real_escape_string($columnName);
+        $check = $conn->query("SHOW COLUMNS FROM orders LIKE '{$safeCol}'");
+        $exists = ($check && $check->num_rows > 0);
+        if (!$exists) {
+            $conn->query($alterSql);
+        }
+    }
+}
+
+/**
+ * Convert internal courier code into user-friendly label.
+ *
+ * @param string $courierCode
+ * @return string
+ */
+function courierLabelFromCode(string $courierCode): string {
+    $map = [
+        'akis_express' => 'Akis Express',
+        'boxnow' => 'BoxNow',
+        'acs' => 'ACS',
+        'elta_courier' => 'ELTA Courier',
+        'speedex' => 'Speedex',
+        'geniki' => 'Geniki Taxydromiki',
+    ];
+    $key = strtolower(trim($courierCode));
+    return $map[$key] ?? ($courierCode !== '' ? $courierCode : 'Not specified');
+}
+
+/**
  * Generate next order number using format ORD-YYYY-XXX.
  *
  * @param mysqli $conn
@@ -79,6 +132,8 @@ function generateOrderNumber(mysqli $conn): string {
  * @throws Exception
  */
 function placeOrder(mysqli $conn, array $input): array {
+    ensureOrderShippingSchema($conn);
+
     $paymentConfirmed = (bool)($input['payment_confirmed'] ?? false);
     if (!$paymentConfirmed) {
         throw new InvalidArgumentException('Payment confirmation is required before placing an order.');
@@ -101,19 +156,32 @@ function placeOrder(mysqli $conn, array $input): array {
     $userID = isset($input['user_id']) && (int)$input['user_id'] > 0 ? (int)$input['user_id'] : null;
     $isGuestFlag = (int)($input['is_guest'] ?? ($userID ? 0 : 1));
     $email = trim((string)($input['email'] ?? ''));
-    $status = trim((string)($input['order_status'] ?? 'accepted'));
+    $status = trim((string)($input['order_status'] ?? 'pending'));
+    $shippingAddress = trim((string)($input['shipping_address'] ?? ''));
+    $shippingCity = trim((string)($input['shipping_city'] ?? ''));
+    $shippingPostalCode = trim((string)($input['shipping_postal_code'] ?? ''));
+    $shippingCountry = trim((string)($input['shipping_country'] ?? ''));
+    $shippingLabel = trim((string)($input['shipping_label'] ?? ''));
+    $courier = trim((string)($input['courier'] ?? ''));
+    $shippingPriority = trim((string)($input['shipping_priority'] ?? 'standard'));
+    $fulfillmentMode = strtolower(trim((string)($input['fulfillment_mode'] ?? 'delivery')));
+    if ($fulfillmentMode !== 'pickup') {
+        $fulfillmentMode = 'delivery';
+    }
 
     // 1) Order header
     $stmt = $conn->prepare(
         "INSERT INTO orders (
-            orderNumber, userID, isGuestFlag, email, status, subtotal, discountTotal, shippingCost, totalAmount
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            orderNumber, userID, isGuestFlag, email, status,
+            subtotal, discountTotal, shippingCost, totalAmount,
+            shippingAddress, shippingCity, shippingPostalCode, shippingCountry, shippingLabel, courierCode, shippingPriority, fulfillmentMode
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
     if (!$stmt) {
         throw new Exception('Failed to prepare order insert: ' . $conn->error);
     }
     $stmt->bind_param(
-        "siissdddd",
+        "siissddddssssssss",
         $orderNumber,
         $userID,
         $isGuestFlag,
@@ -122,7 +190,15 @@ function placeOrder(mysqli $conn, array $input): array {
         $subtotal,
         $discountTotal,
         $shippingCost,
-        $totalAmount
+        $totalAmount,
+        $shippingAddress,
+        $shippingCity,
+        $shippingPostalCode,
+        $shippingCountry,
+        $shippingLabel,
+        $courier,
+        $shippingPriority,
+        $fulfillmentMode
     );
     if (!$stmt->execute()) {
         throw new Exception('Failed to insert order header: ' . $stmt->error);
@@ -204,10 +280,13 @@ function placeOrder(mysqli $conn, array $input): array {
     $payStmt->close();
 
     // 4) Shipment summary
-    // Schema has courierName but no dedicated priority field, so we append priority in label.
-    $courier = trim((string)($input['courier'] ?? ''));
-    $shippingPriority = trim((string)($input['shipping_priority'] ?? 'standard'));
-    $courierLabel = $courier !== '' ? ($courier . ' - ' . $shippingPriority) : null;
+    $courierLabel = courierLabelFromCode($courier);
+    $modeLabel = $fulfillmentMode === 'pickup' ? 'Pickup Point' : 'Delivery';
+    if ($shippingPriority !== '') {
+        $courierLabel .= ' - ' . $modeLabel . ' (' . $shippingPriority . ')';
+    } else {
+        $courierLabel .= ' - ' . $modeLabel;
+    }
 
     $shipStmt = $conn->prepare(
         "INSERT INTO shipments (orderID, courierName, shippingCost) VALUES (?, ?, ?)"
@@ -233,8 +312,14 @@ function placeOrder(mysqli $conn, array $input): array {
         'total' => $totalAmount,
         'customer_email' => $email,
         'shipping_cost' => $shippingCost,
+        'shipping_address' => $shippingAddress,
+        'shipping_city' => $shippingCity,
+        'shipping_postal_code' => $shippingPostalCode,
+        'shipping_country' => $shippingCountry,
+        'shipping_label' => $shippingLabel,
         'courier' => $courier,
         'shipping_priority' => $shippingPriority,
+        'fulfillment_mode' => $fulfillmentMode,
     ]);
 
     return [
@@ -266,9 +351,20 @@ function sendOrderConfirmationEmail(array $payload): array {
     $orderId = (int)($payload['order_id'] ?? 0);
     $total = (float)($payload['total'] ?? 0);
     $shippingCost = (float)($payload['shipping_cost'] ?? 0);
-    $courier = trim((string)($payload['courier'] ?? ''));
+    $shippingAddress = trim((string)($payload['shipping_address'] ?? ''));
+    $shippingCity = trim((string)($payload['shipping_city'] ?? ''));
+    $shippingPostalCode = trim((string)($payload['shipping_postal_code'] ?? ''));
+    $shippingCountry = trim((string)($payload['shipping_country'] ?? ''));
+    $shippingLabel = trim((string)($payload['shipping_label'] ?? ''));
+    $courier = courierLabelFromCode(trim((string)($payload['courier'] ?? '')));
     $shippingPriority = trim((string)($payload['shipping_priority'] ?? 'standard'));
+    $fulfillmentMode = strtolower(trim((string)($payload['fulfillment_mode'] ?? 'delivery')));
+    $deliveryLabel = $fulfillmentMode === 'pickup' ? 'Pickup Point' : 'Delivery';
     $items = is_array($payload['items'] ?? null) ? $payload['items'] : [];
+    $shippingLine = trim($shippingAddress . ', ' . $shippingCity . ', ' . $shippingPostalCode . ', ' . $shippingCountry, " ,");
+    if ($shippingLine === '') {
+        $shippingLine = 'Not specified';
+    }
 
     require_once __DIR__ . '/../PHPMailer-master/src/Exception.php';
     require_once __DIR__ . '/../PHPMailer-master/src/PHPMailer.php';
@@ -291,7 +387,10 @@ function sendOrderConfirmationEmail(array $payload): array {
         "Thank you for your order at Athina E-Shop.\n\n" .
         "Order Number: " . ($orderNumber !== '' ? $orderNumber : ('#' . $orderId)) . "\n" .
         "Shipping: €" . number_format($shippingCost, 2) . "\n" .
+        "Delivery Option: {$deliveryLabel}\n" .
         "Courier: " . ($courier !== '' ? "{$courier} ({$shippingPriority})" : 'Not specified') . "\n" .
+        ($shippingLabel !== '' ? "Address Label: {$shippingLabel}\n" : '') .
+        "Shipping Address: " . $shippingLine . "\n" .
         "Total Paid: €" . number_format($total, 2) . "\n\n" .
         "Items:\n" . implode("\n", $itemLines) . "\n\n" .
         "We will notify you when your order status changes.\n\n" .
@@ -362,8 +461,19 @@ function sendAdminOrderNotificationEmail(mysqli $conn, array $payload): array {
     $total = (float)($payload['total'] ?? 0);
     $customerEmail = trim((string)($payload['customer_email'] ?? ''));
     $shippingCost = (float)($payload['shipping_cost'] ?? 0);
-    $courier = trim((string)($payload['courier'] ?? ''));
+    $shippingAddress = trim((string)($payload['shipping_address'] ?? ''));
+    $shippingCity = trim((string)($payload['shipping_city'] ?? ''));
+    $shippingPostalCode = trim((string)($payload['shipping_postal_code'] ?? ''));
+    $shippingCountry = trim((string)($payload['shipping_country'] ?? ''));
+    $shippingLabel = trim((string)($payload['shipping_label'] ?? ''));
+    $courier = courierLabelFromCode(trim((string)($payload['courier'] ?? '')));
     $shippingPriority = trim((string)($payload['shipping_priority'] ?? 'standard'));
+    $fulfillmentMode = strtolower(trim((string)($payload['fulfillment_mode'] ?? 'delivery')));
+    $deliveryLabel = $fulfillmentMode === 'pickup' ? 'Pickup Point' : 'Delivery';
+    $shippingLine = trim($shippingAddress . ', ' . $shippingCity . ', ' . $shippingPostalCode . ', ' . $shippingCountry, " ,");
+    if ($shippingLine === '') {
+        $shippingLine = 'Not specified';
+    }
 
     $admins = [];
     $res = $conn->query("
@@ -393,7 +503,10 @@ function sendAdminOrderNotificationEmail(mysqli $conn, array $payload): array {
         "Order Number: " . ($orderNumber !== '' ? $orderNumber : ('#' . $orderId)) . "\n" .
         "Total: €" . number_format($total, 2) . "\n" .
         "Shipping: €" . number_format($shippingCost, 2) . "\n" .
+        "Delivery Option: {$deliveryLabel}\n" .
         "Courier: " . ($courier !== '' ? "{$courier} ({$shippingPriority})" : 'Not specified') . "\n" .
+        ($shippingLabel !== '' ? "Address Label: {$shippingLabel}\n" : '') .
+        "Shipping Address: " . $shippingLine . "\n" .
         "Customer email: " . ($customerEmail !== '' ? $customerEmail : 'Guest checkout') . "\n\n" .
         "Open the admin dashboard to process this order.";
 
