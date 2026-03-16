@@ -367,6 +367,13 @@ if (!$product) {
     exit;
 }
 
+// Keep discontinued/internal statuses out of direct-link access for storefront users.
+$publicProductStatuses = ["active", "low_stock", "out_of_stock", "made_to_order"];
+if (!$isAdmin && !in_array((string)($product["cartStatus"] ?? ""), $publicProductStatuses, true)) {
+    header("Location: shop.php");
+    exit;
+}
+
 $baseProductPrice = (float)($product["basePrice"] ?? 0);
 $productCategory = trim((string)($product["category"] ?? ""));
 $storedCouponCode = normalizeCouponCode((string)($_SESSION["cart_coupon_code"] ?? ""));

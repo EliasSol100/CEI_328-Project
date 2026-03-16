@@ -146,6 +146,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
+    if ($action === 'toggle_visibility') {
+        $id = (int)($_POST['productID'] ?? 0);
+        if ($id > 0) {
+            $currentStatus = null;
+            $productName = 'Product';
+
+            $stCurrent = mysqli_prepare($conn, "SELECT nameEN, cartStatus FROM products WHERE productID = ? LIMIT 1");
+            if ($stCurrent) {
+                mysqli_stmt_bind_param($stCurrent, 'i', $id);
+                mysqli_stmt_execute($stCurrent);
+                $resCurrent = mysqli_stmt_get_result($stCurrent);
+                if ($resCurrent && ($rowCurrent = mysqli_fetch_assoc($resCurrent))) {
+                    $productName = trim((string)($rowCurrent['nameEN'] ?? '')) ?: 'Product';
+                    $currentStatus = (string)($rowCurrent['cartStatus'] ?? '');
+                }
+                mysqli_stmt_close($stCurrent);
+            }
+
+            if ($currentStatus !== null) {
+                $nextStatus = ($currentStatus === 'discontinued') ? 'active' : 'discontinued';
+                $stUpdate = mysqli_prepare($conn, "UPDATE products SET cartStatus = ? WHERE productID = ?");
+                if ($stUpdate) {
+                    mysqli_stmt_bind_param($stUpdate, 'si', $nextStatus, $id);
+                    mysqli_stmt_execute($stUpdate);
+                    mysqli_stmt_close($stUpdate);
+
+                    if ($nextStatus === 'discontinued') {
+                        $flash = 'warn:' . $productName . ' is now hidden from the shop.';
+                    } else {
+                        $flash = 'ok:' . $productName . ' is now visible in the shop.';
+                    }
+                } else {
+                    $flash = 'error:Could not update product visibility.';
+                }
+            } else {
+                $flash = 'error:Product not found.';
+            }
+        } else {
+            $flash = 'error:Invalid product.';
+        }
+    }
+
     if ($action === 'delete') {
         $id = (int)($_POST['productID'] ?? 0);
 
@@ -289,6 +331,7 @@ $availStatus = [
     'low_stock'     => ['label' => 'low stock',     'badge' => 'badge-warning'],
     'out_of_stock'  => ['label' => 'out of stock',  'badge' => 'badge-red'],
     'made_to_order' => ['label' => 'made to order', 'badge' => 'badge-muted'],
+    'discontinued'  => ['label' => 'hidden',        'badge' => 'badge-muted'],
 ];
 
 /* ── Images keyed by productID (all photos, up to 4) ── */
@@ -307,6 +350,7 @@ $statuses = [
     'low_stock'     => 'Low Stock',
     'out_of_stock'  => 'Out of Stock',
     'made_to_order' => 'Made to Order',
+    'discontinued'  => 'Discontinued',
 ];
 $statusFilterOptions = [
     ''              => 'All Statuses',
@@ -405,6 +449,12 @@ $statusFilterOptions = [
           <tbody>
             <?php foreach ($products as $p): ?>
               <?php $st = $availStatus[$p['cartStatus']] ?? ['label'=>$p['cartStatus'],'badge'=>'badge-muted']; ?>
+              <?php
+                $isHidden = ((string)$p['cartStatus'] === 'discontinued');
+                $togglePrompt = $isHidden
+                    ? ('Show ' . $p['nameEN'] . ' in shop?')
+                    : ('Hide ' . $p['nameEN'] . ' from shop?');
+              ?>
               <tr>
                 <td>
                   <div class="prod-thumb">
@@ -429,6 +479,16 @@ $statusFilterOptions = [
                   <a href="?edit=<?= $p['productID'] ?><?= ($searchTerm !== '' || $statusFilter !== '') ? '&' . http_build_query(['q' => $searchTerm, 'status_filter' => $statusFilter]) : '' ?>" class="btn-edit">
                     <i class="fas fa-pen"></i> Edit
                   </a>
+                  <form method="POST" style="display:inline"
+                        onsubmit="return confirmDelete('<?= htmlspecialchars(addslashes($togglePrompt), ENT_QUOTES) ?>')">
+                    <input type="hidden" name="action" value="toggle_visibility">
+                    <input type="hidden" name="productID" value="<?= $p['productID'] ?>">
+                    <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
+                    <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
+                    <button type="submit" class="btn-secondary">
+                      <i class="fas <?= $isHidden ? 'fa-eye' : 'fa-eye-slash' ?>"></i> <?= $isHidden ? 'Show' : 'Hide' ?>
+                    </button>
+                  </form>
                   <form method="POST" style="display:inline"
                         onsubmit="return confirmDelete('Delete <?= htmlspecialchars(addslashes($p['nameEN'])) ?>?')">
                     <input type="hidden" name="action" value="delete">
