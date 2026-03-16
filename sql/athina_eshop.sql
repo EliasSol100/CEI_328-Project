@@ -135,13 +135,117 @@ CREATE TABLE `colors` (
 -- Dumping data for table `colors`
 --
 
-INSERT INTO `colors` (`colorID`, `colorName`, `globalInventoryAvailable`, `isActive`, `updatedAt`) VALUES
-(1, 'Cream White', 50, 1, '2026-03-02 21:39:36'),
-(2, 'Soft Pink', 35, 1, '2026-03-01 15:12:21'),
-(3, 'Mint Green', 0, 0, '2026-03-01 15:12:21'),
-(4, 'Coral', 0, 0, '2026-03-02 21:39:20'),
-(5, 'Sky Blue', 20, 1, '2026-03-01 15:12:21'),
-(6, 'Lavender', 15, 1, '2026-03-01 15:12:21');
+INSERT INTO `colors` (`colorID`, `colorName`, `globalInventoryAvailable`, `isActive`) VALUES
+-- Whites / Creams / Beiges
+(55,  'White',           50, 1),
+(450, 'Off White',       50, 1),
+(62,  'Cream',           50, 1),
+(1,   'Vanilla',         50, 1),
+(310, 'Warm Beige',      50, 1),
+-- Peach / Nude / Tan
+(382, 'Peach Blush',     50, 1),
+(599, 'Camel',           50, 1),
+(256, 'Sand',            50, 1),
+(368, 'Tawny Brown',     50, 1),
+(354, 'Copper Rose',     50, 1),
+-- Pinks / Mauves
+(161, 'Salmon',          50, 1),
+(142, 'Dusty Mauve',     50, 1),
+(184, 'Baby Pink',       50, 1),
+(185, 'Light Rose',      50, 1),
+(191, 'Candy Pink',      50, 1),
+(157, 'Hot Pink',        50, 1),
+-- Browns
+(534, 'Chocolate Brown', 50, 1),
+(572, 'Dark Chocolate',  50, 1),
+-- Purples / Lilacs
+(851, 'Purple',          50, 1),
+(27,  'Soft Orchid',     50, 1),
+(682, 'Soft Lilac',      50, 1),
+-- Blues
+(224, 'Ice Blue',        50, 1),
+(40,  'Baby Blue',       50, 1),
+(183, 'Powder Blue',     50, 1),
+(418, 'Slate Blue',      50, 1),
+(141, 'Royal Blue',      50, 1),
+(58,  'Navy',            50, 1),
+(237, 'Cornflower Blue', 50, 1),
+-- Greys
+(344, 'Silver Grey',     50, 1),
+(119, 'Medium Grey',     50, 1),
+-- Greens / Teals / Mints
+(19,  'Mint',            50, 1),
+(463, 'Sage Green',      50, 1),
+(287, 'Teal',            50, 1),
+(138, 'Olive Green',     50, 1),
+(485, 'Apple Green',     50, 1),
+(847, 'Deep Teal',       50, 1),
+(954, 'Kelly Green',     50, 1),
+-- Yellows
+(250, 'Lemon Yellow',    50, 1),
+(216, 'Golden Yellow',   50, 1),
+(281, 'Mustard',         50, 1),
+-- Oranges
+(336, 'Orange',          50, 1),
+(408, 'Burnt Orange',    50, 1),
+(506, 'Warm Tan',        50, 1),
+-- Reds
+(56,  'Bright Red',      50, 1),
+(106, 'Crimson',         50, 1),
+(390, 'Burgundy',        50, 1),
+-- Black
+(60,  'Black',           50, 1);
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `yarn_types`
+--
+
+CREATE TABLE `yarn_types` (
+  `typeID`   int(11)      NOT NULL AUTO_INCREMENT,
+  `typeName` varchar(100) NOT NULL,
+  PRIMARY KEY (`typeID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `yarn_types`
+--
+
+INSERT INTO `yarn_types` (`typeName`) VALUES
+  ('Baby Best');
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `color_yarn_types`
+--
+
+CREATE TABLE `color_yarn_types` (
+  `colorID` int(11)  NOT NULL,
+  `typeID`  int(11)  NOT NULL,
+  `photo`   longblob DEFAULT NULL,
+  PRIMARY KEY (`colorID`, `typeID`),
+  FOREIGN KEY (`colorID`) REFERENCES `colors` (`colorID`) ON DELETE CASCADE,
+  FOREIGN KEY (`typeID`)  REFERENCES `yarn_types` (`typeID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `color_yarn_types`
+--
+
+-- typeID 1 = Baby Best
+INSERT INTO `color_yarn_types` (`colorID`, `typeID`) VALUES
+(55,  1), (450, 1), (62,  1), (1,   1), (310, 1),
+(382, 1), (599, 1), (256, 1), (368, 1), (354, 1),
+(161, 1), (142, 1), (184, 1), (185, 1), (191, 1),
+(157, 1), (534, 1), (572, 1), (851, 1), (27,  1),
+(682, 1), (224, 1), (40,  1), (183, 1), (418, 1),
+(141, 1), (58,  1), (237, 1), (344, 1), (119, 1),
+(19,  1), (463, 1), (287, 1), (138, 1), (485, 1),
+(847, 1), (954, 1), (250, 1), (216, 1), (281, 1),
+(336, 1), (408, 1), (506, 1), (56,  1), (106, 1),
+(390, 1), (60,  1);
 
 -- --------------------------------------------------------
 
