@@ -86,6 +86,12 @@ function ensureProductSalesOverridesSchema(mysqli $conn): void {
 
 ensureProductSalesOverridesSchema($conn);
 
+// Backfill the Selling Fast flag on older databases before shop queries use it.
+$sellingFastColumn = $conn->query("SHOW COLUMNS FROM products LIKE 'isSellingFast'");
+if ($sellingFastColumn && $sellingFastColumn->num_rows === 0) {
+    $conn->query("ALTER TABLE products ADD COLUMN isSellingFast TINYINT(1) NOT NULL DEFAULT 0");
+}
+
 // ---------------------------------------------
 // Wishlist handling (DB for logged-in, session for guests)
 // ---------------------------------------------
@@ -260,6 +266,7 @@ $sql = "
                    COALESCE(os.total_qty, 0) - COALESCE(pso.auto_sales_baseline, COALESCE(os.total_qty, 0))
                )
            END AS totalSales,
+           p.isSellingFast,
            GROUP_CONCAT(ph.imageID ORDER BY ph.imageID ASC SEPARATOR ',') AS imageIDs
     FROM products p
     LEFT JOIN photos ph ON ph.productID = p.productID
@@ -347,7 +354,7 @@ if ($revRes) {
     <title>Creations by Athina - Shop</title>
     <link rel="stylesheet" href="assets/styling/styles.css">
     <link rel="stylesheet" href="assets/styling/header.css?v=5">
-    <link rel="stylesheet" href="assets/styling/shopstyle.css">
+    <link rel="stylesheet" href="assets/styling/shopstyle.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/shopstyle.css') ?>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <style>
@@ -510,6 +517,9 @@ if ($revRes) {
                                  role="link"
                                  aria-label="View <?= htmlspecialchars($p['nameEN']) ?>">
                             <div class="shop-product-image">
+                                <?php if (!empty($p['isSellingFast'])): ?>
+                                <span class="shop-selling-fast-badge">Selling Fast</span>
+                                <?php endif; ?>
                                 <?php if (!empty($imageIDs)): ?>
                                 <div id="carousel-<?= $pid ?>" class="carousel slide shop-carousel" data-bs-ride="carousel" data-bs-interval="3000">
                                     <div class="carousel-inner">

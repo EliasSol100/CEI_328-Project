@@ -5,6 +5,12 @@ require_once __DIR__ . '/includes/db.php';
 $current_page = 'product_management';
 $flash = '';
 
+// Backfill the Selling Fast flag on older databases before the page uses it.
+$sellingFastColumn = mysqli_query($conn, "SHOW COLUMNS FROM products LIKE 'isSellingFast'");
+if ($sellingFastColumn && mysqli_num_rows($sellingFastColumn) === 0) {
+    mysqli_query($conn, "ALTER TABLE products ADD COLUMN isSellingFast TINYINT(1) NOT NULL DEFAULT 0");
+}
+
 /* ── Handle POST actions ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
@@ -33,6 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $status   = $_POST['cartStatus']  ?? 'active';
         $category = trim($_POST['category'] ?? '');
         $sku      = trim($_POST['sku']      ?? '');
+        $isSellingFast = isset($_POST['isSellingFast']) ? 1 : 0;
 
         if ($action === 'add') {
             if (empty($sku)) {
@@ -42,14 +49,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = mysqli_prepare(
                 $conn,
                 "INSERT INTO products
-                 (sku, nameEN, nameGR, descriptionEN, descriptionGR, basePrice, costPrice, inventory, cartStatus, category)
-                 VALUES (?,?,?,?,?,?,?,?,?,?)"
+                 (sku, nameEN, nameGR, descriptionEN, descriptionGR, basePrice, costPrice, inventory, cartStatus, category, isSellingFast)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?)"
             );
             // sku (s), nameEN (s), nameGR (s), descEN (s), descGR (s),
-            // basePrice (d), costPrice (d), inventory (i), cartStatus (s), category (s)
+            // basePrice (d), costPrice (d), inventory (i), cartStatus (s), category (s), isSellingFast (i)
             mysqli_stmt_bind_param(
                 $stmt,
-                'sssssddiss',
+                'sssssddissi',
                 $sku,
                 $nameEN,
                 $nameGR,
@@ -59,7 +66,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $cost,
                 $inv,
                 $status,
-                $category
+                $category,
+                $isSellingFast
             );
             mysqli_stmt_execute($stmt);
             $newProductID = mysqli_insert_id($conn);
@@ -92,14 +100,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      costPrice=?,
                      inventory=?,
                      cartStatus=?,
-                     category=?
+                     category=?,
+                     isSellingFast=?
                  WHERE productID=?"
             );
             // nameEN (s), nameGR (s), descEN (s), descGR (s),
-            // basePrice (d), costPrice (d), inventory (i), cartStatus (s), category (s), productID (i)
+            // basePrice (d), costPrice (d), inventory (i), cartStatus (s), category (s), isSellingFast (i), productID (i)
             mysqli_stmt_bind_param(
                 $stmt,
-                'ssssddissi',
+                'ssssddissii',
                 $nameEN,
                 $nameGR,
                 $descEN,
@@ -109,6 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $inv,
                 $status,
                 $category,
+                $isSellingFast,
                 $id
             );
             mysqli_stmt_execute($stmt);
@@ -442,6 +452,7 @@ $statusFilterOptions = [
               <th>Category</th>
               <th>Price</th>
               <th>Availability</th>
+              <th>Promotions</th>
               <th>Stock</th>
               <th style="text-align:right">Actions</th>
             </tr>
@@ -465,7 +476,14 @@ $statusFilterOptions = [
                     <?php endif; ?>
                   </div>
                 </td>
-                <td class="font-600"><?= htmlspecialchars($p['nameEN']) ?></td>
+                <td>
+                  <div class="font-600"><?= htmlspecialchars($p['nameEN']) ?></div>
+                  <?php if (!empty($p['isSellingFast'])): ?>
+                    <div style="margin-top:6px;">
+                      <span class="badge badge-orange">Selling Fast</span>
+                    </div>
+                  <?php endif; ?>
+                </td>
                 <td class="text-muted"><?= htmlspecialchars($p['category'] ?? '—') ?></td>
                 <td>
                   <span class="price-new">€<?= number_format($p['basePrice'],2) ?></span>
@@ -474,6 +492,13 @@ $statusFilterOptions = [
                   <?php endif; ?>
                 </td>
                 <td><span class="badge <?= $st['badge'] ?>"><?= $st['label'] ?></span></td>
+                <td>
+                  <?php if (!empty($p['isSellingFast'])): ?>
+                    <span class="badge badge-orange">Homepage</span>
+                  <?php else: ?>
+                    <span class="text-muted">â€”</span>
+                  <?php endif; ?>
+                </td>
                 <td><?= $p['cartStatus'] === 'made_to_order' ? 'N/A' : (int)$p['inventory'] ?></td>
                 <td style="text-align:right">
                   <a href="?edit=<?= $p['productID'] ?><?= ($searchTerm !== '' || $statusFilter !== '') ? '&' . http_build_query(['q' => $searchTerm, 'status_filter' => $statusFilter]) : '' ?>" class="btn-edit">
@@ -504,7 +529,7 @@ $statusFilterOptions = [
             <?php endforeach; ?>
             <?php if (empty($products)): ?>
               <tr>
-                <td colspan="7" class="text-muted" style="text-align:center;padding:32px 0;">
+                <td colspan="8" class="text-muted" style="text-align:center;padding:32px 0;">
                   <?= ($searchTerm !== '' || $statusFilter !== '')
                       ? 'No matching products found for your search.'
                       : 'No products yet. Click "Add Product" to get started.' ?>
@@ -590,6 +615,19 @@ $statusFilterOptions = [
           <label class="form-label">SKU</label>
           <input name="sku" class="form-input" placeholder="Auto-generated if blank">
         </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Homepage Promotion</label>
+        <label style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
+          <div>
+            <div style="font-weight:600;color:#111827;">Mark as Selling Fast</div>
+            <div class="text-sm text-muted">Highlighted products appear in the homepage Selling Fast section with a visual badge.</div>
+          </div>
+          <span class="toggle-wrap">
+            <input type="checkbox" name="isSellingFast" value="1">
+            <span class="toggle-slider"></span>
+          </span>
+        </label>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn-cancel" onclick="closeModal('modalAdd')">Cancel</button>
@@ -687,6 +725,19 @@ $statusFilterOptions = [
       <div class="form-group">
         <label class="form-label">Stock Quantity</label>
         <input name="inventory" type="number" min="0" class="form-input" value="<?= (int)$editProduct['inventory'] ?>">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Homepage Promotion</label>
+        <label style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
+          <div>
+            <div style="font-weight:600;color:#111827;">Mark as Selling Fast</div>
+            <div class="text-sm text-muted">Highlighted products appear in the homepage Selling Fast section with a visual badge.</div>
+          </div>
+          <span class="toggle-wrap">
+            <input type="checkbox" name="isSellingFast" value="1" <?= !empty($editProduct['isSellingFast']) ? 'checked' : '' ?>>
+            <span class="toggle-slider"></span>
+          </span>
+        </label>
       </div>
       <div class="modal-footer">
         <a href="product_management.php<?= ($searchTerm !== '' || $statusFilter !== '') ? '?' . http_build_query(['q' => $searchTerm, 'status_filter' => $statusFilter]) : '' ?>" class="btn-cancel">Cancel</a>

@@ -486,6 +486,7 @@ CREATE TABLE `products` (
   `basePrice` double NOT NULL DEFAULT 0,
   `costPrice` double NOT NULL DEFAULT 0,
   `cartStatus` varchar(30) NOT NULL DEFAULT 'active',
+  `isSellingFast` tinyint(1) NOT NULL DEFAULT 0,
   `hasVariants` tinyint(1) NOT NULL DEFAULT 0,
   `metaDescription` varchar(255) DEFAULT NULL,
   `category` varchar(100) DEFAULT NULL

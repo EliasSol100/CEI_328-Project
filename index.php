@@ -93,10 +93,70 @@ $GLOBALS['header_user_full_name'] = $fullName;
 $GLOBALS['header_user_initials']  = $userInitial;
 $GLOBALS['header_user_role']      = $role;
 
+// Backfill the Selling Fast flag on older databases before homepage queries use it.
+$sellingFastColumn = $conn->query("SHOW COLUMNS FROM products LIKE 'isSellingFast'");
+if ($sellingFastColumn && $sellingFastColumn->num_rows === 0) {
+    $conn->query("ALTER TABLE products ADD COLUMN isSellingFast TINYINT(1) NOT NULL DEFAULT 0");
+}
+
+function getOrCreateWishlistID($conn, $uid) {
+    $uid = (int)$uid;
+    $r = $conn->query("SELECT wishlistID FROM wishlists WHERE userID = $uid LIMIT 1");
+    if ($r && ($row = $r->fetch_assoc())) {
+        return (int)$row['wishlistID'];
+    }
+    $conn->query("INSERT INTO wishlists (userID) VALUES ($uid)");
+    return (int)$conn->insert_id;
+}
+
 // Simple wishlist state for homepage hearts (same as shop.php)
 $wishlist = isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])
     ? $_SESSION['wishlist']
     : [];
+
+$wishlistedProductIDs = [];
+if ($isLoggedIn && !empty($userId)) {
+    $wid = getOrCreateWishlistID($conn, (int)$userId);
+    $wishlistRes = $conn->query("SELECT productID FROM wishlist_items WHERE wishlistID = $wid");
+    if ($wishlistRes) {
+        while ($row = $wishlistRes->fetch_assoc()) {
+            $wishlistedProductIDs[] = (int)$row['productID'];
+        }
+    }
+} elseif (isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])) {
+    $wishlistedProductIDs = array_values(array_filter(array_map('intval', $_SESSION['wishlist'])));
+}
+
+$sellingFastProducts = [];
+$sellingFastSql = "
+    SELECT
+        p.productID,
+        p.nameEN,
+        p.basePrice,
+        p.inventory,
+        p.cartStatus,
+        GROUP_CONCAT(ph.imageID ORDER BY ph.imageID ASC SEPARATOR ',') AS imageIDs,
+        COALESCE(rv.review_count, 0) AS reviewCount,
+        COALESCE(rv.avg_rating, 0) AS avgRating
+    FROM products p
+    LEFT JOIN photos ph ON ph.productID = p.productID
+    LEFT JOIN (
+        SELECT productID, COUNT(*) AS review_count, ROUND(AVG(rating), 1) AS avg_rating
+        FROM reviews
+        GROUP BY productID
+    ) rv ON rv.productID = p.productID
+    WHERE p.isSellingFast = 1
+      AND p.cartStatus IN ('active', 'low_stock', 'out_of_stock', 'made_to_order')
+    GROUP BY p.productID
+    ORDER BY p.productID DESC
+    LIMIT 4
+";
+$sellingFastRes = $conn->query($sellingFastSql);
+if ($sellingFastRes) {
+    while ($row = $sellingFastRes->fetch_assoc()) {
+        $sellingFastProducts[] = $row;
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -160,6 +220,79 @@ $wishlist = isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])
             </div>
         </div>
     </section>
+
+    <?php if (!empty($sellingFastProducts)): ?>
+    <section class="selling-fast">
+        <div class="container">
+            <h2 class="section-title">Selling Fast</h2>
+            <p class="section-subtitle">
+                Our most popular items that costumers love right now
+            </p>
+            <div class="products-grid">
+                <?php foreach ($sellingFastProducts as $product): ?>
+                    <?php
+                    $pid = (int)$product['productID'];
+                    $inWishlist = in_array($pid, $wishlistedProductIDs, true);
+                    $imageIDs = !empty($product['imageIDs']) ? array_map('intval', explode(',', $product['imageIDs'])) : [];
+                    $primaryImage = $imageIDs[0] ?? 0;
+                    $isOutStock = ((string)$product['cartStatus'] === 'out_of_stock') || ((int)$product['inventory'] <= 0 && (string)$product['cartStatus'] !== 'made_to_order');
+                    $isLowStock = ((string)$product['cartStatus'] === 'low_stock') || (!$isOutStock && (int)$product['inventory'] > 0 && (int)$product['inventory'] <= 3);
+                    $filledStars = (int)round((float)$product['avgRating']);
+                    ?>
+                    <article class="product-card">
+                        <div class="product-image-wrapper">
+                            <span class="selling-fast-badge">Selling Fast</span>
+                            <?php if ($primaryImage > 0): ?>
+                                <a href="product.php?id=<?= $pid ?>" class="product-card-link" aria-label="View <?= htmlspecialchars($product['nameEN']) ?>">
+                                    <img
+                                        class="product-image-display"
+                                        src="modules/admin/ajax/product_image.php?id=<?= $primaryImage ?>"
+                                        alt="<?= htmlspecialchars($product['nameEN']) ?>">
+                                </a>
+                            <?php else: ?>
+                                <a href="product.php?id=<?= $pid ?>" class="product-card-link product-image-placeholder" aria-label="View <?= htmlspecialchars($product['nameEN']) ?>">
+                                    <i class="fas fa-image"></i>
+                                </a>
+                            <?php endif; ?>
+                            <form method="post" action="wishlist_toggle.php">
+                                <input type="hidden" name="action" value="toggle_wishlist_item">
+                                <input type="hidden" name="product_id" value="<?= $pid ?>">
+                                <button class="wishlist-btn <?= $inWishlist ? 'is-active' : '' ?>" type="submit" title="<?= $inWishlist ? 'Remove from wishlist' : 'Add to wishlist' ?>">
+                                    <i class="<?= $inWishlist ? 'fas' : 'far' ?> fa-heart"></i>
+                                </button>
+                            </form>
+                        </div>
+                        <div class="product-info">
+                            <h3 class="product-name">
+                                <a href="product.php?id=<?= $pid ?>" class="product-title-link">
+                                    <?= htmlspecialchars($product['nameEN']) ?>
+                                </a>
+                            </h3>
+                            <p class="product-price">&euro;<?= number_format((float)$product['basePrice'], 0) ?></p>
+                            <div class="product-rating">
+                                <div class="stars">
+                                    <?php for ($i = 1; $i <= 5; $i++): ?>
+                                        <i class="<?= $i <= $filledStars ? 'fas' : 'far' ?> fa-star"></i>
+                                    <?php endfor; ?>
+                                </div>
+                                <span class="rating-count">(<?= (int)$product['reviewCount'] ?>)</span>
+                            </div>
+                            <?php if ($product['cartStatus'] === 'made_to_order'): ?>
+                                <span class="stock-badge stock-badge-alt">Made to Order</span>
+                            <?php elseif ($isOutStock): ?>
+                                <span class="stock-badge stock-badge-out">Out of Stock</span>
+                            <?php elseif ($isLowStock): ?>
+                                <span class="stock-badge stock-badge-low">Only <?= (int)$product['inventory'] ?> left</span>
+                            <?php else: ?>
+                                <span class="stock-badge">In Stock</span>
+                            <?php endif; ?>
+                        </div>
+                    </article>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    </section>
+    <?php endif; ?>
 
     <!-- Best Sellers Section -->
     <section class="best-sellers">
