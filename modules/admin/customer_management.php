@@ -417,7 +417,7 @@ if (isset($_GET['edit'])) {
     <h3>New Customer Account</h3>
     <p class="modal-sub">Create a new customer login for the storefront.</p>
 
-    <form method="POST">
+    <form method="POST" data-ignore-unsaved-warning>
       <input type="hidden" name="action" value="add_user">
       <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
       <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
@@ -487,7 +487,7 @@ if (isset($_GET['edit'])) {
     <h3>Edit Customer Account</h3>
     <p class="modal-sub">Update the details for this customer.</p>
 
-    <form method="POST">
+    <form method="POST" data-ignore-unsaved-warning>
       <input type="hidden" name="action" value="edit_user">
       <input type="hidden" name="userID" value="<?= (int)$editUser['userID'] ?>">
       <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
@@ -557,7 +557,100 @@ if (isset($_GET['edit'])) {
 </div>
 <?php endif; ?>
 
-<script src="assets/admin.js"></script>
+<script src="assets/admin.js?v=<?= (int)filemtime(__DIR__ . '/assets/admin.js') ?>"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  var warningMessage = 'You have unsaved changes. Are you sure you want to leave this form?';
+  var addModal = document.getElementById('modalAddCustomer');
+  var editModal = document.getElementById('modalEditCustomer');
+  var listUrl = <?= json_encode('customer_management.php' . (($searchTerm !== '' || $statusFilter !== '' || $roleFilter !== '') ? '?' . http_build_query(['q' => $searchTerm, 'status_filter' => $statusFilter, 'role_filter' => $roleFilter]) : '')) ?>;
+
+  function isEditableField(field) {
+    if (!field || field.disabled || !field.name) return false;
+    if (field.type === 'hidden' || field.type === 'submit' || field.type === 'button' || field.type === 'reset') return false;
+    return true;
+  }
+
+  function setupModal(modal, options) {
+    if (!modal) return null;
+
+    var form = modal.querySelector('.modal-box > form');
+    if (!form) return null;
+
+    var state = {
+      dirty: false,
+      isSubmitting: false
+    };
+
+    form.querySelectorAll('input, select, textarea').forEach(function (field) {
+      if (!isEditableField(field)) return;
+      field.addEventListener('input', function () { state.dirty = true; });
+      field.addEventListener('change', function () { state.dirty = true; });
+    });
+
+    form.addEventListener('submit', function () {
+      state.isSubmitting = true;
+      state.dirty = false;
+    });
+
+    function confirmDismiss() {
+      if (!state.dirty || state.isSubmitting) return true;
+      return window.confirm(warningMessage);
+    }
+
+    function dismissModal() {
+      if (!confirmDismiss()) return;
+      state.dirty = false;
+      if (options.mode === 'close') {
+        modal.classList.remove('show');
+        document.body.style.overflow = '';
+        return;
+      }
+      window.location.href = options.returnUrl;
+    }
+
+    modal.addEventListener('click', function (e) {
+      if (e.target !== modal) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dismissModal();
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (!modal.classList.contains('show')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dismissModal();
+    });
+
+    var cancelBtn = modal.querySelector('.btn-cancel');
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        dismissModal();
+      });
+    }
+
+    return state;
+  }
+
+  var modalStates = [];
+  var addState = setupModal(addModal, { mode: 'close' });
+  var editState = setupModal(editModal, { mode: 'navigate', returnUrl: listUrl });
+  if (addState) modalStates.push(addState);
+  if (editState) modalStates.push(editState);
+
+  window.addEventListener('beforeunload', function (e) {
+    var hasDirtyModal = modalStates.some(function (state) {
+      return state.dirty && !state.isSubmitting;
+    });
+    if (!hasDirtyModal) return;
+    e.preventDefault();
+    e.returnValue = warningMessage;
+  });
+});
+</script>
 </body>
 </html>
 

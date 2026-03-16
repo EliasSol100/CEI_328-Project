@@ -8,6 +8,19 @@ $flash = '';
 /* ── Handle POST actions ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
+    $photoDeleteId = (int)($_POST['photo_delete'] ?? 0);
+
+    if ($photoDeleteId > 0) {
+        $productID = (int)($_POST['productID'] ?? 0);
+        if ($productID > 0) {
+            mysqli_query($conn, "DELETE FROM photos WHERE imageID=$photoDeleteId AND productID=$productID");
+        }
+        $q2 = trim((string)($_POST['q'] ?? ''));
+        $sf2 = trim((string)($_POST['status_filter'] ?? ''));
+        $qs = http_build_query(array_filter(['edit' => $productID, 'q' => $q2, 'status_filter' => $sf2]));
+        header("Location: product_management.php?" . $qs);
+        exit;
+    }
 
     if ($action === 'add' || $action === 'edit') {
         $nameEN   = trim($_POST['nameEN']   ?? '');
@@ -451,7 +464,7 @@ $statusFilterOptions = [
   <div class="modal-box">
     <h3>Add Product</h3>
     <p class="modal-sub">Fill in the product details below.</p>
-    <form method="POST" enctype="multipart/form-data">
+    <form method="POST" enctype="multipart/form-data" data-ignore-unsaved-warning>
       <input type="hidden" name="action" value="add">
       <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
       <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
@@ -532,7 +545,7 @@ $statusFilterOptions = [
   <div class="modal-box">
     <h3>Edit Product</h3>
     <p class="modal-sub">Update the details for "<?= htmlspecialchars($editProduct['nameEN']) ?>".</p>
-    <form method="POST" enctype="multipart/form-data">
+    <form method="POST" enctype="multipart/form-data" data-ignore-unsaved-warning>
       <input type="hidden" name="action" value="edit">
       <input type="hidden" name="productID" value="<?= $editProduct['productID'] ?>">
       <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
@@ -546,16 +559,14 @@ $statusFilterOptions = [
               <div style="position:relative;display:inline-block;">
                 <img src="ajax/product_image.php?id=<?= $imgID ?>"
                      style="height:72px;width:72px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb;" alt="">
-                <form method="POST" style="position:absolute;top:-7px;right:-7px;margin:0;"
-                      onsubmit="return confirm('Delete this photo?')">
-                  <input type="hidden" name="action" value="delete_photo">
-                  <input type="hidden" name="imageID" value="<?= $imgID ?>">
-                  <input type="hidden" name="productID" value="<?= $editProduct['productID'] ?>">
-                  <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
-                  <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
-                  <button type="submit" title="Delete photo"
-                          style="background:#e74c3c;color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:13px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;">&times;</button>
-                </form>
+                <button
+                  type="submit"
+                  name="photo_delete"
+                  value="<?= $imgID ?>"
+                  formnovalidate
+                  onclick="return confirm('Delete this photo?')"
+                  title="Delete photo"
+                  style="position:absolute;top:-7px;right:-7px;margin:0;background:#e74c3c;color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:13px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;">&times;</button>
               </div>
             <?php endforeach; ?>
           </div>
@@ -626,6 +637,91 @@ $statusFilterOptions = [
 </div>
 <?php endif; ?>
 
-<script src="assets/admin.js"></script>
+<script src="assets/admin.js?v=<?= (int)filemtime(__DIR__ . '/assets/admin.js') ?>"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  var warningMessage = 'You have unsaved changes. Are you sure you want to leave this form?';
+  var listUrl = <?= json_encode('product_management.php' . (($searchTerm !== '' || $statusFilter !== '') ? '?' . http_build_query(['q' => $searchTerm, 'status_filter' => $statusFilter]) : '')) ?>;
+
+  function isEditableField(field) {
+    if (!field || field.disabled || !field.name) return false;
+    if (field.type === 'hidden' || field.type === 'submit' || field.type === 'button' || field.type === 'reset') return false;
+    return true;
+  }
+
+  function setupModal(modal, options) {
+    if (!modal) return null;
+    var form = modal.querySelector('.modal-box > form');
+    if (!form) return null;
+
+    var state = {
+      dirty: false,
+      isSubmitting: false
+    };
+
+    form.querySelectorAll('input, select, textarea').forEach(function (field) {
+      if (!isEditableField(field)) return;
+      field.addEventListener('input', function () { state.dirty = true; });
+      field.addEventListener('change', function () { state.dirty = true; });
+    });
+
+    function dismissModal() {
+      if (state.dirty && !state.isSubmitting && !window.confirm(warningMessage)) return;
+      state.dirty = false;
+      if (options.mode === 'close') {
+        modal.classList.remove('show');
+        document.body.style.overflow = '';
+        return;
+      }
+      window.location.href = options.returnUrl;
+    }
+
+    modal.addEventListener('click', function (e) {
+      if (e.target !== modal) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dismissModal();
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (!modal.classList.contains('show')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dismissModal();
+    });
+
+    var cancelBtn = modal.querySelector('.btn-cancel');
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        dismissModal();
+      });
+    }
+
+    form.addEventListener('submit', function () {
+      state.isSubmitting = true;
+      state.dirty = false;
+    });
+
+    return state;
+  }
+
+  var modalStates = [];
+  var addState = setupModal(document.getElementById('modalAdd'), { mode: 'close' });
+  var editState = setupModal(document.getElementById('modalEdit'), { mode: 'navigate', returnUrl: listUrl });
+  if (addState) modalStates.push(addState);
+  if (editState) modalStates.push(editState);
+
+  window.addEventListener('beforeunload', function (e) {
+    var hasDirtyModal = modalStates.some(function (state) {
+      return state.dirty && !state.isSubmitting;
+    });
+    if (!hasDirtyModal) return;
+    e.preventDefault();
+    e.returnValue = warningMessage;
+  });
+});
+</script>
 </body>
 </html>

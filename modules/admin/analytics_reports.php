@@ -276,7 +276,7 @@ $jsonCatValues  = json_encode(array_values($costByCategory));
   <div class="modal-box">
     <h3>Record Operational Cost</h3>
     <p class="modal-sub">Add a new cost entry to track your expenses.</p>
-    <form method="POST">
+    <form method="POST" data-ignore-unsaved-warning>
       <input type="hidden" name="action" value="record_cost">
       <div class="form-grid-2">
         <div class="form-group">
@@ -310,8 +310,80 @@ $jsonCatValues  = json_encode(array_values($costByCategory));
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="assets/admin.js"></script>
+<script src="assets/admin.js?v=<?= (int)filemtime(__DIR__ . '/assets/admin.js') ?>"></script>
 <script>
+document.addEventListener('DOMContentLoaded', function () {
+  var warningMessage = 'You have unsaved changes. Are you sure you want to leave this form?';
+  var modal = document.getElementById('modalCost');
+  if (!modal) return;
+
+  var form = modal.querySelector('.modal-box > form');
+  if (!form) return;
+
+  var state = {
+    dirty: false,
+    isSubmitting: false
+  };
+
+  function isEditableField(field) {
+    if (!field || field.disabled || !field.name) return false;
+    if (field.type === 'hidden' || field.type === 'submit' || field.type === 'button' || field.type === 'reset') return false;
+    return true;
+  }
+
+  form.querySelectorAll('input, select, textarea').forEach(function (field) {
+    if (!isEditableField(field)) return;
+    field.addEventListener('input', function () { state.dirty = true; });
+    field.addEventListener('change', function () { state.dirty = true; });
+  });
+
+  form.addEventListener('submit', function () {
+    state.isSubmitting = true;
+    state.dirty = false;
+  });
+
+  function confirmDismiss() {
+    if (!state.dirty || state.isSubmitting) return true;
+    return window.confirm(warningMessage);
+  }
+
+  function dismissModal() {
+    if (!confirmDismiss()) return;
+    state.dirty = false;
+    modal.classList.remove('show');
+    document.body.style.overflow = '';
+  }
+
+  modal.addEventListener('click', function (e) {
+    if (e.target !== modal) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dismissModal();
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    if (!modal.classList.contains('show')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dismissModal();
+  });
+
+  var cancelBtn = modal.querySelector('.btn-cancel');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      dismissModal();
+    });
+  }
+
+  window.addEventListener('beforeunload', function (e) {
+    if (!state.dirty || state.isSubmitting) return;
+    e.preventDefault();
+    e.returnValue = warningMessage;
+  });
+});
+
 (function () {
   var labels  = <?= $jsonRevLabels ?>;
   var rev     = <?= $jsonRevValues ?>;

@@ -965,7 +965,7 @@ $receiptStatuses = ['paid', 'completed', 'captured', 'succeeded'];
                       <i class="fas fa-receipt"></i> No Receipt
                     </button>
                   <?php endif; ?>
-                  <form method="POST" style="display:inline-flex;gap:4px;align-items:center;">
+                  <form method="POST" style="display:inline-flex;gap:4px;align-items:center;" data-ignore-unsaved-warning>
                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['admin_order_token']) ?>">
                     <input type="hidden" name="orderID" value="<?= (int)$o['orderID'] ?>">
                     <select name="status" class="form-input" style="width:140px;padding:4px 6px;font-size:12px;">
@@ -992,6 +992,42 @@ $receiptStatuses = ['paid', 'completed', 'captured', 'succeeded'];
   </main>
 </div>
 
-<script src="assets/admin.js"></script>
+<script src="assets/admin.js?v=<?= (int)filemtime(__DIR__ . '/assets/admin.js') ?>"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  var warningMessage = 'You have unsaved changes. Are you sure you want to leave this page?';
+  var dirtyForms = new Set();
+  var isSubmitting = false;
+
+  document.querySelectorAll('form[data-ignore-unsaved-warning]').forEach(function (form) {
+    var statusSelect = form.querySelector('select[name="status"]');
+    if (!statusSelect) return;
+
+    var initialValue = statusSelect.value;
+
+    function refreshFormState() {
+      if (statusSelect.value !== initialValue) {
+        dirtyForms.add(form);
+      } else {
+        dirtyForms.delete(form);
+      }
+    }
+
+    statusSelect.addEventListener('change', refreshFormState);
+    statusSelect.addEventListener('input', refreshFormState);
+
+    form.addEventListener('submit', function () {
+      isSubmitting = true;
+      dirtyForms.delete(form);
+    });
+  });
+
+  window.addEventListener('beforeunload', function (e) {
+    if (dirtyForms.size === 0 || isSubmitting) return;
+    e.preventDefault();
+    e.returnValue = warningMessage;
+  });
+});
+</script>
 </body>
 </html>

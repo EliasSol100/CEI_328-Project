@@ -199,7 +199,7 @@ $statusBadge = [
                 </span>
               </td>
               <td class="col-auto">
-                <form method="POST" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <form method="POST" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap" data-ignore-unsaved-warning data-stock-warning>
                   <input type="hidden" name="action" value="update_sales_override">
                   <input type="hidden" name="productID" value="<?= $pid ?>">
                   <div class="input-with-icon">
@@ -216,7 +216,7 @@ $statusBadge = [
                   </div>
                 </form>
                 <?php if ($hasManualSales): ?>
-                <form method="POST" style="margin-top:6px">
+                <form method="POST" style="margin-top:6px" data-ignore-unsaved-warning data-stock-warning>
                   <input type="hidden" name="action" value="remove_sales_override">
                   <input type="hidden" name="productID" value="<?= $pid ?>">
                   <button type="submit" class="btn-secondary" style="padding:5px 10px;font-size:12px">
@@ -226,7 +226,7 @@ $statusBadge = [
                 <?php endif; ?>
               </td>
               <td class="col-update">
-                <form method="POST" style="display:flex;gap:8px;align-items:center">
+                <form method="POST" style="display:flex;gap:8px;align-items:center" data-ignore-unsaved-warning data-stock-warning>
                   <input type="hidden" name="action"    value="update_stock">
                   <input type="hidden" name="productID" value="<?= $pid ?>">
                   <input
@@ -281,7 +281,7 @@ $statusBadge = [
                 <?php endif; ?>
               </td>
               <td>
-                <form method="POST" style="display:flex;gap:8px;align-items:center">
+                <form method="POST" style="display:flex;gap:8px;align-items:center" data-ignore-unsaved-warning data-stock-warning>
                   <input type="hidden" name="action"  value="update_color_stock">
                   <input type="hidden" name="colorID" value="<?= $c['colorID'] ?>">
                   <input
@@ -310,7 +310,78 @@ $statusBadge = [
     </div>
   </main>
 </div>
-<script src="assets/admin.js"></script>
+<script src="assets/admin.js?v=<?= (int)filemtime(__DIR__ . '/assets/admin.js') ?>"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  var warningMessage = 'You have unsaved changes. Are you sure you want to leave this form?';
+  var dirtyForms = new Set();
+  var isSubmitting = false;
+
+  function isTrackedForm(form) {
+    if (!form) return false;
+    return form.matches('form[data-stock-warning]');
+  }
+
+  function isEditableField(field) {
+    if (!field || field.disabled || !field.name) return false;
+    if (field.type === 'hidden' || field.type === 'submit' || field.type === 'button' || field.type === 'reset') return false;
+    return true;
+  }
+
+  function trackFormChange(form) {
+    if (!isTrackedForm(form)) return;
+    dirtyForms.add(form);
+  }
+
+  function clearFormChange(form) {
+    if (!form) return;
+    dirtyForms.delete(form);
+  }
+
+  document.querySelectorAll('form').forEach(function (form) {
+    if (!isTrackedForm(form)) return;
+
+    form.querySelectorAll('input, select, textarea').forEach(function (field) {
+      if (!isEditableField(field)) return;
+      field.addEventListener('input', function () {
+        trackFormChange(form);
+      });
+      field.addEventListener('change', function () {
+        trackFormChange(form);
+      });
+    });
+
+    form.addEventListener('submit', function () {
+      isSubmitting = true;
+      clearFormChange(form);
+    });
+  });
+
+  window.addEventListener('beforeunload', function (e) {
+    if (dirtyForms.size === 0 || isSubmitting) return;
+    e.preventDefault();
+    e.returnValue = warningMessage;
+  });
+
+  document.addEventListener('click', function (e) {
+    var link = e.target.closest('a[href]');
+    if (!link || dirtyForms.size === 0 || isSubmitting) return;
+    if (link.target === '_blank' || link.hasAttribute('download')) return;
+
+    var href = link.getAttribute('href') || '';
+    if (!href || href.charAt(0) === '#') return;
+
+    if (!window.confirm(warningMessage)) {
+      e.preventDefault();
+      return;
+    }
+
+    dirtyForms.clear();
+    isSubmitting = true;
+  });
+
+});
+</script>
 </body>
 </html>
 

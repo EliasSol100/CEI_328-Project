@@ -130,7 +130,7 @@ foreach ($categories as $cat) {
                 <?php endif; ?>
               </td>
               <td>
-                <form method="POST" style="display:inline">
+                <form method="POST" style="display:inline" data-ignore-unsaved-warning data-auto-submit>
                   <input type="hidden" name="toggleGlobal" value="1">
                   <input type="hidden" name="colorID" value="<?= $col['colorID'] ?>">
                   <input type="hidden" name="newActive" value="<?= $col['isActive'] ? 0 : 1 ?>">
@@ -203,7 +203,7 @@ foreach ($categories as $cat) {
               <?php endif; ?>
 
               <?php if ($globalOk): ?>
-              <form method="POST" style="display:inline">
+              <form method="POST" style="display:inline" data-ignore-unsaved-warning data-auto-submit>
                 <input type="hidden" name="categoryID" value="<?= $activeCategory ?>">
                 <input type="hidden" name="colorID"    value="<?= $col['colorID'] ?>">
                 <input type="hidden" name="isEnabled"  value="<?= $enabled ? 0 : 1 ?>">
@@ -229,6 +229,6 @@ foreach ($categories as $cat) {
     </div>
   </main>
 </div>
-<script src="assets/admin.js"></script>
+<script src="assets/admin.js?v=<?= (int)filemtime(__DIR__ . '/assets/admin.js') ?>"></script>
 </body>
 </html>
