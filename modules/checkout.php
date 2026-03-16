@@ -695,411 +695,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Checkout - <?= htmlspecialchars($system_title) ?></title>
-    <link rel="stylesheet" href="<?= $project ?>/assets/styling/styles.css">
-    <link rel="stylesheet" href="<?= $project ?>/assets/styling/header.css">
+    <link rel="stylesheet" href="../assets/styling/styles.css">
+    <link rel="stylesheet" href="../assets/styling/header.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="<?= $project ?>/assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/translations.js') ?>" defer></script>
-    <style>
-        .checkout-container {
-            max-width: 1160px;
-            margin: 36px auto 72px;
-            padding: 0 20px;
-        }
-
-        .checkout-title {
-            margin: 0 0 18px;
-            color: #2d184d;
-            font-size: clamp(1.9rem, 2.7vw, 2.4rem);
-            line-height: 1.1;
-            letter-spacing: 0.2px;
-        }
-
-        .checkout-grid {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) 360px;
-            gap: 28px;
-            align-items: start;
-        }
-
-        .checkout-form {
-            border: 1px solid #e6dff2;
-            border-radius: 18px;
-            padding: 24px;
-            background: #fff;
-            box-shadow: 0 12px 28px rgba(63, 32, 102, 0.08);
-        }
-
-        .checkout-form fieldset {
-            border: 1px solid #e5dcf2;
-            border-radius: 14px;
-            padding: 20px;
-            margin-bottom: 18px;
-            background: #fff;
-        }
-
-        .checkout-form legend {
-            color: #4e2f74;
-            font-weight: 700;
-            font-size: 14px;
-            padding: 0 10px;
-            letter-spacing: 0.2px;
-        }
-
-        .form-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
-        }
-
-        .form-group {
-            margin-bottom: 14px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: #443058;
-            font-size: 14px;
-            font-weight: 600;
-        }
-
-        .form-group input:not([type="radio"]):not([type="checkbox"]),
-        .form-group select,
-        .form-group textarea {
-            width: 100%;
-            min-height: 46px;
-            border: 1px solid #d5cae8;
-            border-radius: 10px;
-            padding: 11px 13px;
-            color: #2f2342;
-            background: #fff;
-            outline: none;
-            transition: border-color 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        .form-group input:not([type="radio"]):not([type="checkbox"]):focus,
-        .form-group select:focus,
-        .form-group textarea:focus {
-            border-color: #a879e2;
-            box-shadow: 0 0 0 3px rgba(168, 121, 226, 0.15);
-        }
-
-        .form-options {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px 18px;
-        }
-
-        .form-options.form-options-column {
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .option-label {
-            display: inline-flex;
-            align-items: center;
-            gap: 7px;
-            color: #3a294f;
-            font-size: 14px;
-            font-weight: 500;
-        }
-
-        .checkout-form input[type="radio"],
-        .checkout-form input[type="checkbox"] {
-            accent-color: #8a4dd6;
-        }
-
-        .form-helper {
-            display: block;
-            margin-top: 6px;
-            color: #6e5e84;
-            font-size: 12px;
-            line-height: 1.35;
-        }
-
-        .coupon-row {
-            display: flex;
-            gap: 10px;
-            align-items: stretch;
-        }
-
-        .coupon-row input[type="text"] {
-            flex: 1;
-        }
-
-        .coupon-actions {
-            display: flex;
-            gap: 8px;
-            margin-top: 8px;
-        }
-
-        .btn-inline {
-            border: 1px solid #d4c3eb;
-            border-radius: 10px;
-            padding: 10px 14px;
-            font-size: 13px;
-            font-weight: 700;
-            cursor: pointer;
-            background: #fff;
-            color: #45286d;
-        }
-
-        .btn-inline.btn-apply {
-            border-color: #7f46cf;
-            background: #7f46cf;
-            color: #fff;
-        }
-
-        .error {
-            display: block;
-            margin-top: 7px;
-            color: #b42318;
-            font-size: 13px;
-            font-weight: 600;
-        }
-
-        .error-field {
-            border-color: #d64545 !important;
-            background: #fff7f7 !important;
-        }
-
-        .free-shipping-notice {
-            margin-bottom: 18px;
-            border: 1px solid #d0e9d8;
-            border-radius: 12px;
-            padding: 14px 16px;
-            text-align: center;
-            color: #185a35;
-            background: #e8f7ed;
-            font-size: 14px;
-            font-weight: 600;
-        }
-
-        .guest-notice {
-            margin-bottom: 16px;
-            border: 1px solid #cfe0ff;
-            border-radius: 12px;
-            padding: 14px 15px;
-            background: #ebf3ff;
-            color: #1e3a68;
-            font-size: 14px;
-        }
-
-        .guest-notice a {
-            color: #114a9c;
-            font-weight: 600;
-            text-decoration: underline;
-        }
-
-        .checkout-error {
-            margin-bottom: 16px;
-            border: 1px solid #f1aeb5;
-            border-radius: 12px;
-            background: #fcebed;
-            color: #8a1f2d;
-            padding: 14px 16px;
-            font-weight: 600;
-        }
-
-        .terms-row {
-            margin: 18px 0 14px;
-        }
-
-        .terms-label {
-            display: inline-flex;
-            align-items: flex-start;
-            gap: 8px;
-            color: #3f3058;
-            font-size: 14px;
-            font-weight: 500;
-        }
-
-        .btn-primary {
-            width: 100%;
-            border: none;
-            border-radius: 11px;
-            padding: 13px 16px;
-            background: linear-gradient(90deg, #8f54d9 0%, #5c2ea0 100%);
-            color: #fff;
-            font-size: 15px;
-            font-weight: 700;
-            cursor: pointer;
-            letter-spacing: 0.2px;
-            transition: transform 0.15s ease, box-shadow 0.2s ease;
-        }
-
-        .btn-primary:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 8px 20px rgba(108, 58, 176, 0.28);
-        }
-
-        .order-summary {
-            position: sticky;
-            top: 90px;
-            border: 1px solid #e5dbf2;
-            border-radius: 16px;
-            padding: 22px;
-            background: linear-gradient(180deg, #fbf9ff 0%, #f5f1fb 100%);
-            box-shadow: 0 10px 24px rgba(61, 30, 98, 0.08);
-        }
-
-        .order-summary h2 {
-            margin: 0 0 12px;
-            color: #2f1d49;
-            font-size: 24px;
-            line-height: 1.2;
-        }
-
-        .courier-map-card {
-            margin-top: 14px;
-            border: 1px solid #e5dbf2;
-            border-radius: 16px;
-            padding: 14px;
-            background: #fff;
-            box-shadow: 0 10px 24px rgba(61, 30, 98, 0.08);
-        }
-
-        .courier-map-card h3 {
-            margin: 0 0 8px;
-            font-size: 16px;
-            color: #2f1d49;
-        }
-
-        .courier-map-card p {
-            margin: 0 0 10px;
-            font-size: 12px;
-            color: #6f5f85;
-            line-height: 1.4;
-        }
-
-        .courier-map-frame {
-            width: 100%;
-            height: 220px;
-            border: 1px solid #dfd3ef;
-            border-radius: 10px;
-            background: #f8f4ff;
-            overflow: hidden;
-        }
-
-        .courier-map-links {
-            margin-top: 10px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-
-        .courier-map-links a {
-            font-size: 12px;
-            color: #5c2ea0;
-            text-decoration: underline;
-            font-weight: 600;
-        }
-
-        .courier-map-points {
-            margin-top: 10px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-
-        .courier-map-points span {
-            display: inline-flex;
-            align-items: center;
-            padding: 4px 8px;
-            border-radius: 999px;
-            background: #f2ebff;
-            color: #4f3774;
-            font-size: 11px;
-            font-weight: 600;
-            border: 1px solid #ddd1f0;
-        }
-
-        .courier-map-points span.is-closest {
-            background: #e2d3ff;
-            border-color: #b99cf2;
-            color: #34185f;
-        }
-
-        .order-item {
-            padding: 11px 0;
-            border-bottom: 1px solid #e6deef;
-        }
-
-        .order-item-main {
-            display: flex;
-            justify-content: space-between;
-            gap: 12px;
-            color: #3c2a57;
-            font-size: 14px;
-            font-weight: 600;
-        }
-
-        .order-item-addons {
-            margin-top: 6px;
-            color: #6f5f85;
-            font-size: 12px;
-            line-height: 1.4;
-        }
-
-        .summary-divider {
-            border: none;
-            border-top: 1px solid #ddd2ec;
-            margin: 15px 0 13px;
-        }
-
-        .summary-row {
-            display: flex;
-            justify-content: space-between;
-            color: #432f60;
-            font-size: 14px;
-            margin-bottom: 8px;
-        }
-
-        .summary-row-total {
-            margin-top: 14px;
-            padding-top: 12px;
-            border-top: 1px solid #d5c8e7;
-            color: #291747;
-            font-size: 18px;
-            font-weight: 800;
-        }
-
-        @media (max-width: 1024px) {
-            .checkout-container {
-                margin-top: 24px;
-            }
-
-            .checkout-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .order-summary {
-                position: static;
-            }
-        }
-
-        @media (max-width: 640px) {
-            .checkout-container {
-                margin-bottom: 50px;
-                padding: 0 14px;
-            }
-
-            .checkout-form {
-                padding: 17px;
-            }
-
-            .checkout-form fieldset {
-                padding: 15px;
-            }
-
-            .form-row {
-                grid-template-columns: 1fr;
-                gap: 0;
-            }
-        }
-    </style>
+    <script src="../assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/translations.js') ?>" defer></script>
 </head>
 <body class="site-page">
 <?php
@@ -1222,6 +823,89 @@ if (file_exists($headerPath)) {
                         </select>
                         <span class="form-helper">Couriers update automatically based on the selected country.</span>
                         <?php if (isset($errors['courier'])): ?><span class="error"><?= $errors['courier'] ?></span><?php endif; ?>
+                    </div>
+                    <div class="form-group" id="akis-point-wrapper" style="display:none;">
+                        <label>Επιλέξτε Σημείο Παραλαβής Akis Express *</label>
+                        <select id="akis_pickup_point" name="akis_pickup_point">
+                            <option value="">-- Επιλέξτε Πόλη --</option>
+                            <option>Αγία Βαρβάρα (Αντιπρόσωπος)</option>
+                            <option>Αγία Νάπα (Αντιπρόσωπος)</option>
+                            <option>Αγία Φύλα (Αντιπρόσωπος)</option>
+                            <option>Άγιος Αθανάσιος Κέντρο Διαλογής</option>
+                            <option>Άγιος Δομέτιος</option>
+                            <option>Άγιος Τύχωνας (Αντιπρόσωπος)</option>
+                            <option>Αγίου Σύλα Αποθήκη</option>
+                            <option>Αθηαίνου (Αντιπρόσωπος)</option>
+                            <option>Ακάκι (Αντιπρόσωπος)</option>
+                            <option>Αλεθρικό (Αντιπρόσωπος)</option>
+                            <option>Ασγάτα (Αντιπρόσωπος)</option>
+                            <option>Βαβυλά, Βιομηχανική Περιοχή Ιδαλίου</option>
+                            <option>Βιομηχανική Στροβόλου</option>
+                            <option>Βρυσούλες (Αντιπρόσωπος)</option>
+                            <option>Γερμασόγεια (Αντιπρόσωπος)</option>
+                            <option>Γεροσκήπου (Αντιπρόσωπος)</option>
+                            <option>Δάλι</option>
+                            <option>Δάλι Βιομηχανική περιοχή (EXLOG DALI)</option>
+                            <option>Δασάκι Άχνας (Αντιπρόσωπος)</option>
+                            <option>Δερύνεια (Αντιπρόσωπος)</option>
+                            <option>Δευτερά Staroil (Agent)</option>
+                            <option>Δευτερά Talbot (Αντιπρόσωπος)</option>
+                            <option>Δρομολαξιά (Αντιπρόσωπος)</option>
+                            <option>Δροσιά</option>
+                            <option>Επισκοπή (Αντιπρόσωπος)</option>
+                            <option>Εργάτες (Αντιπρόσωπος)</option>
+                            <option>Ευρύχου (Αντιπρόσωπος)</option>
+                            <option>Θερμοπυλών (Αντιπρόσωπος)</option>
+                            <option>Θεσσαλονίκης</option>
+                            <option>Καλό Χωριό Λάρνακας (Αντιπρόσωπος)</option>
+                            <option>Κέννεντυ</option>
+                            <option>Κέντρο Διαλογής Αραδίππου</option>
+                            <option>Κέντρο Διαλογής Παραλιμνίου</option>
+                            <option>Κέντρο Διαλογής Στροβόλου</option>
+                            <option>Κινύρας</option>
+                            <option>Κίτι (Αντιπρόσωπος)</option>
+                            <option>Κλήρου/Μαλούντα (Αντιπρόσωπος)</option>
+                            <option>Κοκκινοτριμιθιά (Αντιπρόσωπος)</option>
+                            <option>Κολόσσι (Αντιπρόσωπος)</option>
+                            <option>Κόρνος (Αντιπρόσωπος)</option>
+                            <option>Κυπερούντα (Αντιπρόσωπος)</option>
+                            <option>Λακατάμια</option>
+                            <option>Λατσιά</option>
+                            <option>Λεύκαρα (Αντιπρόσωπος)</option>
+                            <option>Λεωφόρος Ελλάδος</option>
+                            <option>Λιβάδια (Αντιπρόσωπος)</option>
+                            <option>Λιοπέτρι</option>
+                            <option>Λυθροδόντας (Αντιπρόσωπος)</option>
+                            <option>Μαζωτός (Αντιπρόσωπος)</option>
+                            <option>Μακεδονίτισσα</option>
+                            <option>Μόλος (Αντιπρόσωπος)</option>
+                            <option>Μονή (Αντιπρόσωπος)</option>
+                            <option>Νάξου</option>
+                            <option>Νεάπολη</option>
+                            <option>Ξυλοτύμπου (Αντιπρόσωπος)</option>
+                            <option>Ξυλοφάγου (Αντιπρόσωπος)</option>
+                            <option>Ομονοίας</option>
+                            <option>Ορμήδεια (Αντιπρόσωπος)</option>
+                            <option>Οροκλίνη (Αντιπρόσωπος)</option>
+                            <option>Παλαιομέτοχο (Αντιπρόσωπος)</option>
+                            <option>Παλλουριώτισσα Αποθήκη</option>
+                            <option>Πέγια (Αντιπρόσωπος)</option>
+                            <option>Πισσούρι (Αντιπρόσωπος)</option>
+                            <option>Πλατεία Ελευθερίας</option>
+                            <option>Πόλης Χρυσοχούς</option>
+                            <option>Πρωταράς (Αντιπρόσωπος)</option>
+                            <option>Πύργος Τυλληρίας (Αντιπρόσωπος)</option>
+                            <option>Στασίνου Branch</option>
+                            <option>Στρόβολος</option>
+                            <option>Τάλα (Αντιπρόσωπος)</option>
+                            <option>Τεύκρου Άνθια</option>
+                            <option>Τσέρι (Αντιπρόσωπος)</option>
+                            <option>Ύψωνας</option>
+                            <option>Φραγκλίνου Ρούσβελτ</option>
+                            <option>Χλώρακα (Αντιπρόσωπος)</option>
+                            <option>Χοιροκοιτία (Αντιπρόσωπος)</option>
+                            <option>Χρυσοπολίτισσα</option>
+                        </select>
                     </div>
                     <div class="form-group">
                         <label data-translate="checkoutSpeed">Speed</label>
@@ -1922,13 +1606,25 @@ if (file_exists($headerPath)) {
             applyPostalRule();
             updateTotals();
             updateCourierMap();
+            toggleAkisPointWrapper();
         });
+    }
+
+    var akisPointWrapper = document.getElementById('akis-point-wrapper');
+
+    function toggleAkisPointWrapper() {
+        if (!akisPointWrapper) return;
+        var isAkis = courierEl && courierEl.value === 'akis_express';
+        akisPointWrapper.style.display = isAkis ? '' : 'none';
+        var sel = document.getElementById('akis_pickup_point');
+        if (sel) sel.required = isAkis;
     }
 
     if (courierEl) {
         courierEl.addEventListener('change', function () {
             updateTotals();
             updateCourierMap();
+            toggleAkisPointWrapper();
         });
     }
 
@@ -1964,6 +1660,7 @@ if (file_exists($headerPath)) {
     updateSpeedLabels();
     applyPostalRule();
     updateTotals();
+    toggleAkisPointWrapper();
     applySavedAddress(false);
     updateCourierMap();
 })();
