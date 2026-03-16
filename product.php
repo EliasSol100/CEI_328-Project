@@ -428,6 +428,7 @@ $variationStmt = $conn->prepare(
      LEFT JOIN variation_stock vs ON vs.variationID = pv.variationID
      JOIN products p ON p.productID = pv.productID
      WHERE pv.productID = ?
+       AND (pv.colorID IS NULL OR c.isActive = 1)
      ORDER BY pv.variationID ASC"
 );
 if ($variationStmt) {
