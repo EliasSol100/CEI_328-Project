@@ -112,13 +112,29 @@ function evaluateProductCoupon(mysqli $conn, float $basePrice, string $productCa
     return $result;
 }
 
-$conn->query("
-    CREATE TABLE IF NOT EXISTS product_sales_overrides (
-        productID INT PRIMARY KEY,
-        manual_total_sales INT NOT NULL DEFAULT 0,
-        updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    )
-");
+function ensureProductSalesOverridesSchema(mysqli $conn): void {
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $conn->query("
+        CREATE TABLE IF NOT EXISTS product_sales_overrides (
+            productID INT PRIMARY KEY,
+            manual_total_sales INT NOT NULL DEFAULT 0,
+            updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+    ");
+
+    $colCheck = $conn->query("SHOW COLUMNS FROM product_sales_overrides LIKE 'auto_sales_baseline'");
+    $hasBaselineColumn = ($colCheck && $colCheck->num_rows > 0);
+    if (!$hasBaselineColumn) {
+        $conn->query("ALTER TABLE product_sales_overrides ADD COLUMN auto_sales_baseline INT NULL DEFAULT NULL AFTER manual_total_sales");
+    }
+}
+
+ensureProductSalesOverridesSchema($conn);
 
 $productId = (int)($_GET["id"] ?? 0);
 if ($productId <= 0) {
@@ -339,7 +355,13 @@ $product = null;
 $productStmt = $conn->prepare(
     "SELECT p.productID, p.sku, p.nameEN, p.nameGR, p.descriptionEN, p.descriptionGR,
             p.basePrice, p.inventory, p.cartStatus, p.hasVariants, p.category,
-            COALESCE(pso.manual_total_sales, COALESCE(os.total_qty, 0)) AS totalSales,
+            CASE
+                WHEN pso.productID IS NULL THEN COALESCE(os.total_qty, 0)
+                ELSE pso.manual_total_sales + GREATEST(
+                    0,
+                    COALESCE(os.total_qty, 0) - COALESCE(pso.auto_sales_baseline, COALESCE(os.total_qty, 0))
+                )
+            END AS totalSales,
             ROUND(COALESCE(AVG(r.rating), 0), 1) AS avgRating,
             COUNT(r.reviewID) AS reviewCount
      FROM products p

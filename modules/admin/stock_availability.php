@@ -5,14 +5,44 @@ require_once __DIR__ . '/includes/db.php';
 $current_page = 'stock_availability';
 $flash = '';
 
-// Optional manual override for per-product sales display on storefront.
-mysqli_query($conn, "
-    CREATE TABLE IF NOT EXISTS product_sales_overrides (
-        productID INT PRIMARY KEY,
-        manual_total_sales INT NOT NULL DEFAULT 0,
-        updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    )
-");
+function ensureProductSalesOverridesSchema(mysqli $conn): void {
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    mysqli_query($conn, "
+        CREATE TABLE IF NOT EXISTS product_sales_overrides (
+            productID INT PRIMARY KEY,
+            manual_total_sales INT NOT NULL DEFAULT 0,
+            updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+    ");
+
+    $colRes = mysqli_query($conn, "SHOW COLUMNS FROM product_sales_overrides LIKE 'auto_sales_baseline'");
+    $hasBaselineColumn = $colRes && mysqli_num_rows($colRes) > 0;
+    if (!$hasBaselineColumn) {
+        mysqli_query(
+            $conn,
+            "ALTER TABLE product_sales_overrides ADD COLUMN auto_sales_baseline INT NULL DEFAULT NULL AFTER manual_total_sales"
+        );
+    }
+
+    // Backfill legacy rows so existing manual totals stay unchanged and future online sales continue from now.
+    mysqli_query($conn, "
+        UPDATE product_sales_overrides pso
+        LEFT JOIN (
+            SELECT productID, COALESCE(SUM(quantity), 0) AS total_qty
+            FROM order_items
+            GROUP BY productID
+        ) os ON os.productID = pso.productID
+        SET pso.auto_sales_baseline = COALESCE(os.total_qty, 0)
+        WHERE pso.auto_sales_baseline IS NULL
+    ");
+}
+
+ensureProductSalesOverridesSchema($conn);
 
 /* -- Handle POST: update product inventory / status -- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -43,14 +73,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'update_sales_override') {
         $productID = (int)$_POST['productID'];
         $manualSales = max(0, (int)($_POST['manual_total_sales'] ?? 0));
+
+        $currentAutoSales = 0;
+        $autoStmt = mysqli_prepare($conn, "SELECT COALESCE(SUM(quantity), 0) AS total_qty FROM order_items WHERE productID = ?");
+        if ($autoStmt) {
+            mysqli_stmt_bind_param($autoStmt, 'i', $productID);
+            mysqli_stmt_execute($autoStmt);
+            $autoRes = mysqli_stmt_get_result($autoStmt);
+            if ($autoRes && ($autoRow = mysqli_fetch_assoc($autoRes))) {
+                $currentAutoSales = (int)($autoRow['total_qty'] ?? 0);
+            }
+            mysqli_stmt_close($autoStmt);
+        }
+
         $stmt = mysqli_prepare(
             $conn,
-            "INSERT INTO product_sales_overrides (productID, manual_total_sales)
-             VALUES (?, ?)
-             ON DUPLICATE KEY UPDATE manual_total_sales = VALUES(manual_total_sales)"
+            "INSERT INTO product_sales_overrides (productID, manual_total_sales, auto_sales_baseline)
+             VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                manual_total_sales = VALUES(manual_total_sales),
+                auto_sales_baseline = VALUES(auto_sales_baseline)"
         );
         if ($stmt) {
-            mysqli_stmt_bind_param($stmt, 'ii', $productID, $manualSales);
+            mysqli_stmt_bind_param($stmt, 'iii', $productID, $manualSales, $currentAutoSales);
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
             $flash = 'ok:Manual sales updated.';
@@ -87,10 +132,13 @@ if ($salesRes) {
 
 // Manual overrides map.
 $manualSalesMap = [];
-$msRes = mysqli_query($conn, "SELECT productID, manual_total_sales FROM product_sales_overrides");
+$msRes = mysqli_query($conn, "SELECT productID, manual_total_sales, auto_sales_baseline FROM product_sales_overrides");
 if ($msRes) {
     while ($row = mysqli_fetch_assoc($msRes)) {
-        $manualSalesMap[(int)$row['productID']] = (int)$row['manual_total_sales'];
+        $manualSalesMap[(int)$row['productID']] = [
+            'manual_total_sales' => (int)$row['manual_total_sales'],
+            'auto_sales_baseline' => isset($row['auto_sales_baseline']) ? (int)$row['auto_sales_baseline'] : null,
+        ];
     }
 }
 
@@ -166,7 +214,7 @@ $statusBadge = [
               <th class="col-category">Category</th>
               <th class="col-stock">Current Stock</th>
               <th class="col-status">Status</th>
-              <th class="col-auto">Auto Sales</th>
+              <th class="col-auto">Current Sales</th>
               <th class="col-update">Update</th>
             </tr>
           </thead>
@@ -176,7 +224,13 @@ $statusBadge = [
               $pid = (int)$p['productID'];
               $autoSales = (int)($autoSalesMap[$pid] ?? 0);
               $hasManualSales = array_key_exists($pid, $manualSalesMap);
-              $manualSales = $hasManualSales ? (int)$manualSalesMap[$pid] : null;
+              $currentSales = $autoSales;
+              if ($hasManualSales) {
+                  $manualSales = (int)($manualSalesMap[$pid]['manual_total_sales'] ?? 0);
+                  $baselineRaw = $manualSalesMap[$pid]['auto_sales_baseline'] ?? null;
+                  $baselineSales = is_null($baselineRaw) ? $autoSales : (int)$baselineRaw;
+                  $currentSales = $manualSales + max(0, $autoSales - $baselineSales);
+              }
             ?>
             <tr>
               <td class="col-product font-600"><?= htmlspecialchars($p['nameEN']) ?></td>
@@ -206,11 +260,11 @@ $statusBadge = [
                     <input
                       type="number"
                       name="manual_total_sales"
-                      value="<?= $hasManualSales ? (int)$manualSales : $autoSales ?>"
+                      value="<?= (int)$currentSales ?>"
                       min="0"
                       class="form-input has-icon-right"
                     >
-                    <button type="submit" class="icon-btn" aria-label="Save auto sales">
+                    <button type="submit" class="icon-btn" aria-label="Save sales count">
                       <i class="fas fa-save"></i>
                     </button>
                   </div>

@@ -62,14 +62,29 @@ if (isset($_SESSION["user"])) {
 $GLOBALS['header_user_full_name'] = $fullName;
 $GLOBALS['header_user_role']      = $role;
 
-// Manual sales override table (used by admin page + storefront display).
-$conn->query("
-    CREATE TABLE IF NOT EXISTS product_sales_overrides (
-        productID INT PRIMARY KEY,
-        manual_total_sales INT NOT NULL DEFAULT 0,
-        updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    )
-");
+function ensureProductSalesOverridesSchema(mysqli $conn): void {
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $conn->query("
+        CREATE TABLE IF NOT EXISTS product_sales_overrides (
+            productID INT PRIMARY KEY,
+            manual_total_sales INT NOT NULL DEFAULT 0,
+            updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+    ");
+
+    $colCheck = $conn->query("SHOW COLUMNS FROM product_sales_overrides LIKE 'auto_sales_baseline'");
+    $hasBaselineColumn = ($colCheck && $colCheck->num_rows > 0);
+    if (!$hasBaselineColumn) {
+        $conn->query("ALTER TABLE product_sales_overrides ADD COLUMN auto_sales_baseline INT NULL DEFAULT NULL AFTER manual_total_sales");
+    }
+}
+
+ensureProductSalesOverridesSchema($conn);
 
 // ---------------------------------------------
 // Wishlist handling (DB for logged-in, session for guests)
@@ -238,7 +253,13 @@ $products = [];
 $sql = "
     SELECT p.productID, p.nameEN, p.nameGR, p.basePrice, p.inventory,
            p.cartStatus, p.category, p.hasVariants,
-           COALESCE(pso.manual_total_sales, COALESCE(os.total_qty, 0)) AS totalSales,
+           CASE
+               WHEN pso.productID IS NULL THEN COALESCE(os.total_qty, 0)
+               ELSE pso.manual_total_sales + GREATEST(
+                   0,
+                   COALESCE(os.total_qty, 0) - COALESCE(pso.auto_sales_baseline, COALESCE(os.total_qty, 0))
+               )
+           END AS totalSales,
            GROUP_CONCAT(ph.imageID ORDER BY ph.imageID ASC SEPARATOR ',') AS imageIDs
     FROM products p
     LEFT JOIN photos ph ON ph.productID = p.productID
