@@ -584,6 +584,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'user_id' => $userId > 0 ? $userId : null,
                     'is_guest' => $isLoggedIn ? 0 : 1,
                     'email' => $isLoggedIn ? $userEmail : trim((string)($_POST['email'] ?? '')),
+                    'customer_name' => $isLoggedIn ? (string)$userFullName : trim((string)($_POST['full_name'] ?? 'Customer')),
                     'order_status' => 'pending',
                     'payment_status' => 'paid',
                     'payment_provider' => trim((string)($_POST['payment_method'] ?? 'manual')),

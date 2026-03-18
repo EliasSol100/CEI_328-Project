@@ -2,6 +2,7 @@
 session_start();
 require_once "authentication/database.php";
 require_once "authentication/get_config.php";
+require_once __DIR__ . '/include/made_to_order_access.php';
 
 $system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
 $logo_path = getSystemConfig("logo_path") ?: "assets/images/athina-eshop-logo.png";
@@ -12,6 +13,7 @@ if (!file_exists($logo_path) && file_exists("assets/images/athina-eshop-logo.png
 if (!file_exists($logo_path)) {
     $logo_path = "assets/images/athina-eshop-logo.png";
 }
+ensureMadeToOrderProductSchema($conn);
 
 // --------- User / Profile handling ----------
 $role     = "guest";
@@ -61,6 +63,40 @@ if (isset($_SESSION["user"])) {
 
 $GLOBALS['header_user_full_name'] = $fullName;
 $GLOBALS['header_user_role']      = $role;
+
+if (isset($_GET['mto_pid']) && isset($_GET['mto_token'])) {
+    $mtoPid = (int)($_GET['mto_pid'] ?? 0);
+    $mtoToken = trim((string)($_GET['mto_token'] ?? ''));
+    $grant = grantMadeToOrderAccessFromLink($conn, $mtoPid, $mtoToken);
+
+    if (!empty($grant['ok'])) {
+        $_SESSION['shop_mto_flash'] = 'ok:Private made-to-order product unlocked for your account.';
+    } else {
+        $reason = (string)($grant['reason'] ?? 'invalid_link');
+        if ($reason === 'login_required') {
+            $_SESSION['shop_mto_flash'] = 'err:Sign in with the assigned customer email to access this private product.';
+        } elseif ($reason === 'email_mismatch') {
+            $_SESSION['shop_mto_flash'] = 'err:This private product belongs to a different customer email.';
+        } else {
+            $_SESSION['shop_mto_flash'] = 'err:Invalid or expired private product link.';
+        }
+    }
+
+    $safeQuery = $_GET;
+    unset($safeQuery['mto_pid'], $safeQuery['mto_token']);
+    $redirectUrl = 'shop.php';
+    if (!empty($safeQuery)) {
+        $redirectUrl .= '?' . http_build_query($safeQuery);
+    }
+    header('Location: ' . $redirectUrl);
+    exit();
+}
+
+$shopMtoFlash = '';
+if (isset($_SESSION['shop_mto_flash'])) {
+    $shopMtoFlash = (string)$_SESSION['shop_mto_flash'];
+    unset($_SESSION['shop_mto_flash']);
+}
 
 function ensureProductSalesOverridesSchema(mysqli $conn): void {
     static $checked = false;
@@ -202,13 +238,23 @@ if ($userId) {
 // Keep header wishlist counter in sync on this request.
 $_SESSION['wishlist_count'] = count($wishlistedIDs);
 
+$accessibleMadeToOrderIds = getAccessibleMadeToOrderProductIds($conn);
+$catalogVisibilityWhere = "p.cartStatus IN ('active', 'low_stock', 'out_of_stock')";
+if (!empty($accessibleMadeToOrderIds)) {
+    $catalogVisibilityWhere .= " OR (p.cartStatus = 'made_to_order' AND p.productID IN (" . implode(',', array_map('intval', $accessibleMadeToOrderIds)) . "))";
+}
+$categoryVisibilityWhere = "cartStatus IN ('active', 'low_stock', 'out_of_stock')";
+if (!empty($accessibleMadeToOrderIds)) {
+    $categoryVisibilityWhere .= " OR (cartStatus = 'made_to_order' AND productID IN (" . implode(',', array_map('intval', $accessibleMadeToOrderIds)) . "))";
+}
+
 // Load distinct active categories
 $categories = [];
 $catRes = $conn->query("
     SELECT DISTINCT category
     FROM products
     WHERE category IS NOT NULL AND category != ''
-      AND cartStatus IN ('active', 'low_stock', 'out_of_stock', 'made_to_order')
+      AND ({$categoryVisibilityWhere})
     ORDER BY category ASC
 ");
 if ($catRes) {
@@ -223,7 +269,7 @@ $maxPrice = 100;
 $priceBoundsRes = $conn->query("
     SELECT MIN(basePrice) AS min_price, MAX(basePrice) AS max_price
     FROM products
-    WHERE cartStatus IN ('active', 'low_stock', 'out_of_stock', 'made_to_order')
+    WHERE ({$categoryVisibilityWhere})
 ");
 if ($priceBoundsRes && ($bounds = $priceBoundsRes->fetch_assoc())) {
     if ($bounds['min_price'] !== null && $bounds['max_price'] !== null) {
@@ -276,7 +322,7 @@ $sql = "
         GROUP BY productID
     ) os ON os.productID = p.productID
     LEFT JOIN product_sales_overrides pso ON pso.productID = p.productID
-    WHERE p.cartStatus IN ('active', 'low_stock', 'out_of_stock', 'made_to_order')
+    WHERE ({$catalogVisibilityWhere})
 ";
 
 $bindTypes = '';
@@ -395,6 +441,13 @@ if ($revRes) {
                     Find your favorite handmade crochet creations
                 </p>
             </div>
+
+            <?php if ($shopMtoFlash !== ''): ?>
+            <?php [$shopFlashType, $shopFlashMsg] = array_pad(explode(':', $shopMtoFlash, 2), 2, ''); ?>
+            <div class="flash flash-<?= $shopFlashType === 'ok' ? 'success' : 'error' ?>" style="margin-bottom:16px;">
+                <?= htmlspecialchars($shopFlashMsg) ?>
+            </div>
+            <?php endif; ?>
 
             <div class="shop-layout">
                 <!-- FILTER SIDEBAR -->

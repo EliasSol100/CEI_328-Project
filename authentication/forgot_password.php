@@ -168,7 +168,7 @@ if (isset($_POST["submit"])) {
             </div>
             <h3 class="mt-2">Password Recovery</h3>
             <p class="wizard-subtitle mb-0">
-                Enter your email and weâ€™ll send you a reset link (valid for 20 minutes).
+                Enter your email and we'll send you a reset link (valid for 20 minutes).
             </p>
         </div>
 

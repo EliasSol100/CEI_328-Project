@@ -5,7 +5,40 @@ require_once __DIR__ . '/includes/db.php';
 $current_page = 'custom_orders';
 $flash = '';
 
-/* ── Handle POST ── */
+function ensureCustomOrderAdminSchema(mysqli $conn): void {
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $tableCheck = mysqli_query($conn, "SHOW TABLES LIKE 'custom_orders'");
+    if (!$tableCheck || mysqli_num_rows($tableCheck) === 0) {
+        return;
+    }
+
+    mysqli_query($conn, "ALTER TABLE custom_orders MODIFY COLUMN userID INT(11) NULL");
+
+    $requiredColumns = [
+        'sourceOrderID' => "ALTER TABLE custom_orders ADD COLUMN sourceOrderID INT NULL AFTER accessCode",
+        'sourceOrderNumber' => "ALTER TABLE custom_orders ADD COLUMN sourceOrderNumber VARCHAR(64) NULL AFTER sourceOrderID",
+        'sourceProductID' => "ALTER TABLE custom_orders ADD COLUMN sourceProductID INT NULL AFTER sourceOrderNumber",
+        'linkedProductName' => "ALTER TABLE custom_orders ADD COLUMN linkedProductName VARCHAR(255) NULL AFTER sourceProductID",
+    ];
+
+    foreach ($requiredColumns as $column => $sql) {
+        $safeCol = mysqli_real_escape_string($conn, $column);
+        $check = mysqli_query($conn, "SHOW COLUMNS FROM custom_orders LIKE '{$safeCol}'");
+        $exists = $check && mysqli_num_rows($check) > 0;
+        if (!$exists) {
+            mysqli_query($conn, $sql);
+        }
+    }
+}
+
+ensureCustomOrderAdminSchema($conn);
+
+/* Handle POST */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
@@ -100,14 +133,14 @@ if (isset($_GET['flash'])) {
     $flash = $_GET['flash'];
 }
 
-/* ── Load custom orders ── */
+/* Load custom orders */
 $orders = [];
 $r = mysqli_query(
     $conn,
     "SELECT
         co.*,
         COALESCE(
-          co.customerName,
+          NULLIF(co.customerName, ''),
           NULLIF(u.full_name, ''),
           NULLIF(CONCAT_WS(' ', u.first_name, u.last_name), '')
         ) AS displayName
@@ -121,13 +154,24 @@ if ($r) {
     }
 }
 
-/* ── Edit: load one order ── */
+/* Edit: load one order */
 $editOrder = null;
 if (isset($_GET['edit'])) {
     $eid = (int)$_GET['edit'];
     foreach ($orders as $o) {
         if ((int)$o['customOrderID'] === $eid) {
             $editOrder = $o;
+            break;
+        }
+    }
+}
+
+$viewOrder = null;
+if (isset($_GET['view'])) {
+    $vid = (int)$_GET['view'];
+    foreach ($orders as $o) {
+        if ((int)$o['customOrderID'] === $vid) {
+            $viewOrder = $o;
             break;
         }
     }
@@ -142,7 +186,7 @@ $statusOptions = [
 $statusBadge = [
     'pending'     => 'badge-muted',
     'in_progress' => 'badge-orange',
-    'completed'   => 'badge-dark',
+    'completed'   => 'badge-completed',
     'cancelled'   => 'badge-red',
 ];
 ?>
@@ -151,7 +195,7 @@ $statusBadge = [
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Custom Orders – Athena Admin</title>
+  <title>Custom Orders - Athena Admin</title>
   <link rel="stylesheet" href="assets/admin.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -173,13 +217,82 @@ $statusBadge = [
     <div class="content-body">
 
       <?php if ($flash): ?>
-        <?php [$type, $msg] = explode(':', $flash, 2); ?>
+        <?php [$type, $msg] = array_pad(explode(':', $flash, 2), 2, ''); ?>
         <div class="flash flash-<?= $type === 'ok' ? 'success' : 'error' ?>">
           <?= htmlspecialchars($msg) ?>
         </div>
       <?php endif; ?>
 
-      <!-- ── Active orders table ── -->
+      <?php if ($viewOrder): ?>
+        <?php
+          $viewSourceOrderNo = trim((string)($viewOrder['sourceOrderNumber'] ?? ''));
+          if ($viewSourceOrderNo === '' && !empty($viewOrder['sourceOrderID'])) {
+              $viewSourceOrderNo = 'Order #' . (int)$viewOrder['sourceOrderID'];
+          }
+          $viewCustomerName = trim((string)($viewOrder['displayName'] ?? $viewOrder['customerName'] ?? ''));
+          $viewStatus = trim((string)($viewOrder['status'] ?? 'pending'));
+          $viewStatusLabel = ucwords(str_replace('_', ' ', $viewStatus));
+          $viewStatusClass = $statusBadge[$viewStatus] ?? 'badge-muted';
+        ?>
+        <div class="card mb-6">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+            <div class="card-title" style="margin:0;">Custom Order Details</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <a href="?edit=<?= (int)$viewOrder['customOrderID'] ?>" class="btn-edit">
+                <i class="fas fa-pen"></i> Edit
+              </a>
+              <a href="custom_orders.php" class="btn-secondary btn-sm">
+                <i class="fas fa-arrow-left"></i> Back
+              </a>
+            </div>
+          </div>
+
+          <div class="order-detail-grid" style="margin-top:14px;">
+            <div class="order-detail-block">
+              <h4>Customer</h4>
+              <p class="text-sm mb-1"><strong>Name:</strong> <?= htmlspecialchars($viewCustomerName !== '' ? $viewCustomerName : '—') ?></p>
+              <p class="text-sm mb-1"><strong>Email:</strong> <?= htmlspecialchars(trim((string)($viewOrder['email'] ?? '')) !== '' ? (string)$viewOrder['email'] : '—') ?></p>
+              <p class="text-sm mb-1"><strong>Access Code:</strong>
+                <code style="background:#f3f4f6;padding:3px 8px;border-radius:6px;font-size:12px;font-weight:600">
+                  <?= htmlspecialchars((string)($viewOrder['accessCode'] ?? '—')) ?>
+                </code>
+              </p>
+              <p class="text-sm mb-1"><strong>Status:</strong>
+                <span class="badge <?= htmlspecialchars($viewStatusClass) ?>"><?= htmlspecialchars($viewStatusLabel) ?></span>
+              </p>
+            </div>
+            <div class="order-detail-block">
+              <h4>Order Link</h4>
+              <p class="text-sm mb-1"><strong>Agreed Price:</strong> €<?= number_format((float)($viewOrder['agreedPrice'] ?? 0), 2) ?></p>
+              <p class="text-sm mb-1"><strong>Deadline:</strong>
+                <?= !empty($viewOrder['deadline']) ? htmlspecialchars(date('n/j/Y', strtotime((string)$viewOrder['deadline']))) : '—' ?>
+              </p>
+              <p class="text-sm mb-1"><strong>Linked Product:</strong> <?= htmlspecialchars(trim((string)($viewOrder['linkedProductName'] ?? '')) !== '' ? (string)$viewOrder['linkedProductName'] : '—') ?></p>
+              <p class="text-sm mb-1"><strong>Source Order:</strong>
+                <?php if ($viewSourceOrderNo !== ''): ?>
+                  <?= htmlspecialchars($viewSourceOrderNo) ?>
+                  <?php if (!empty($viewOrder['sourceOrderID'])): ?>
+                    <a href="order_management.php?view=<?= (int)$viewOrder['sourceOrderID'] ?>" class="btn-edit" style="padding:0 4px;margin-left:6px;">
+                      <i class="fas fa-arrow-up-right-from-square"></i> Open
+                    </a>
+                  <?php endif; ?>
+                <?php else: ?>
+                  —
+                <?php endif; ?>
+              </p>
+            </div>
+          </div>
+
+          <div style="margin-top:14px;">
+            <h4 style="margin-bottom:8px;">Request Description</h4>
+            <div class="text-sm text-muted" style="white-space:pre-wrap;line-height:1.5;">
+              <?= htmlspecialchars((string)($viewOrder['requestDescription'] ?? '—')) ?>
+            </div>
+          </div>
+        </div>
+      <?php endif; ?>
+
+      <!-- Active orders table -->
       <div class="card mb-6">
         <div class="card-title">Active Custom Orders</div>
         <?php if (empty($orders)): ?>
@@ -190,7 +303,9 @@ $statusBadge = [
               <thead>
                 <tr>
                   <th>Customer Name</th>
+                  <th>Email</th>
                   <th>Description</th>
+                  <th>Source Order</th>
                   <th>Agreed Price</th>
                   <th>Deadline</th>
                   <th>Status</th>
@@ -200,16 +315,42 @@ $statusBadge = [
               </thead>
               <tbody>
               <?php foreach ($orders as $ord): ?>
+                <?php
+                  $sourceOrderNumber = trim((string)($ord['sourceOrderNumber'] ?? ''));
+                  if ($sourceOrderNumber === '' && !empty($ord['sourceOrderID'])) {
+                      $sourceOrderNumber = 'Order #' . (int)$ord['sourceOrderID'];
+                  }
+                  $displayEmail = trim((string)($ord['email'] ?? ''));
+                ?>
                 <tr>
                   <td class="font-600"><?= htmlspecialchars($ord['displayName'] ?? '—') ?></td>
+                  <td class="text-muted"><?= htmlspecialchars($displayEmail !== '' ? $displayEmail : '—') ?></td>
                   <td class="text-muted" style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
                     <?= htmlspecialchars($ord['requestDescription']) ?>
+                  </td>
+                  <td>
+                    <?php if ($sourceOrderNumber !== ''): ?>
+                      <span class="font-600"><?= htmlspecialchars($sourceOrderNumber) ?></span>
+                      <?php if (!empty($ord['sourceOrderID'])): ?>
+                        <div class="text-sm text-muted" style="margin-top:4px;">
+                          <a href="order_management.php?view=<?= (int)$ord['sourceOrderID'] ?>" class="btn-edit" style="padding:0;">
+                            <i class="fas fa-arrow-up-right-from-square"></i> Open
+                          </a>
+                        </div>
+                      <?php endif; ?>
+                    <?php else: ?>
+                      <span class="text-muted">—</span>
+                    <?php endif; ?>
                   </td>
                   <td class="font-600">€<?= number_format((float)$ord['agreedPrice'], 2) ?></td>
                   <td class="text-muted">
                     <?= $ord['deadline'] ? date('n/j/Y', strtotime($ord['deadline'])) : '—' ?>
                   </td>
                   <td>
+                    <?php $statusBadgeClass = $statusBadge[$ord['status']] ?? 'badge-muted'; ?>
+                    <span class="badge <?= $statusBadgeClass ?>" style="min-width:92px;margin-right:8px;">
+                      <?= htmlspecialchars(ucwords(str_replace('_', ' ', (string)$ord['status']))) ?>
+                    </span>
                     <form method="POST" style="display:inline">
                       <input type="hidden" name="action" value="status">
                       <input type="hidden" name="customOrderID" value="<?= (int)$ord['customOrderID'] ?>">
@@ -230,7 +371,7 @@ $statusBadge = [
                       <button
                         type="button"
                         class="btn-edit"
-                        onclick="copyCode('<?= htmlspecialchars(addslashes($ord['accessCode'])) ?>')"
+                        onclick='copyCode(<?= json_encode((string)$ord["accessCode"]) ?>)'
                         title="Copy"
                       >
                         <i class="fas fa-copy"></i>
@@ -238,6 +379,9 @@ $statusBadge = [
                     <?php endif; ?>
                   </td>
                   <td>
+                    <a href="?view=<?= (int)$ord['customOrderID'] ?>" class="btn-secondary btn-sm">
+                      <i class="fas fa-eye"></i> View
+                    </a>
                     <a href="?edit=<?= (int)$ord['customOrderID'] ?>" class="btn-edit">
                       <i class="fas fa-pen"></i> Edit
                     </a>
@@ -262,7 +406,7 @@ $statusBadge = [
   </main>
 </div>
 
-<!-- ── Add Custom Order Modal ── -->
+<!-- Add Custom Order Modal -->
 <div class="modal-overlay" id="modalAdd">
   <div class="modal-box">
     <h3>New Custom Order</h3>
@@ -321,7 +465,7 @@ $statusBadge = [
   </div>
 </div>
 
-<!-- ── Edit Custom Order Modal ── -->
+<!-- Edit Custom Order Modal -->
 <?php if ($editOrder): ?>
 <div class="modal-overlay show" id="modalEdit">
   <div class="modal-box">

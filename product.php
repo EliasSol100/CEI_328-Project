@@ -2,6 +2,7 @@
 session_start();
 require_once __DIR__ . "/authentication/database.php";
 require_once __DIR__ . "/authentication/get_config.php";
+require_once __DIR__ . "/include/made_to_order_access.php";
 
 $systemTitle = getSystemConfig("site_title") ?: "Creations by Athina";
 
@@ -135,6 +136,7 @@ function ensureProductSalesOverridesSchema(mysqli $conn): void {
 }
 
 ensureProductSalesOverridesSchema($conn);
+ensureMadeToOrderProductSchema($conn);
 
 $productId = (int)($_GET["id"] ?? 0);
 if ($productId <= 0) {
@@ -149,6 +151,31 @@ $role = $sessionUser["role"] ?? "guest";
 $isAdmin = in_array(strtolower((string)$role), ["admin", "administrator", "superadmin"], true);
 $GLOBALS["header_user_full_name"] = $fullName;
 $GLOBALS["header_user_role"] = $role;
+
+if (isset($_GET['mto_token']) && (string)$_GET['mto_token'] !== '') {
+    $grant = grantMadeToOrderAccessFromLink($conn, $productId, (string)$_GET['mto_token']);
+    if (!empty($grant['ok'])) {
+        $safeQuery = $_GET;
+        unset($safeQuery['mto_token']);
+        $redirectUrl = 'product.php';
+        if (!empty($safeQuery)) {
+            $redirectUrl .= '?' . http_build_query($safeQuery);
+        }
+        header('Location: ' . $redirectUrl);
+        exit;
+    }
+
+    $reason = (string)($grant['reason'] ?? 'invalid_link');
+    if ($reason === 'login_required') {
+        $_SESSION['shop_mto_flash'] = 'err:Sign in with the assigned customer email to access this private product.';
+    } elseif ($reason === 'email_mismatch') {
+        $_SESSION['shop_mto_flash'] = 'err:This private product belongs to a different customer email.';
+    } else {
+        $_SESSION['shop_mto_flash'] = 'err:Invalid or expired private product link.';
+    }
+    header("Location: shop.php");
+    exit;
+}
 
 $conn->query("
     CREATE TABLE IF NOT EXISTS review_admin_replies (
@@ -390,10 +417,19 @@ if (!$product) {
 }
 
 // Keep discontinued/internal statuses out of direct-link access for storefront users.
-$publicProductStatuses = ["active", "low_stock", "out_of_stock", "made_to_order"];
-if (!$isAdmin && !in_array((string)($product["cartStatus"] ?? ""), $publicProductStatuses, true)) {
-    header("Location: shop.php");
-    exit;
+$publicProductStatuses = ["active", "low_stock", "out_of_stock"];
+if (!$isAdmin) {
+    $productStatus = (string)($product["cartStatus"] ?? "");
+    if ($productStatus === 'made_to_order') {
+        if (!isMadeToOrderProductAccessible($conn, $productId)) {
+            $_SESSION['shop_mto_flash'] = 'err:You do not have access to this private made-to-order product.';
+            header("Location: shop.php");
+            exit;
+        }
+    } elseif (!in_array($productStatus, $publicProductStatuses, true)) {
+        header("Location: shop.php");
+        exit;
+    }
 }
 
 $baseProductPrice = (float)($product["basePrice"] ?? 0);

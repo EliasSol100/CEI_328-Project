@@ -225,6 +225,12 @@ $statusBadge = [
               $autoSales = (int)($autoSalesMap[$pid] ?? 0);
               $hasManualSales = array_key_exists($pid, $manualSalesMap);
               $currentSales = $autoSales;
+              $effectiveStatus = (string)$p['cartStatus'];
+              if ($effectiveStatus !== 'made_to_order' && (int)$p['inventory'] <= 0) {
+                  $effectiveStatus = 'out_of_stock';
+              } elseif ($effectiveStatus === 'active' && (int)$p['inventory'] > 0 && (int)$p['inventory'] <= 3) {
+                  $effectiveStatus = 'low_stock';
+              }
               if ($hasManualSales) {
                   $manualSales = (int)($manualSalesMap[$pid]['manual_total_sales'] ?? 0);
                   $baselineRaw = $manualSalesMap[$pid]['auto_sales_baseline'] ?? null;
@@ -241,15 +247,12 @@ $statusBadge = [
                     <span class="text-muted stock-number">N/A</span>
                   <?php else: ?>
                     <span class="font-600 stock-number"><?= (int)$p['inventory'] ?></span>
-                    <?php if ((int)$p['inventory'] <= 3 && $p['cartStatus'] !== 'out_of_stock'): ?>
-                      <span class="badge badge-warning">Low</span>
-                    <?php endif; ?>
                   <?php endif; ?>
                 </div>
               </td>
               <td class="col-status">
-                <span class="badge <?= $statusBadge[$p['cartStatus']] ?? 'badge-muted' ?>">
-                  <?= $statusOptions[$p['cartStatus']] ?? $p['cartStatus'] ?>
+                <span class="badge <?= $statusBadge[$effectiveStatus] ?? 'badge-muted' ?>">
+                  <?= $statusOptions[$effectiveStatus] ?? $effectiveStatus ?>
                 </span>
               </td>
               <td class="col-auto">
@@ -293,7 +296,7 @@ $statusBadge = [
                   >
                   <select name="cartStatus" class="form-input" style="width:150px">
                     <?php foreach ($statusOptions as $val=>$lbl): ?>
-                      <option value="<?= $val ?>" <?= $p['cartStatus']===$val?'selected':'' ?>><?= $lbl ?></option>
+                      <option value="<?= $val ?>" <?= $effectiveStatus===$val?'selected':'' ?>><?= $lbl ?></option>
                     <?php endforeach; ?>
                   </select>
                   <button type="submit" class="btn-primary" style="padding:6px 12px;font-size:12px">

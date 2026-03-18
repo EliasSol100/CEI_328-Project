@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/../../include/made_to_order_access.php';
 
 $current_page = 'product_management';
 $flash = '';
@@ -9,6 +10,84 @@ $flash = '';
 $sellingFastColumn = mysqli_query($conn, "SHOW COLUMNS FROM products LIKE 'isSellingFast'");
 if ($sellingFastColumn && mysqli_num_rows($sellingFastColumn) === 0) {
     mysqli_query($conn, "ALTER TABLE products ADD COLUMN isSellingFast TINYINT(1) NOT NULL DEFAULT 0");
+}
+ensureMadeToOrderProductSchema($conn);
+
+function productMgmtBuildProjectBasePath(): string {
+    $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
+    $base = rtrim(str_replace('\\', '/', dirname(dirname(dirname($script)))), '/');
+    if ($base === '/' || $base === '.' || $base === '') {
+        return '';
+    }
+    return $base;
+}
+
+function productMgmtBuildPrivateLink(int $productId, string $token): string {
+    $scheme = (!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off') ? 'https' : 'http';
+    $host = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
+    $path = productMgmtBuildProjectBasePath() . '/shop.php?' . http_build_query([
+        'mto_pid' => $productId,
+        'mto_token' => $token,
+    ]);
+    if ($host !== '') {
+        return $scheme . '://' . $host . $path;
+    }
+    return $path;
+}
+
+function productMgmtSendPrivateLinkEmail(string $customerEmail, string $productName, string $privateLink): bool {
+    require_once __DIR__ . '/../../PHPMailer-master/src/Exception.php';
+    require_once __DIR__ . '/../../PHPMailer-master/src/PHPMailer.php';
+    require_once __DIR__ . '/../../PHPMailer-master/src/SMTP.php';
+
+    $subject = 'Your private made-to-order product link';
+    $body =
+        "Hello,\n\n" .
+        "Your private made-to-order product is now ready to purchase:\n" .
+        $productName . "\n\n" .
+        "Private link:\n" . $privateLink . "\n\n" .
+        "For security, this link only works when you are signed in with {$customerEmail}.\n\n" .
+        "Thank you,\nAthina E-Shop";
+
+    $transports = [
+        ['port' => 587, 'secure' => \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS],
+        ['port' => 465, 'secure' => \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS],
+    ];
+
+    foreach ($transports as $transport) {
+        $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+        try {
+            $mail->SMTPDebug = 0;
+            $mail->isSMTP();
+            $mail->Host = 'premium245.web-hosting.com';
+            $mail->SMTPAuth = true;
+            $mail->Username = 'admin@festival-web.com';
+            $mail->Password = '!g3$~8tYju*D';
+            $mail->SMTPSecure = $transport['secure'];
+            $mail->Port = (int)$transport['port'];
+            $mail->Timeout = 20;
+            $mail->SMTPOptions = [
+                'ssl' => [
+                    'verify_peer' => false,
+                    'verify_peer_name' => false,
+                    'allow_self_signed' => true,
+                ],
+            ];
+
+            $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
+            $mail->addAddress($customerEmail, $customerEmail);
+            $mail->CharSet = 'UTF-8';
+            $mail->isHTML(false);
+            $mail->Subject = $subject;
+            $mail->Body = $body;
+            $mail->send();
+            return true;
+        } catch (\Throwable $e) {
+            error_log('Made-to-order private-link email failed: ' . $e->getMessage());
+        }
+    }
+
+    return false;
 }
 
 /* ── Handle POST actions ── */
@@ -40,23 +119,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $category = trim($_POST['category'] ?? '');
         $sku      = trim($_POST['sku']      ?? '');
         $isSellingFast = isset($_POST['isSellingFast']) ? 1 : 0;
+        $privateCustomerEmail = normalizeCustomerEmail((string)($_POST['privateCustomerEmail'] ?? ''));
+
+        if ($status === 'made_to_order' && ($privateCustomerEmail === '' || !filter_var($privateCustomerEmail, FILTER_VALIDATE_EMAIL))) {
+            $flash = 'error:Made to Order products require a valid customer email.';
+            header('Location: product_management.php?flash=' . urlencode($flash));
+            exit;
+        }
+
+        if ($status !== 'made_to_order') {
+            $privateCustomerEmail = '';
+        }
 
         if ($action === 'add') {
             if (empty($sku)) {
                 $sku = 'SKU-' . strtoupper(substr(md5(microtime()), 0, 6));
             }
 
+            $privateAccessToken = $status === 'made_to_order' ? generateMadeToOrderAccessToken() : '';
+            $privateLinkSentAt = $status === 'made_to_order' ? date('Y-m-d H:i:s') : null;
+
             $stmt = mysqli_prepare(
                 $conn,
                 "INSERT INTO products
-                 (sku, nameEN, nameGR, descriptionEN, descriptionGR, basePrice, costPrice, inventory, cartStatus, category, isSellingFast)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+                 (sku, nameEN, nameGR, descriptionEN, descriptionGR, basePrice, costPrice, inventory, cartStatus, category, isSellingFast, privateCustomerEmail, privateAccessToken, privateLinkSentAt)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             );
-            // sku (s), nameEN (s), nameGR (s), descEN (s), descGR (s),
-            // basePrice (d), costPrice (d), inventory (i), cartStatus (s), category (s), isSellingFast (i)
+            // sku (s), nameEN (s), nameGR (s), descEN (s), descGR (s), basePrice (d), costPrice (d),
+            // inventory (i), cartStatus (s), category (s), isSellingFast (i), privateCustomerEmail (s),
+            // privateAccessToken (s), privateLinkSentAt (s)
             mysqli_stmt_bind_param(
                 $stmt,
-                'sssssddissi',
+                'sssssddississs',
                 $sku,
                 $nameEN,
                 $nameGR,
@@ -67,7 +161,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $inv,
                 $status,
                 $category,
-                $isSellingFast
+                $isSellingFast,
+                $privateCustomerEmail,
+                $privateAccessToken,
+                $privateLinkSentAt
             );
             mysqli_stmt_execute($stmt);
             $newProductID = mysqli_insert_id($conn);
@@ -85,9 +182,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            $flash = 'ok:Product added successfully.';
+            if ($status === 'made_to_order' && $newProductID > 0 && $privateCustomerEmail !== '' && $privateAccessToken !== '') {
+                $privateLink = productMgmtBuildPrivateLink($newProductID, $privateAccessToken);
+                $emailSent = productMgmtSendPrivateLinkEmail($privateCustomerEmail, $nameEN, $privateLink);
+                $flash = $emailSent
+                    ? 'ok:Made-to-order product added and private link emailed to customer.'
+                    : 'warn:Made-to-order product added, but private link email failed to send.';
+            } else {
+                $flash = 'ok:Product added successfully.';
+            }
         } else {
             $id = (int)($_POST['productID'] ?? 0);
+
+            $existingPrivateToken = '';
+            $existingPrivateEmail = '';
+            $existingRowStmt = mysqli_prepare(
+                $conn,
+                "SELECT privateAccessToken, privateCustomerEmail
+                 FROM products
+                 WHERE productID = ?
+                 LIMIT 1"
+            );
+            if ($existingRowStmt) {
+                mysqli_stmt_bind_param($existingRowStmt, 'i', $id);
+                mysqli_stmt_execute($existingRowStmt);
+                $existingRes = mysqli_stmt_get_result($existingRowStmt);
+                if ($existingRes && ($existingRow = mysqli_fetch_assoc($existingRes))) {
+                    $existingPrivateToken = trim((string)($existingRow['privateAccessToken'] ?? ''));
+                    $existingPrivateEmail = normalizeCustomerEmail((string)($existingRow['privateCustomerEmail'] ?? ''));
+                }
+                mysqli_stmt_close($existingRowStmt);
+            }
+
+            $privateAccessToken = '';
+            $privateLinkSentAt = null;
+            $privateLinkNeedsEmail = false;
+            if ($status === 'made_to_order') {
+                $privateAccessToken = $existingPrivateToken !== '' ? $existingPrivateToken : generateMadeToOrderAccessToken();
+                if ($privateCustomerEmail !== $existingPrivateEmail || $existingPrivateToken === '') {
+                    $privateAccessToken = generateMadeToOrderAccessToken();
+                    $privateLinkNeedsEmail = true;
+                }
+                $privateLinkSentAt = $privateLinkNeedsEmail ? date('Y-m-d H:i:s') : null;
+            }
 
             $stmt = mysqli_prepare(
                 $conn,
@@ -101,14 +238,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      inventory=?,
                      cartStatus=?,
                      category=?,
-                     isSellingFast=?
+                     isSellingFast=?,
+                     privateCustomerEmail=?,
+                     privateAccessToken=?,
+                     privateLinkSentAt=?
                  WHERE productID=?"
             );
             // nameEN (s), nameGR (s), descEN (s), descGR (s),
-            // basePrice (d), costPrice (d), inventory (i), cartStatus (s), category (s), isSellingFast (i), productID (i)
+            // basePrice (d), costPrice (d), inventory (i), cartStatus (s), category (s), isSellingFast (i),
+            // privateCustomerEmail (s), privateAccessToken (s), privateLinkSentAt (s), productID (i)
             mysqli_stmt_bind_param(
                 $stmt,
-                'ssssddissii',
+                'ssssddississsi',
                 $nameEN,
                 $nameGR,
                 $descEN,
@@ -119,6 +260,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $status,
                 $category,
                 $isSellingFast,
+                $privateCustomerEmail,
+                $privateAccessToken,
+                $privateLinkSentAt,
                 $id
             );
             mysqli_stmt_execute($stmt);
@@ -139,7 +283,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            $flash = 'ok:Product updated successfully.';
+            if ($status === 'made_to_order' && $privateCustomerEmail !== '') {
+                $shouldSendLink = $privateLinkNeedsEmail || isset($_POST['resendPrivateLink']);
+                if ($shouldSendLink && $privateAccessToken !== '') {
+                    $privateLink = productMgmtBuildPrivateLink($id, $privateAccessToken);
+                    $emailSent = productMgmtSendPrivateLinkEmail($privateCustomerEmail, $nameEN, $privateLink);
+                    $flash = $emailSent
+                        ? 'ok:Product updated and private link emailed to customer.'
+                        : 'warn:Product updated, but private link email failed to send.';
+                } else {
+                    $flash = 'ok:Product updated successfully.';
+                }
+            } else {
+                $flash = 'ok:Product updated successfully.';
+            }
         }
     }
 
@@ -491,12 +648,19 @@ $statusFilterOptions = [
                     <div class="text-sm text-muted">Cost: €<?= number_format((float)$p['costPrice'], 2) ?></div>
                   <?php endif; ?>
                 </td>
-                <td><span class="badge <?= $st['badge'] ?>"><?= $st['label'] ?></span></td>
+                <td>
+                  <span class="badge <?= $st['badge'] ?>"><?= $st['label'] ?></span>
+                  <?php if ((string)$p['cartStatus'] === 'made_to_order' && trim((string)($p['privateCustomerEmail'] ?? '')) !== ''): ?>
+                    <div class="text-sm text-muted" style="margin-top:6px;">
+                      <?= htmlspecialchars((string)$p['privateCustomerEmail']) ?>
+                    </div>
+                  <?php endif; ?>
+                </td>
                 <td>
                   <?php if (!empty($p['isSellingFast'])): ?>
                     <span class="badge badge-orange">Homepage</span>
                   <?php else: ?>
-                    <span class="text-muted">â€”</span>
+                    <span class="text-muted">&mdash;</span>
                   <?php endif; ?>
                 </td>
                 <td><?= $p['cartStatus'] === 'made_to_order' ? 'N/A' : (int)$p['inventory'] ?></td>
@@ -605,6 +769,11 @@ $statusFilterOptions = [
             <?php endforeach; ?>
           </select>
         </div>
+      </div>
+      <div class="form-group mto-private-email-field" data-private-email-field style="display:none;">
+        <label class="form-label">Private Customer Email (Made to Order)</label>
+        <input name="privateCustomerEmail" type="email" class="form-input" placeholder="customer@example.com">
+        <span class="form-hint">Only this email can use the private product link in shop.</span>
       </div>
       <div class="form-grid-2">
         <div class="form-group">
@@ -722,6 +891,31 @@ $statusFilterOptions = [
           </select>
         </div>
       </div>
+      <div
+        class="form-group mto-private-email-field"
+        data-private-email-field
+        style="<?= (string)($editProduct['cartStatus'] ?? '') === 'made_to_order' ? '' : 'display:none;' ?>"
+      >
+        <label class="form-label">Private Customer Email (Made to Order)</label>
+        <input
+          name="privateCustomerEmail"
+          type="email"
+          class="form-input"
+          placeholder="customer@example.com"
+          value="<?= htmlspecialchars((string)($editProduct['privateCustomerEmail'] ?? '')) ?>"
+        >
+        <span class="form-hint">Only this email can use the private product link in shop.</span>
+        <?php if ((string)($editProduct['cartStatus'] ?? '') === 'made_to_order' && trim((string)($editProduct['privateAccessToken'] ?? '')) !== ''): ?>
+          <?php $privatePreview = productMgmtBuildPrivateLink((int)$editProduct['productID'], (string)$editProduct['privateAccessToken']); ?>
+          <div class="text-sm" style="margin-top:8px;word-break:break-all;">
+            Current link: <a href="<?= htmlspecialchars($privatePreview) ?>" target="_blank" rel="noopener"><?= htmlspecialchars($privatePreview) ?></a>
+          </div>
+          <label class="text-sm text-muted" style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+            <input type="checkbox" name="resendPrivateLink" value="1">
+            Resend private link email on save
+          </label>
+        <?php endif; ?>
+      </div>
       <div class="form-group">
         <label class="form-label">Stock Quantity</label>
         <input name="inventory" type="number" min="0" class="form-input" value="<?= (int)$editProduct['inventory'] ?>">
@@ -754,6 +948,24 @@ document.addEventListener('DOMContentLoaded', function () {
   var warningMessage = 'You have unsaved changes. Are you sure you want to leave this form?';
   var listUrl = <?= json_encode('product_management.php' . (($searchTerm !== '' || $statusFilter !== '') ? '?' . http_build_query(['q' => $searchTerm, 'status_filter' => $statusFilter]) : '')) ?>;
 
+  function bindMadeToOrderField(form) {
+    if (!form) return;
+    var statusSelect = form.querySelector('select[name="cartStatus"]');
+    var fieldWrap = form.querySelector('[data-private-email-field]');
+    var emailInput = fieldWrap ? fieldWrap.querySelector('input[name="privateCustomerEmail"]') : null;
+    if (!statusSelect || !fieldWrap || !emailInput) return;
+
+    function refreshFieldState() {
+      var show = statusSelect.value === 'made_to_order';
+      fieldWrap.style.display = show ? '' : 'none';
+      emailInput.required = show;
+    }
+
+    statusSelect.addEventListener('change', refreshFieldState);
+    statusSelect.addEventListener('input', refreshFieldState);
+    refreshFieldState();
+  }
+
   function isEditableField(field) {
     if (!field || field.disabled || !field.name) return false;
     if (field.type === 'hidden' || field.type === 'submit' || field.type === 'button' || field.type === 'reset') return false;
@@ -764,6 +976,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!modal) return null;
     var form = modal.querySelector('.modal-box > form');
     if (!form) return null;
+    bindMadeToOrderField(form);
 
     var state = {
       dirty: false,
