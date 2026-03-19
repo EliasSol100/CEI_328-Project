@@ -94,28 +94,7 @@ CREATE TABLE `category_colors` (
 --
 -- Dumping data for table `category_colors`
 --
-
-INSERT INTO `category_colors` (`categoryID`, `colorID`, `isEnabled`) VALUES
-(1, 1, 1),
-(1, 2, 1),
-(1, 5, 1),
-(1, 6, 1),
-(2, 1, 1),
-(2, 2, 1),
-(2, 5, 1),
-(2, 6, 1),
-(3, 1, 1),
-(3, 2, 1),
-(3, 5, 1),
-(3, 6, 1),
-(4, 1, 1),
-(4, 2, 1),
-(4, 5, 1),
-(4, 6, 1),
-(5, 1, 1),
-(5, 2, 1),
-(5, 5, 1),
-(5, 6, 1);
+-- (populated via admin panel)
 
 -- --------------------------------------------------------
 
@@ -128,7 +107,9 @@ CREATE TABLE `colors` (
   `colorName` varchar(100) NOT NULL,
   `globalInventoryAvailable` int(11) NOT NULL DEFAULT 0,
   `isActive` tinyint(1) NOT NULL DEFAULT 1,
-  `updatedAt` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
+  `updatedAt` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`colorID`),
+  UNIQUE KEY `uq_colors_colorName` (`colorName`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -663,13 +644,6 @@ ALTER TABLE `category_colors`
   ADD KEY `fk_cc_color` (`colorID`);
 
 --
--- Indexes for table `colors`
---
-ALTER TABLE `colors`
-  ADD PRIMARY KEY (`colorID`),
-  ADD UNIQUE KEY `uq_colors_colorName` (`colorName`);
-
---
 -- Indexes for table `content_pages`
 --
 ALTER TABLE `content_pages`
@@ -830,12 +804,6 @@ ALTER TABLE `audit_logs`
 --
 ALTER TABLE `categories`
   MODIFY `categoryID` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
-
---
--- AUTO_INCREMENT for table `colors`
---
-ALTER TABLE `colors`
-  MODIFY `colorID` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=7;
 
 --
 -- AUTO_INCREMENT for table `content_pages`
