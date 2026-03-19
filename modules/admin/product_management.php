@@ -483,6 +483,23 @@ if ($productsStmt) {
     mysqli_stmt_close($productsStmt);
 }
 
+/* ── Load colors per product (for colour photos card) ── */
+$pcpColorsByProduct = [];
+$r = mysqli_query($conn,
+    "SELECT DISTINCT pv.productID, pv.colorID, c.colorName
+     FROM product_variations pv
+     JOIN colors c ON c.colorID = pv.colorID
+     WHERE pv.colorID IS NOT NULL
+     ORDER BY c.colorName ASC");
+if ($r) {
+    while ($row = mysqli_fetch_assoc($r)) {
+        $pcpColorsByProduct[(int)$row['productID']][] = [
+            'id'   => (int)$row['colorID'],
+            'name' => $row['colorName'],
+        ];
+    }
+}
+
 /* ── Load one product for edit modal ── */
 $editProduct = null;
 if (isset($_GET['edit'])) {
@@ -702,6 +719,44 @@ $statusFilterOptions = [
             <?php endif; ?>
           </tbody>
         </table>
+      </div>
+
+      <!-- ── Product Colour Photos ── -->
+      <div class="card" style="margin-top:24px">
+        <div class="card-title">Product Colour Photos</div>
+        <p class="text-sm text-muted" style="margin-bottom:20px">Upload product photos per colour. These appear on the storefront when the customer selects a colour.</p>
+
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px">
+          <div class="form-group" style="flex:1;min-width:200px">
+            <label class="form-label">Product</label>
+            <select id="pcp-product" class="form-input" onchange="pcpLoadColors()">
+              <option value="">— Select product —</option>
+              <?php foreach ($products as $p): ?>
+                <option value="<?= (int)$p['productID'] ?>"><?= htmlspecialchars($p['nameEN']) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="form-group" style="flex:1;min-width:200px">
+            <label class="form-label">Colour</label>
+            <select id="pcp-color" class="form-input" disabled onchange="pcpLoadPhotos()">
+              <option value="">— Select colour —</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="pcp-upload-area" style="display:none;margin-bottom:20px">
+          <label class="form-label">Upload Photo(s)</label>
+          <div style="display:flex;align-items:center;gap:12px">
+            <input type="file" id="pcp-file" class="form-input" accept="image/*" multiple style="flex:1">
+            <button class="btn btn-primary" onclick="pcpUpload()" style="white-space:nowrap">
+              <i class="fas fa-upload"></i> Upload
+            </button>
+          </div>
+          <div id="pcp-upload-progress" style="margin-top:8px;font-size:13px;color:#6b7280"></div>
+        </div>
+
+        <div id="pcp-photos-grid" style="display:flex;flex-wrap:wrap;gap:12px"></div>
+        <div id="pcp-empty" style="display:none;font-size:13px;color:#9ca3af;padding:12px 0">No photos yet for this product &amp; colour combination.</div>
       </div>
 
     </div>
@@ -1046,6 +1101,108 @@ document.addEventListener('DOMContentLoaded', function () {
     e.returnValue = warningMessage;
   });
 });
+</script>
+
+<script>
+/* ── Product Colour Photos ── */
+var pcpColorMap = <?= json_encode($pcpColorsByProduct, JSON_UNESCAPED_UNICODE) ?>;
+var pcpAjax     = 'ajax/product_color_photo.php';
+
+function pcpLoadColors() {
+  var pid      = parseInt(document.getElementById('pcp-product').value) || 0;
+  var colorSel = document.getElementById('pcp-color');
+  colorSel.innerHTML = '<option value="">— Select colour —</option>';
+  colorSel.disabled  = true;
+  document.getElementById('pcp-upload-area').style.display = 'none';
+  document.getElementById('pcp-photos-grid').innerHTML     = '';
+  document.getElementById('pcp-empty').style.display       = 'none';
+  if (!pid || !pcpColorMap[pid]) return;
+  pcpColorMap[pid].forEach(function(c) {
+    var opt = document.createElement('option');
+    opt.value       = c.id;
+    opt.textContent = c.id + ' — ' + c.name;
+    colorSel.appendChild(opt);
+  });
+  colorSel.disabled = false;
+}
+
+function pcpLoadPhotos() {
+  var pid = parseInt(document.getElementById('pcp-product').value) || 0;
+  var cid = parseInt(document.getElementById('pcp-color').value)   || 0;
+  var grid    = document.getElementById('pcp-photos-grid');
+  var empty   = document.getElementById('pcp-empty');
+  var upload  = document.getElementById('pcp-upload-area');
+  grid.innerHTML = '';
+  empty.style.display  = 'none';
+  upload.style.display = 'none';
+  if (!pid || !cid) return;
+  upload.style.display = 'block';
+  fetch(pcpAjax + '?action=list&productID=' + pid + '&colorID=' + cid)
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+      if (!data.ok || !data.photos.length) {
+        empty.style.display = 'block';
+        return;
+      }
+      data.photos.forEach(function(ph) { pcpAddThumb(ph); });
+    });
+}
+
+function pcpAddThumb(ph) {
+  var grid = document.getElementById('pcp-photos-grid');
+  var base = '<?= htmlspecialchars(productMgmtBuildProjectBasePath(), ENT_QUOTES) ?>/';
+  var wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative;width:100px;height:100px';
+  wrap.innerHTML =
+    '<img src="' + base + ph.photoPath + '" style="width:100px;height:100px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">' +
+    '<button onclick="pcpDelete(' + ph.id + ',this)" style="position:absolute;top:4px;right:4px;background:#dc2626;color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:12px;line-height:1" title="Delete"><i class="fas fa-times"></i></button>';
+  grid.appendChild(wrap);
+  document.getElementById('pcp-empty').style.display = 'none';
+}
+
+function pcpUpload() {
+  var pid   = parseInt(document.getElementById('pcp-product').value) || 0;
+  var cid   = parseInt(document.getElementById('pcp-color').value)   || 0;
+  var files = document.getElementById('pcp-file').files;
+  var prog  = document.getElementById('pcp-upload-progress');
+  if (!pid || !cid || !files.length) return;
+  prog.textContent = 'Uploading...';
+  var remaining = files.length;
+  Array.from(files).forEach(function(file) {
+    var fd = new FormData();
+    fd.append('action',    'upload');
+    fd.append('productID', pid);
+    fd.append('colorID',   cid);
+    fd.append('photo',     file);
+    fetch(pcpAjax, { method: 'POST', body: fd })
+      .then(function(r){ return r.json(); })
+      .then(function(data) {
+        if (data.ok) pcpAddThumb(data);
+        remaining--;
+        if (remaining === 0) {
+          prog.textContent = 'Done.';
+          document.getElementById('pcp-file').value = '';
+          setTimeout(function(){ prog.textContent = ''; }, 2000);
+        }
+      });
+  });
+}
+
+function pcpDelete(id, btn) {
+  if (!confirm('Delete this photo?')) return;
+  var fd = new FormData();
+  fd.append('action', 'delete');
+  fd.append('id', id);
+  fetch(pcpAjax, { method: 'POST', body: fd })
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        btn.closest('div').remove();
+        var grid = document.getElementById('pcp-photos-grid');
+        if (!grid.children.length) document.getElementById('pcp-empty').style.display = 'block';
+      }
+    });
+}
 </script>
 </body>
 </html>

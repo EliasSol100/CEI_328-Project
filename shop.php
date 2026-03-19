@@ -391,6 +391,15 @@ if ($revRes) {
         ];
     }
 }
+
+// Load product_color_photos per product (for carousel)
+$colorPhotosByProduct = [];
+$cpRes = $conn->query("SELECT productID, photoPath FROM product_color_photos ORDER BY productID, sortOrder ASC");
+if ($cpRes) {
+    while ($row = $cpRes->fetch_assoc()) {
+        $colorPhotosByProduct[(int)$row['productID']][] = $row['photoPath'];
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -553,7 +562,8 @@ if ($revRes) {
                             $isOutStock = ((string)$p['cartStatus'] === 'out_of_stock') || ((int)$p['inventory'] <= 0 && (string)$p['cartStatus'] !== 'made_to_order');
                             $isLowStock = ((string)$p['cartStatus'] === 'low_stock') || (!$isOutStock && (int)$p['inventory'] > 0 && (int)$p['inventory'] <= 3);
                             $catName   = $p['category'] ?? '';
-                            $imageIDs = !empty($p['imageIDs']) ? array_map('intval', explode(',', $p['imageIDs'])) : [];
+                            $imageIDs   = !empty($p['imageIDs']) ? array_map('intval', explode(',', $p['imageIDs'])) : [];
+                            $colorPaths = $colorPhotosByProduct[$pid] ?? [];
                             $rev    = $reviewData[$pid] ?? ['cnt' => 0, 'avg' => 0.0];
                             $stars  = '';
                             $filled = (int)round($rev['avg']);
@@ -573,16 +583,26 @@ if ($revRes) {
                                 <?php if (!empty($p['isSellingFast'])): ?>
                                 <span class="shop-selling-fast-badge">Selling Fast</span>
                                 <?php endif; ?>
-                                <?php if (!empty($imageIDs)): ?>
-                                <div id="carousel-<?= $pid ?>" class="carousel slide shop-carousel" data-bs-ride="carousel" data-bs-interval="3000">
+                                <?php
+                                    // Combine blob photos + color photos
+                                    $allSlides = [];
+                                    foreach ($imageIDs as $imgID) {
+                                        $allSlides[] = ['type' => 'blob', 'src' => 'modules/admin/ajax/product_image.php?id=' . $imgID];
+                                    }
+                                    foreach ($colorPaths as $cp) {
+                                        $allSlides[] = ['type' => 'path', 'src' => $cp];
+                                    }
+                                ?>
+                                <?php if (!empty($allSlides)): ?>
+                                <div id="carousel-<?= $pid ?>" class="carousel slide shop-carousel" data-bs-ride="carousel" data-bs-interval="2000">
                                     <div class="carousel-inner">
-                                        <?php foreach ($imageIDs as $cidx => $imgID): ?>
+                                        <?php foreach ($allSlides as $cidx => $slide): ?>
                                         <div class="carousel-item <?= $cidx === 0 ? 'active' : '' ?>">
-                                            <img src="modules/admin/ajax/product_image.php?id=<?= $imgID ?>" alt="<?= htmlspecialchars($p['nameEN']) ?>">
+                                            <img src="<?= htmlspecialchars($slide['src']) ?>" alt="<?= htmlspecialchars($p['nameEN']) ?>">
                                         </div>
                                         <?php endforeach; ?>
                                     </div>
-                                    <?php if (count($imageIDs) > 1): ?>
+                                    <?php if (count($allSlides) > 1): ?>
                                     <button class="carousel-control-prev" type="button" data-bs-target="#carousel-<?= $pid ?>" data-bs-slide="prev">
                                         <span class="carousel-control-prev-icon"></span>
                                     </button>

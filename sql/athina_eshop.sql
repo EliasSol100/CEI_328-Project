@@ -396,7 +396,8 @@ CREATE TABLE `products` (
   `isSellingFast` tinyint(1) NOT NULL DEFAULT 0,
   `hasVariants` tinyint(1) NOT NULL DEFAULT 0,
   `metaDescription` varchar(255) DEFAULT NULL,
-  `category` varchar(100) DEFAULT NULL
+  `category` varchar(100) DEFAULT NULL,
+  PRIMARY KEY (`productID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -409,6 +410,30 @@ INSERT INTO `products` (`productID`, `sku`, `nameGR`, `nameEN`, `descriptionGR`,
 (3, 'SKU-003', 'Τσάντα Tote', 'Tote Bag', NULL, NULL, 3, 25, 10, 'active', 1, NULL, 'Bags'),
 (4, 'SKU-004', 'Μπουκέτο Λουλουδιών', 'Flower Bouquet', NULL, NULL, 12, 42, 15, 'active', 1, NULL, 'Decor'),
 (5, 'SKU-005', 'Κούκλα Κατά Παραγγελία', 'Custom Doll', NULL, NULL, 0, 55, 18, 'made_to_order', 1, NULL, 'Dolls');
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `product_color_photos`
+--
+
+CREATE TABLE `product_color_photos` (
+  `id`        int(11)      NOT NULL AUTO_INCREMENT,
+  `productID` int(11)      NOT NULL,
+  `colorID`   int(11)      NOT NULL,
+  `photoPath` varchar(255) NOT NULL,
+  `sortOrder` int(11)      NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  KEY `idx_pcp_product` (`productID`),
+  KEY `idx_pcp_color`   (`colorID`),
+  FOREIGN KEY (`productID`) REFERENCES `products` (`productID`) ON DELETE CASCADE,
+  FOREIGN KEY (`colorID`)   REFERENCES `colors`   (`colorID`)   ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `product_color_photos`
+--
+-- (populated via admin panel)
 
 -- --------------------------------------------------------
 
@@ -712,7 +737,6 @@ ALTER TABLE `photos`
 -- Indexes for table `products`
 --
 ALTER TABLE `products`
-  ADD PRIMARY KEY (`productID`),
   ADD UNIQUE KEY `uq_products_sku` (`sku`),
   ADD KEY `idx_products_cartStatus` (`cartStatus`);
 

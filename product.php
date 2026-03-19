@@ -483,6 +483,21 @@ if (empty($photos)) {
     $photos[] = "assets/images/athina-eshop-logo.png";
 }
 
+/* ── Per-colour product photos ── */
+$colorPhotos = []; // [colorID => [photoPath, ...]]
+$cpStmt = $conn->prepare(
+    "SELECT colorID, photoPath FROM product_color_photos WHERE productID = ? ORDER BY sortOrder ASC"
+);
+if ($cpStmt) {
+    $cpStmt->bind_param("i", $productId);
+    $cpStmt->execute();
+    $cpRes = $cpStmt->get_result();
+    while ($cpRes && ($row = $cpRes->fetch_assoc())) {
+        $colorPhotos[(int)$row['colorID']][] = $row['photoPath'];
+    }
+    $cpStmt->close();
+}
+
 $variations = [];
 $variationStmt = $conn->prepare(
     "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID,
@@ -696,6 +711,7 @@ if ($storedCouponCode !== '') {
             display: inline;
         }
     </style>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
 </head>
 <body class="site-page">
 <?php
@@ -706,15 +722,20 @@ include __DIR__ . "/include/header.php";
 <main class="product-page">
     <div class="product-wrap">
         <section class="product-gallery">
-            <div class="main-image-wrap">
-                <img id="main-product-image" src="<?= htmlspecialchars($photos[0]) ?>" alt="<?= htmlspecialchars((string)$product["nameEN"]) ?>">
-            </div>
-            <div class="thumbs-wrap">
-                <?php foreach ($photos as $idx => $src): ?>
-                    <button type="button" class="thumb-btn <?= $idx === 0 ? "active" : "" ?>" data-image-src="<?= htmlspecialchars($src) ?>" aria-label="View image <?= $idx + 1 ?>">
-                        <img src="<?= htmlspecialchars($src) ?>" alt="Product image <?= $idx + 1 ?>">
-                    </button>
-                <?php endforeach; ?>
+            <div id="product-carousel" class="carousel slide" data-bs-ride="carousel" data-bs-interval="2000">
+                <div class="carousel-inner" id="product-carousel-inner">
+                    <?php foreach ($photos as $idx => $src): ?>
+                    <div class="carousel-item <?= $idx === 0 ? 'active' : '' ?>">
+                        <img src="<?= htmlspecialchars($src) ?>" class="d-block w-100" style="object-fit:cover;border-radius:16px;max-height:480px" alt="<?= htmlspecialchars((string)$product['nameEN']) ?>">
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <button class="carousel-control-prev" type="button" data-bs-target="#product-carousel" data-bs-slide="prev">
+                    <span class="carousel-control-prev-icon"></span>
+                </button>
+                <button class="carousel-control-next" type="button" data-bs-target="#product-carousel" data-bs-slide="next">
+                    <span class="carousel-control-next-icon"></span>
+                </button>
             </div>
         </section>
 
@@ -978,20 +999,27 @@ include __DIR__ . "/include/header.php";
     var selectedColorId = null;
     var selectedSize = null;
 
-    var mainImage = document.getElementById("main-product-image");
-    var thumbs = Array.prototype.slice.call(document.querySelectorAll(".thumb-btn"));
-    thumbs.forEach(function (btn) {
-        btn.addEventListener("click", function () {
-            var src = btn.getAttribute("data-image-src");
-            if (src && mainImage) {
-                mainImage.src = src;
-            }
-            thumbs.forEach(function (item) {
-                item.classList.remove("active");
-            });
-            btn.classList.add("active");
+    var colorPhotos   = <?= json_encode($colorPhotos, JSON_UNESCAPED_UNICODE) ?>;
+    var defaultPhotos = <?= json_encode($photos,      JSON_UNESCAPED_UNICODE) ?>;
+
+    function pcpSwapImages(colorId) {
+        var imgs = (colorId && colorPhotos[colorId] && colorPhotos[colorId].length)
+            ? colorPhotos[colorId]
+            : defaultPhotos;
+        var inner = document.getElementById('product-carousel-inner');
+        if (!inner) return;
+        inner.innerHTML = '';
+        imgs.forEach(function(src, idx) {
+            var div = document.createElement('div');
+            div.className = 'carousel-item' + (idx === 0 ? ' active' : '');
+            div.innerHTML = '<img src="' + src + '" class="d-block w-100" style="object-fit:cover;border-radius:16px;max-height:480px" alt="Product image">';
+            inner.appendChild(div);
         });
-    });
+        var el = document.getElementById('product-carousel');
+        if (el && window.bootstrap) {
+            bootstrap.Carousel.getOrCreateInstance(el).to(0);
+        }
+    }
 
     var qtyOut = document.getElementById("qty-value");
     var qtyMinus = document.getElementById("qty-minus");
@@ -1222,9 +1250,9 @@ include __DIR__ . "/include/header.php";
     if (colorSelect) {
         colorSelect.addEventListener("change", function () {
             selectedColorId = parseInt(colorSelect.value) || null;
-            var selOpt = colorSelect.options[colorSelect.selectedIndex];
             updateColorStockDisplay();
             updateAddToCartState();
+            pcpSwapImages(selectedColorId);
         });
         updateColorSelect();
         // Auto-select first available option
@@ -1540,5 +1568,6 @@ include __DIR__ . "/include/header.php";
     paintRatingSelection();
 })();
 </script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
