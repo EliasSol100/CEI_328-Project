@@ -487,11 +487,17 @@ $variations = [];
 $variationStmt = $conn->prepare(
     "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID,
             c.colorName,
-            COALESCE(vs.quantityAvailable, p.inventory, 0) AS stock
+            COALESCE(vs.quantityAvailable, p.inventory, 0) AS stock,
+            cyt.photoPath
      FROM product_variations pv
      LEFT JOIN colors c ON c.colorID = pv.colorID
      LEFT JOIN variation_stock vs ON vs.variationID = pv.variationID
      JOIN products p ON p.productID = pv.productID
+     LEFT JOIN (
+         SELECT colorID, MIN(photoPath) AS photoPath
+         FROM color_yarn_types
+         GROUP BY colorID
+     ) cyt ON cyt.colorID = pv.colorID
      WHERE pv.productID = ?
        AND (pv.colorID IS NULL OR c.isActive = 1)
      ORDER BY pv.variationID ASC"
@@ -508,6 +514,7 @@ if ($variationStmt) {
             "colorID" => isset($row["colorID"]) ? (int)$row["colorID"] : null,
             "colorName" => trim((string)($row["colorName"] ?? "")),
             "stock" => (int)($row["stock"] ?? 0),
+            "photoPath" => $row["photoPath"] ?? null,
         ];
     }
     $variationStmt->close();
@@ -545,6 +552,7 @@ foreach ($variations as $variation) {
         "id" => $colorId,
         "name" => $colorName !== "" ? $colorName : ("Color " . $colorId),
         "hex" => $colorHexMap[$colorKey] ?? "#ece6f6",
+        "photoPath" => $variation["photoPath"] ?? null,
     ];
 }
 
@@ -749,17 +757,21 @@ include __DIR__ . "/include/header.php";
             <?php endif; ?>
 
             <?php if (!empty($uniqueColors)): ?>
-                <div class="color-row" id="color-row">
-                    <?php foreach ($uniqueColors as $idx => $color): ?>
-                        <button
-                            type="button"
-                            class="color-dot <?= $idx === 0 ? "active" : "" ?>"
-                            style="background: <?= htmlspecialchars($color["hex"]) ?>;"
-                            data-color-id="<?= (int)$color["id"] ?>"
-                            data-color-name="<?= htmlspecialchars($color["name"]) ?>"
-                            title="<?= htmlspecialchars($color["name"]) ?>">
-                        </button>
-                    <?php endforeach; ?>
+                <div class="color-row" id="color-row" style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">
+                  <label style="font-size:13px;font-weight:600;color:#374151;margin:0">Colour</label>
+                  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                    <select id="color-select"
+                            style="min-width:200px;padding:8px 12px;border:1px solid #d6c7ea;border-radius:8px;font-size:14px;color:#4b3569;background:#fff;cursor:pointer">
+                      <option value="">— Select colour —</option>
+                      <?php foreach ($uniqueColors as $color): ?>
+                      <option value="<?= (int)$color["id"] ?>"
+                              data-color-name="<?= htmlspecialchars($color["name"]) ?>"
+                              data-photo="<?= htmlspecialchars($color["photoPath"] ?? "") ?>">
+                        <?= htmlspecialchars($color["name"]) ?>
+                      </option>
+                      <?php endforeach; ?>
+                    </select>
+                  </div>
                 </div>
             <?php endif; ?>
 
@@ -1031,7 +1043,7 @@ include __DIR__ . "/include/header.php";
     });
 
     var sizeChips = Array.prototype.slice.call(document.querySelectorAll(".size-chip"));
-    var colorDots = Array.prototype.slice.call(document.querySelectorAll(".color-dot"));
+    var colorSelect = document.getElementById("color-select");
     var colorStockEl = document.getElementById("color-stock");
     var variantStatus = document.getElementById("variant-status");
     var addCartBtn = document.getElementById("add-cart-btn");
@@ -1048,43 +1060,39 @@ include __DIR__ . "/include/header.php";
         });
     }
 
-    function updateColorDots() {
-        if (!colorDots.length) {
-            return;
-        }
-        if (!hasSelectableVariations || !variationUsesColor) {
-            colorDots.forEach(function (dot) {
-                dot.dataset.colorStock = String(Number(productInventory || 0));
-                dot.classList.remove("is-out");
-            });
-            return;
-        }
-        colorDots.forEach(function (dot) {
-            var colorId = parseInt(dot.getAttribute("data-color-id") || "0", 10) || 0;
-            var stock = Number(colorStockMap[colorId] || 0);
-            dot.dataset.colorStock = String(stock);
-            if (stock <= 0) {
-                dot.classList.add("is-out");
-                dot.title = (dot.getAttribute("data-color-name") || "Color") + " (Out of stock)";
+    function updateColorSelect() {
+        if (!colorSelect) return;
+        for (var i = 1; i < colorSelect.options.length; i++) {
+            var opt = colorSelect.options[i];
+            var colorId = parseInt(opt.value) || 0;
+            if (!hasSelectableVariations || !variationUsesColor) {
+                opt.disabled = false;
+                opt.text = opt.dataset.colorName
+                    ? (colorId + " \u2014 " + opt.dataset.colorName)
+                    : opt.text;
             } else {
-                dot.classList.remove("is-out");
+                var stock = Number(colorStockMap[colorId] || 0);
+                if (stock <= 0) {
+                    opt.disabled = true;
+                    opt.text = (opt.dataset.colorName || "Color") + " (Out of stock)";
+                } else {
+                    opt.disabled = false;
+                    opt.text = opt.dataset.colorName || "Color";
+                }
             }
-        });
+        }
     }
 
     function updateColorStockDisplay() {
-        if (!colorStockEl) {
-            return;
-        }
+        if (!colorStockEl) return;
         colorStockEl.classList.remove("is-error", "is-warning");
         if (!selectedColorId) {
             colorStockEl.textContent = "";
             return;
         }
-        var stock = Number(colorStockMap[selectedColorId] || 0);
-        var activeDot = document.querySelector(".color-dot.active");
-        var name = activeDot ? (activeDot.getAttribute("data-color-name") || "") : "";
-        colorStockEl.textContent = name ? name : "";
+        var selOpt = colorSelect ? colorSelect.options[colorSelect.selectedIndex] : null;
+        var name = selOpt ? (selOpt.dataset.colorName || "") : "";
+        colorStockEl.textContent = name;
     }
 
     function findSelectedVariation() {
@@ -1141,7 +1149,7 @@ include __DIR__ . "/include/header.php";
         var available = true;
         var selectedVariation = findSelectedVariation();
         var requireSizeSelection = variationUsesSize && sizeChips.length > 0;
-        var requireColorSelection = variationUsesColor && colorDots.length > 0;
+        var requireColorSelection = variationUsesColor && colorSelect !== null;
         var requireExact = (requireSizeSelection || requireColorSelection);
 
         if (hasSelectableVariations) {
@@ -1211,23 +1219,22 @@ include __DIR__ . "/include/header.php";
         sizeChips[0].click();
     }
 
-    colorDots.forEach(function (dot) {
-        dot.addEventListener("click", function () {
-            colorDots.forEach(function (item) {
-                item.classList.remove("active");
-            });
-            dot.classList.add("active");
-            selectedColorId = parseInt(dot.getAttribute("data-color-id") || "0", 10) || null;
+    if (colorSelect) {
+        colorSelect.addEventListener("change", function () {
+            selectedColorId = parseInt(colorSelect.value) || null;
+            var selOpt = colorSelect.options[colorSelect.selectedIndex];
+            updateColorStockDisplay();
             updateAddToCartState();
         });
-    });
-    updateColorDots();
-    if (colorDots.length) {
-        var firstAvailable = colorDots.find(function (dot) {
-            var stock = Number(dot.dataset.colorStock || 0);
-            return stock > 0;
-        });
-        (firstAvailable || colorDots[0]).click();
+        updateColorSelect();
+        // Auto-select first available option
+        for (var i = 1; i < colorSelect.options.length; i++) {
+            if (!colorSelect.options[i].disabled) {
+                colorSelect.selectedIndex = i;
+                colorSelect.dispatchEvent(new Event("change"));
+                break;
+            }
+        }
     }
     updateAddToCartState();
 
