@@ -19,6 +19,7 @@ unset($_SESSION['temp_password']);
 
 // Correct relative path for includes
 require_once __DIR__ . '/../authentication/database.php';
+require_once __DIR__ . '/../include/loyalty_program.php';
 
 $configPath = __DIR__ . '/../authentication/get_config.php';
 if (file_exists($configPath)) {
@@ -37,6 +38,12 @@ if ($project === '' || $project === '.') {
 
 $orderDetails = null;
 $orderItems = [];
+$loyaltyRedeemedPoints = max(0, (int)($result['loyalty_redeemed_points'] ?? 0));
+$loyaltyRedeemDiscount = max(0, (float)($result['loyalty_redeem_discount'] ?? 0));
+$loyaltyEarnedPoints = max(0, (int)($result['loyalty_earned_points'] ?? 0));
+$loyaltyBalanceAfter = max(0, (int)($result['loyalty_balance_after'] ?? 0));
+$loyaltyAccountAvailable = !empty($result['loyalty_account_available']);
+$loyaltyHasActivity = $loyaltyRedeemedPoints > 0 || $loyaltyEarnedPoints > 0;
 if (isset($result['order_id'])) {
     // Schema-aligned read query: orderID/order_items.orderID.
     $stmt = $conn->prepare("SELECT o.*, (SELECT COUNT(*) FROM order_items WHERE orderID = o.orderID) AS item_count FROM orders o WHERE o.orderID = ?");
@@ -142,6 +149,7 @@ function isOrderReviewEligible(mysqli $conn, int $orderId): bool {
         .btn-review { background: #495bd6; color: white; }
         .btn-review:hover { background: #3f4fb6; }
         .email-note { background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 20px 0; }
+        .loyalty-box { background: #eef8ef; color: #1d5b2a; padding: 22px; border-radius: 8px; margin: 25px 0; text-align: left; }
     </style>
 </head>
 <body class="site-page">
@@ -176,6 +184,9 @@ if (file_exists($headerPath)) {
             <div class="detail-row"><span class="detail-label">Status:</span> <span><?= htmlspecialchars((string)$orderDetails['status']) ?></span></div>
             <div class="detail-row"><span class="detail-label">Items:</span> <span><?= $orderDetails['item_count'] ?> items</span></div>
             <div class="detail-row"><span class="detail-label">Subtotal:</span> <span>&euro;<?= number_format((float)$orderDetails['subtotal'], 2) ?></span></div>
+            <?php if ((float)($orderDetails['discountTotal'] ?? 0) > 0): ?>
+                <div class="detail-row"><span class="detail-label">Discounts:</span> <span>-&euro;<?= number_format((float)$orderDetails['discountTotal'], 2) ?></span></div>
+            <?php endif; ?>
             <div class="detail-row"><span class="detail-label">Shipping:</span> <span>&euro;<?= number_format((float)$orderDetails['shippingCost'], 2) ?></span></div>
             <div class="detail-row" style="font-size:18px; font-weight:bold; color:#28a745;"><span class="detail-label">Total Paid:</span> <span>&euro;<?= number_format((float)$orderDetails['totalAmount'],2) ?></span></div>
 
@@ -192,6 +203,31 @@ if (file_exists($headerPath)) {
                 </div>
             <?php endif; ?>
         </div>
+        <?php endif; ?>
+
+        <?php if ($loyaltyHasActivity): ?>
+            <div class="loyalty-box">
+                <h3 style="margin-top:0;">Loyalty Program</h3>
+                <?php if ($loyaltyRedeemedPoints > 0): ?>
+                    <div class="detail-row">
+                        <span class="detail-label">Redeemed:</span>
+                        <span><?= number_format($loyaltyRedeemedPoints) ?> points (-&euro;<?= number_format($loyaltyRedeemDiscount, 2) ?>)</span>
+                    </div>
+                <?php endif; ?>
+                <?php if ($loyaltyEarnedPoints > 0): ?>
+                    <div class="detail-row">
+                        <span class="detail-label">Earned:</span>
+                        <span><?= number_format($loyaltyEarnedPoints) ?> points</span>
+                    </div>
+                <?php endif; ?>
+                <div class="detail-row">
+                    <span class="detail-label">Balance after this order:</span>
+                    <span><?= number_format($loyaltyBalanceAfter) ?> points</span>
+                </div>
+                <?php if ($loyaltyAccountAvailable): ?>
+                    <p style="margin:14px 0 0;">Your loyalty history is now available in My Account.</p>
+                <?php endif; ?>
+            </div>
         <?php endif; ?>
 
         <?php

@@ -6,6 +6,7 @@ define('INCLUDE_CHECK', true);
 
 // Correct relative path: go up one level from 'modules' to project root, then into 'authentication'
 require_once __DIR__ . '/../authentication/database.php';
+require_once __DIR__ . '/../include/loyalty_program.php';
 require_once __DIR__ . '/place_order.php';
 
 // Optional: include get_config.php if it exists (to avoid errors if missing)
@@ -68,6 +69,25 @@ function findActiveCouponPromotion(mysqli $conn, string $couponCode): ?array {
     $row = $res ? $res->fetch_assoc() : null;
     $st->close();
     return $row ?: null;
+}
+
+function checkoutSanitizePositiveInt($value): int {
+    $digits = preg_replace('/\D/', '', (string)$value);
+    return max(0, (int)$digits);
+}
+
+function checkoutResetLoyaltySelection(): void {
+    unset($_SESSION['cart_loyalty_points_redeem'], $_SESSION['cart_loyalty_user_id']);
+}
+
+function checkoutStoreLoyaltySelection(int $userId, int $points): void {
+    if ($userId <= 0 || $points <= 0) {
+        checkoutResetLoyaltySelection();
+        return;
+    }
+
+    $_SESSION['cart_loyalty_points_redeem'] = $points;
+    $_SESSION['cart_loyalty_user_id'] = $userId;
 }
 
 function cartLineTotalsWithCategory(mysqli $conn, array $cartItems): array {
@@ -259,6 +279,7 @@ function checkoutLoadDefaultAddress(mysqli $conn, int $userId): array {
 }
 
 ensurePromotionCouponColumn($conn);
+ensureLoyaltyProgramSchema($conn);
 
 // Build project root for URLs dynamically so the page works in nested folders too.
 $project = rtrim(str_replace('\\', '/', dirname(dirname($_SERVER['SCRIPT_NAME'] ?? ''))), '/');
@@ -276,6 +297,11 @@ $isLoggedIn = isset($_SESSION["user"]);
 $userId = $isLoggedIn ? (int)($_SESSION["user"]["id"] ?? $_SESSION["user"]["userID"] ?? 0) : 0;
 $userEmail = $isLoggedIn ? ($_SESSION["user"]["email"] ?? null) : null;
 $userFullName = $isLoggedIn ? ($_SESSION["user"]["full_name"] ?? 'User') : null;
+if (!$isLoggedIn || $userId <= 0) {
+    checkoutResetLoyaltySelection();
+} elseif (isset($_SESSION['cart_loyalty_user_id']) && (int)$_SESSION['cart_loyalty_user_id'] !== $userId) {
+    checkoutResetLoyaltySelection();
+}
 
 // ----- CART -----
 // Support both cart shapes:
@@ -305,6 +331,7 @@ if (empty($cartItems)) {
 }
 
 $couponAction = '';
+$loyaltyAction = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $couponAction = strtolower(trim((string)($_POST['coupon_action'] ?? '')));
     if (!in_array($couponAction, ['apply', 'remove'], true)) {
@@ -312,6 +339,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if ($couponAction === 'remove') {
         $_POST['coupon_code'] = '';
+    }
+
+    $loyaltyAction = strtolower(trim((string)($_POST['loyalty_action'] ?? '')));
+    if (!in_array($loyaltyAction, ['apply', 'remove'], true)) {
+        $loyaltyAction = '';
+    }
+    if ($loyaltyAction === 'remove') {
+        $_POST['loyalty_points'] = '';
     }
 }
 
@@ -335,6 +370,43 @@ if ($selectedCouponCode !== '') {
 } else {
     unset($_SESSION['cart_coupon_code']);
 }
+
+$availableLoyaltyBalance = ($isLoggedIn && $userId > 0)
+    ? loyaltyGetCurrentBalance($conn, $userId)
+    : 0;
+$loyaltyEligibleSubtotal = max(0, round($cartTotal - $couponDiscount, 2));
+$selectedLoyaltyPoints = ($isLoggedIn && $userId > 0)
+    ? checkoutSanitizePositiveInt($_POST['loyalty_points'] ?? ($_SESSION['cart_loyalty_points_redeem'] ?? 0))
+    : 0;
+$loyaltyMessage = '';
+$loyaltyRedemption = loyaltyBuildRedemptionPreview(
+    $selectedLoyaltyPoints,
+    $availableLoyaltyBalance,
+    $loyaltyEligibleSubtotal
+);
+
+if ($selectedLoyaltyPoints > 0 && $loyaltyRedemption['error'] !== '' && $loyaltyAction !== 'apply') {
+    if ((int)$loyaltyRedemption['max_points_allowed'] > 0 && $isLoggedIn && $userId > 0) {
+        $selectedLoyaltyPoints = (int)$loyaltyRedemption['max_points_allowed'];
+        checkoutStoreLoyaltySelection($userId, $selectedLoyaltyPoints);
+        $loyaltyRedemption = loyaltyBuildRedemptionPreview(
+            $selectedLoyaltyPoints,
+            $availableLoyaltyBalance,
+            $loyaltyEligibleSubtotal
+        );
+        $loyaltyMessage = 'Loyalty redemption was adjusted to match your current cart.';
+    } else {
+        checkoutResetLoyaltySelection();
+        $selectedLoyaltyPoints = 0;
+        $loyaltyRedemption = loyaltyBuildRedemptionPreview(0, $availableLoyaltyBalance, $loyaltyEligibleSubtotal);
+        $loyaltyMessage = 'Loyalty redemption was removed because this order is no longer eligible.';
+    }
+}
+
+$loyaltyDiscount = (float)($loyaltyRedemption['discount_amount'] ?? 0);
+$estimatedEarnedPoints = (($isLoggedIn && $userId > 0) || (!empty($_POST['create_account']) && $_POST['create_account'] === 'yes'))
+    ? loyaltyCalculateEarnedPoints(max(0, round($loyaltyEligibleSubtotal - $loyaltyDiscount, 2)))
+    : 0;
 
 // ----- SHIPPING -----
 $countryCouriers = [
@@ -384,6 +456,9 @@ $error = '';
 $formData = $_POST;
 if (!isset($formData['coupon_code']) && $selectedCouponCode !== '') {
     $formData['coupon_code'] = $selectedCouponCode;
+}
+if (!isset($formData['loyalty_points']) && $selectedLoyaltyPoints > 0) {
+    $formData['loyalty_points'] = (string)$selectedLoyaltyPoints;
 }
 if (!isset($formData['shipping_speed']) || !in_array((string)$formData['shipping_speed'], $shippingSpeeds, true)) {
     $formData['shipping_speed'] = 'standard';
@@ -442,7 +517,7 @@ $displayShippingCost = checkoutShippingCost(
     (float)$freeShippingThreshold,
     $shippingRatesByCountry
 );
-$displayTotal = max(0, ($cartTotal - $couponDiscount) + $displayShippingCost);
+$displayTotal = max(0, ($cartTotal - $couponDiscount - $loyaltyDiscount) + $displayShippingCost);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
@@ -450,6 +525,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $isCouponOnlyPost = ($couponAction !== '');
+    $isLoyaltyOnlyPost = ($loyaltyAction !== '');
     if ($isCouponOnlyPost) {
         if ($couponAction === 'remove') {
             unset($_SESSION['cart_coupon_code']);
@@ -472,7 +548,82 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $couponMessage = 'Coupon applied: ' . (string)($activeCoupon['promotionName'] ?? $selectedCouponCode);
             }
         }
-        $displayTotal = max(0, ($cartTotal - $couponDiscount) + $displayShippingCost);
+        $loyaltyEligibleSubtotal = max(0, round($cartTotal - $couponDiscount, 2));
+        if ($selectedLoyaltyPoints > 0) {
+            $loyaltyRedemption = loyaltyBuildRedemptionPreview(
+                $selectedLoyaltyPoints,
+                $availableLoyaltyBalance,
+                $loyaltyEligibleSubtotal
+            );
+            if ($loyaltyRedemption['error'] !== '') {
+                if ((int)$loyaltyRedemption['max_points_allowed'] > 0 && $isLoggedIn && $userId > 0) {
+                    $selectedLoyaltyPoints = (int)$loyaltyRedemption['max_points_allowed'];
+                    checkoutStoreLoyaltySelection($userId, $selectedLoyaltyPoints);
+                    $loyaltyRedemption = loyaltyBuildRedemptionPreview(
+                        $selectedLoyaltyPoints,
+                        $availableLoyaltyBalance,
+                        $loyaltyEligibleSubtotal
+                    );
+                    $loyaltyMessage = 'Loyalty redemption was adjusted to match your current cart.';
+                } else {
+                    checkoutResetLoyaltySelection();
+                    $selectedLoyaltyPoints = 0;
+                    $loyaltyRedemption = loyaltyBuildRedemptionPreview(0, $availableLoyaltyBalance, $loyaltyEligibleSubtotal);
+                    $loyaltyMessage = 'Loyalty redemption was removed because this order is no longer eligible.';
+                }
+            }
+        }
+        $loyaltyDiscount = (float)($loyaltyRedemption['discount_amount'] ?? 0);
+        $estimatedEarnedPoints = (($isLoggedIn && $userId > 0) || (!empty($_POST['create_account']) && $_POST['create_account'] === 'yes'))
+            ? loyaltyCalculateEarnedPoints(max(0, round($loyaltyEligibleSubtotal - $loyaltyDiscount, 2)))
+            : 0;
+        if ($selectedLoyaltyPoints > 0 && !isset($formData['loyalty_points'])) {
+            $formData['loyalty_points'] = (string)$selectedLoyaltyPoints;
+        }
+        $displayTotal = max(0, ($cartTotal - $couponDiscount - $loyaltyDiscount) + $displayShippingCost);
+    } elseif ($isLoyaltyOnlyPost) {
+        $formData['loyalty_points'] = trim((string)($_POST['loyalty_points'] ?? ''));
+        if (!$isLoggedIn || $userId <= 0) {
+            checkoutResetLoyaltySelection();
+            $selectedLoyaltyPoints = 0;
+            $loyaltyRedemption = loyaltyBuildRedemptionPreview(0, 0, $loyaltyEligibleSubtotal);
+            $loyaltyDiscount = 0.0;
+            $errors['loyalty_points'] = 'Please log in to redeem loyalty points.';
+        } elseif ($loyaltyAction === 'remove') {
+            checkoutResetLoyaltySelection();
+            $selectedLoyaltyPoints = 0;
+            $loyaltyRedemption = loyaltyBuildRedemptionPreview(0, $availableLoyaltyBalance, $loyaltyEligibleSubtotal);
+            $loyaltyDiscount = 0.0;
+            $loyaltyMessage = 'Loyalty points removed.';
+            $_POST['loyalty_points'] = '';
+            $formData['loyalty_points'] = '';
+        } else {
+            $selectedLoyaltyPoints = checkoutSanitizePositiveInt($_POST['loyalty_points'] ?? 0);
+            $formData['loyalty_points'] = $selectedLoyaltyPoints > 0 ? (string)$selectedLoyaltyPoints : '';
+            $loyaltyRedemption = loyaltyBuildRedemptionPreview(
+                $selectedLoyaltyPoints,
+                $availableLoyaltyBalance,
+                $loyaltyEligibleSubtotal
+            );
+            if ($selectedLoyaltyPoints <= 0) {
+                checkoutResetLoyaltySelection();
+                $loyaltyDiscount = 0.0;
+                $errors['loyalty_points'] = 'Enter how many loyalty points you want to redeem.';
+            } elseif ($loyaltyRedemption['error'] !== '') {
+                checkoutResetLoyaltySelection();
+                $loyaltyDiscount = 0.0;
+                $errors['loyalty_points'] = (string)$loyaltyRedemption['error'];
+            } else {
+                checkoutStoreLoyaltySelection($userId, (int)$loyaltyRedemption['points_to_redeem']);
+                $selectedLoyaltyPoints = (int)$loyaltyRedemption['points_to_redeem'];
+                $loyaltyDiscount = (float)$loyaltyRedemption['discount_amount'];
+                $loyaltyMessage = 'Using ' . $selectedLoyaltyPoints . ' points for €' . number_format($loyaltyDiscount, 2) . ' off.';
+            }
+        }
+        $estimatedEarnedPoints = (($isLoggedIn && $userId > 0) || (!empty($_POST['create_account']) && $_POST['create_account'] === 'yes'))
+            ? loyaltyCalculateEarnedPoints(max(0, round($loyaltyEligibleSubtotal - $loyaltyDiscount, 2)))
+            : 0;
+        $displayTotal = max(0, ($cartTotal - $couponDiscount - $loyaltyDiscount) + $displayShippingCost);
     } else {
         $required = [
             'shipping_address' => 'Shipping address',
@@ -557,6 +708,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($selectedCouponCode !== '' && (!$activeCoupon || $couponDiscount <= 0)) {
             $errors['coupon_code'] = 'Coupon code is invalid, expired, or not applicable to your cart.';
         }
+        if (!empty($_POST['loyalty_points'])) {
+            $selectedLoyaltyPoints = checkoutSanitizePositiveInt($_POST['loyalty_points']);
+            $formData['loyalty_points'] = (string)$selectedLoyaltyPoints;
+            $loyaltyRedemption = loyaltyBuildRedemptionPreview(
+                $selectedLoyaltyPoints,
+                $availableLoyaltyBalance,
+                $loyaltyEligibleSubtotal
+            );
+            $loyaltyDiscount = (float)($loyaltyRedemption['discount_amount'] ?? 0);
+        }
+        if ($selectedLoyaltyPoints > 0) {
+            if (!$isLoggedIn || $userId <= 0) {
+                $errors['loyalty_points'] = 'Please log in to redeem loyalty points.';
+            } elseif ($loyaltyRedemption['error'] !== '') {
+                $errors['loyalty_points'] = (string)$loyaltyRedemption['error'];
+            }
+        }
 
         if (empty($errors)) {
             try {
@@ -574,7 +742,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ? "Free Shipping Applied!"
                     : "Add €" . number_format($shippingDifference, 2) . " more for free delivery!";
 
-                $totalAmount = max(0, ($cartTotal - $couponDiscount) + $shippingCost);
+                $lockedLoyaltyBalance = ($isLoggedIn && $userId > 0)
+                    ? loyaltyGetCurrentBalance($conn, $userId, true)
+                    : 0;
+                $finalLoyaltyRedemption = loyaltyBuildRedemptionPreview(
+                    $selectedLoyaltyPoints,
+                    $lockedLoyaltyBalance,
+                    $loyaltyEligibleSubtotal
+                );
+                if ($selectedLoyaltyPoints > 0 && $finalLoyaltyRedemption['error'] !== '') {
+                    throw new RuntimeException((string)$finalLoyaltyRedemption['error']);
+                }
+
+                $loyaltyDiscount = (float)($finalLoyaltyRedemption['discount_amount'] ?? 0);
+                $combinedDiscountTotal = round($couponDiscount + $loyaltyDiscount, 2);
+                $loyaltyEarnEligibleAmount = max(0, round($loyaltyEligibleSubtotal - $loyaltyDiscount, 2));
+                $earnedPoints = loyaltyCalculateEarnedPoints($loyaltyEarnEligibleAmount);
+                $totalAmount = max(0, ($cartTotal - $combinedDiscountTotal) + $shippingCost);
 
                 // Centralized Place Order module call:
                 // creates order header, order lines, payment row and shipment summary.
@@ -589,7 +773,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'payment_status' => 'paid',
                     'payment_provider' => trim((string)($_POST['payment_method'] ?? 'manual')),
                     'subtotal' => $cartTotal,
-                    'discount_total' => $couponDiscount,
+                    'discount_total' => $combinedDiscountTotal,
                     'shipping_cost' => $shippingCost,
                     'total_amount' => $totalAmount,
                     'shipping_address' => trim((string)($_POST['shipping_address'] ?? '')),
@@ -605,6 +789,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $orderNumber = (string)$placed['order_number'];
 
                 $accountCreated = false;
+                $loyaltyUserId = $isLoggedIn && $userId > 0 ? $userId : 0;
                 if (!$isLoggedIn && !empty($_POST['create_account']) && $_POST['create_account'] === 'yes') {
                     $tempPassword = bin2hex(random_bytes(5));
                     $hash = password_hash($tempPassword, PASSWORD_DEFAULT);
@@ -630,11 +815,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $upd->close();
                             $_SESSION['temp_password'] = $tempPassword;
                             $accountCreated = true;
+                            $loyaltyUserId = (int)$newUserId;
                         }
                         $insert->close();
                     }
                     $check->close();
                 }
+
+                $loyaltyOutcome = loyaltyApplyOrderTransactions(
+                    $conn,
+                    $loyaltyUserId,
+                    $orderId,
+                    (int)($finalLoyaltyRedemption['points_to_redeem'] ?? 0),
+                    $loyaltyDiscount,
+                    $earnedPoints
+                );
 
                 $conn->commit();
 
@@ -662,6 +857,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 unset($_SESSION['cart']);
                 unset($_SESSION['cart_coupon_code']);
+                checkoutResetLoyaltySelection();
 
                 $_SESSION['checkout_result'] = [
                     'order_id'         => $orderId,
@@ -670,7 +866,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'shipping_message' => $shippingMessage,
                     'free_shipping'    => $freeShippingEligible,
                     'account_created'  => $accountCreated,
-                    'discount_total'   => $couponDiscount,
+                    'discount_total'   => $combinedDiscountTotal,
+                    'coupon_discount'  => $couponDiscount,
+                    'loyalty_redeemed_points' => (int)($loyaltyOutcome['redeemed_points'] ?? 0),
+                    'loyalty_redeem_discount' => (float)($loyaltyOutcome['redeem_discount'] ?? 0),
+                    'loyalty_earned_points' => (int)($loyaltyOutcome['earned_points'] ?? 0),
+                    'loyalty_balance_after' => (int)($loyaltyOutcome['balance_after'] ?? 0),
+                    'loyalty_account_available' => $loyaltyUserId > 0,
                     'coupon_code'      => $selectedCouponCode,
                     'confirmation_email_to' => $confirmationEmailTo,
                     'confirmation_email_sent' => (bool)($emailResult['sent'] ?? false),
@@ -943,6 +1145,44 @@ if (file_exists($headerPath)) {
                     </div>
                 </fieldset>
 
+                <fieldset>
+                    <legend>Loyalty Program</legend>
+                    <?php if ($isLoggedIn && $userId > 0): ?>
+                    <div class="form-group">
+                        <label>Your loyalty balance</label>
+                        <span class="form-helper">
+                            <strong><?= number_format($availableLoyaltyBalance) ?> points</strong>
+                            worth about €<?= number_format($availableLoyaltyBalance * loyaltyPointValueEuro(), 2) ?>.
+                            Earn <?= loyaltyPointsEarnedPerEuro() ?> point per €1 spent and redeem <?= loyaltyPointsRedeemPerEuro() ?> points for every €1.00 off.
+                        </span>
+                    </div>
+                    <div class="form-group">
+                        <label>Redeem points</label>
+                        <div class="coupon-row">
+                            <input type="number" min="0" step="1" name="loyalty_points" value="<?= htmlspecialchars($formData['loyalty_points'] ?? '') ?>" placeholder="Enter points to redeem">
+                        </div>
+                        <div class="coupon-actions">
+                            <button type="submit" name="loyalty_action" value="apply" class="btn-inline btn-apply" formnovalidate>Apply</button>
+                            <button type="submit" name="loyalty_action" value="remove" class="btn-inline" formnovalidate>Remove</button>
+                        </div>
+                        <span class="form-helper">
+                            Max usable on this order: <strong><?= number_format((int)($loyaltyRedemption['max_points_allowed'] ?? 0)) ?> points</strong>
+                            for up to €<?= number_format(((int)($loyaltyRedemption['max_points_allowed'] ?? 0)) * loyaltyPointValueEuro(), 2) ?> off.
+                        </span>
+                        <span class="form-helper">
+                            Estimated points after this purchase: <strong><?= number_format($estimatedEarnedPoints) ?> points</strong>.
+                        </span>
+                        <?php if ($loyaltyMessage !== ''): ?><span class="form-helper"><?= htmlspecialchars($loyaltyMessage) ?></span><?php endif; ?>
+                        <?php if (isset($errors['loyalty_points'])): ?><span class="error"><?= $errors['loyalty_points'] ?></span><?php endif; ?>
+                    </div>
+                    <?php else: ?>
+                    <div class="form-group">
+                        <label>Loyalty rewards</label>
+                        <span class="form-helper">Sign in to redeem points now, or create an account during checkout to start earning points from this order.</span>
+                    </div>
+                    <?php endif; ?>
+                </fieldset>
+
                 <?php if (!$isLoggedIn): ?>
                 <fieldset>
                     <legend data-translate="checkoutOptional">Optional</legend>
@@ -991,7 +1231,8 @@ if (file_exists($headerPath)) {
                 <?php endforeach; ?>
                 <hr class="summary-divider">
                 <div class="summary-row"><span data-translate="subtotal">Subtotal</span><span>&euro;<span id="orderSubtotal"><?= number_format($cartTotal,2) ?></span></span></div>
-                <div class="summary-row"><span>Discount</span><span>-&euro;<span id="orderDiscount"><?= number_format($couponDiscount,2) ?></span></span></div>
+                <div class="summary-row"><span>Coupon Discount</span><span>-&euro;<span id="orderCouponDiscount"><?= number_format($couponDiscount,2) ?></span></span></div>
+                <div class="summary-row"><span>Loyalty Discount</span><span>-&euro;<span id="orderLoyaltyDiscount"><?= number_format($loyaltyDiscount,2) ?></span></span></div>
                 <div class="summary-row"><span data-translate="shipping">Shipping</span><span id="orderShipping"><?= $freeShippingEligible ? 'FREE' : ('€' . number_format($displayShippingCost,2)) ?></span></div>
                 <div class="summary-row summary-row-total"><span data-translate="total">Total</span><span>&euro;<span id="orderTotal"><?= number_format($displayTotal,2) ?></span></span></div>
             </div>
@@ -1010,7 +1251,8 @@ if (file_exists($headerPath)) {
 (function () {
     var freeThreshold = <?= json_encode((float)$freeShippingThreshold) ?>;
     var subtotal = <?= json_encode((float)$cartTotal) ?>;
-    var discount = <?= json_encode((float)$couponDiscount) ?>;
+    var couponDiscount = <?= json_encode((float)$couponDiscount) ?>;
+    var loyaltyDiscount = <?= json_encode((float)$loyaltyDiscount) ?>;
     var shippingRatesByCountry = <?= json_encode($shippingRatesByCountry) ?>;
     var countryCouriers = <?= json_encode($countryCouriers) ?>;
     var defaultAddress = <?= json_encode($defaultAddress) ?>;
@@ -1231,7 +1473,7 @@ if (file_exists($headerPath)) {
         var speed = selectedSpeed();
         var currentShippingCost = shippingCost(country, speed);
         if (shippingOut) shippingOut.textContent = currentShippingCost === 0 ? 'FREE' : formatMoney(currentShippingCost);
-        var total = Math.max(0, subtotal - discount + currentShippingCost);
+        var total = Math.max(0, subtotal - couponDiscount - loyaltyDiscount + currentShippingCost);
         if (totalOut) totalOut.textContent = total.toFixed(2);
         if (btnTotalOut) btnTotalOut.textContent = total.toFixed(2);
     }

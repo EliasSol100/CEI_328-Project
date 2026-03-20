@@ -2,6 +2,7 @@
 session_start();
 
 require_once "../authentication/database.php";
+require_once "../include/loyalty_program.php";
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
@@ -75,7 +76,7 @@ $GLOBALS['header_user_role']      = $role;
 $GLOBALS['header_user_initials']  = $initials;
 
 $activeTab = $_GET["tab"] ?? "orders";
-$allowedTabs = ["orders", "addresses", "settings"];
+$allowedTabs = ["orders", "loyalty", "addresses", "settings"];
 if (!in_array($activeTab, $allowedTabs, true)) {
     $activeTab = "orders";
 }
@@ -86,6 +87,20 @@ function formatDateTime(?string $value): string {
     $ts = strtotime($value);
     if (!$ts) return $value;
     return date("d/m/Y H:i", $ts);
+}
+
+function formatLoyaltyRuleLabel(?string $rule): string {
+    $rule = strtolower(trim((string)$rule));
+    if ($rule === "earn_purchase") {
+        return "Points earned from purchase";
+    }
+    if ($rule === "redeem_checkout") {
+        return "Points redeemed at checkout";
+    }
+    if ($rule === "") {
+        return "Loyalty activity";
+    }
+    return ucwords(str_replace("_", " ", $rule));
 }
 
 /**
@@ -899,6 +914,12 @@ if ($previewStmt) {
     $previewStmt->close();
 }
 
+$loyaltyBalance = loyaltyGetCurrentBalance($conn, $userId);
+$loyaltyHistory = loyaltyFetchHistory($conn, $userId, 100);
+$loyaltyEarnRate = loyaltyPointsEarnedPerEuro();
+$loyaltyRedeemRate = loyaltyPointsRedeemPerEuro();
+$loyaltyBalanceValue = $loyaltyBalance * loyaltyPointValueEuro();
+
 $orderStatusLabels = [
     "pending" => "Pending",
     "accepted" => "Accepted",
@@ -1027,6 +1048,11 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                             <i class="bi bi-box-seam me-2"></i>
                             <span data-translate="sidebarOrders">Orders</span>
                         </a>
+                        <a href="account.php?tab=loyalty"
+                           class="list-group-item list-group-item-action <?= $activeTab === 'loyalty' ? 'active' : '' ?>">
+                            <i class="bi bi-stars me-2"></i>
+                            <span>Loyalty</span>
+                        </a>
                         <a href="account.php?tab=addresses"
                            class="list-group-item list-group-item-action <?= $activeTab === 'addresses' ? 'active' : '' ?>">
                             <i class="bi bi-geo-alt me-2"></i>
@@ -1145,6 +1171,89 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                             </div>
                                         </div>
                                     <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+                        <?php elseif ($activeTab === "loyalty"): ?>
+                            <h4 class="mb-4">Loyalty Program</h4>
+
+                            <div class="row g-3 mb-4">
+                                <div class="col-md-4">
+                                    <div class="card border-0 shadow-sm rounded-4 h-100">
+                                        <div class="card-body">
+                                            <div class="text-muted small text-uppercase">Current Balance</div>
+                                            <div class="fs-3 fw-semibold"><?= number_format($loyaltyBalance) ?> pts</div>
+                                            <div class="small text-muted">Approx. €<?= number_format($loyaltyBalanceValue, 2) ?> in redeemable value</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="card border-0 shadow-sm rounded-4 h-100">
+                                        <div class="card-body">
+                                            <div class="text-muted small text-uppercase">Earn Rule</div>
+                                            <div class="fs-5 fw-semibold"><?= number_format($loyaltyEarnRate) ?> point per €1</div>
+                                            <div class="small text-muted">Points are awarded after successful orders.</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="card border-0 shadow-sm rounded-4 h-100">
+                                        <div class="card-body">
+                                            <div class="text-muted small text-uppercase">Redeem Rule</div>
+                                            <div class="fs-5 fw-semibold"><?= number_format($loyaltyRedeemRate) ?> points = €1 off</div>
+                                            <div class="small text-muted">Redemption applies at checkout before shipping.</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <?php if (empty($loyaltyHistory)): ?>
+                                <p class="text-muted mb-0">
+                                    You do not have any loyalty activity yet. Once you complete an eligible purchase, your points history will appear here.
+                                </p>
+                            <?php else: ?>
+                                <div class="card border-0 shadow-sm rounded-4">
+                                    <div class="card-body">
+                                        <div class="table-responsive">
+                                            <table class="table align-middle mb-0">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Date</th>
+                                                        <th>Activity</th>
+                                                        <th>Order</th>
+                                                        <th>Points</th>
+                                                        <th>Balance</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <?php foreach ($loyaltyHistory as $entry): ?>
+                                                        <?php
+                                                        $pointsDelta = (int)($entry["pointsDelta"] ?? 0);
+                                                        $balanceAfterRow = (int)($entry["pointsBalanceAfter"] ?? 0);
+                                                        $voucherValue = (float)($entry["voucherValue"] ?? 0);
+                                                        $orderNumber = trim((string)($entry["orderNumber"] ?? ""));
+                                                        $orderLabel = $orderNumber !== ""
+                                                            ? $orderNumber
+                                                            : (((int)($entry["referenceOrderID"] ?? 0) > 0) ? ("Order #" . (int)$entry["referenceOrderID"]) : "-");
+                                                        $pointsClass = $pointsDelta >= 0 ? "text-success" : "text-danger";
+                                                        $pointsPrefix = $pointsDelta > 0 ? "+" : "";
+                                                        ?>
+                                                        <tr>
+                                                            <td><?= htmlspecialchars(formatDateTime($entry["createdAt"] ?? null)) ?></td>
+                                                            <td>
+                                                                <div class="fw-medium"><?= htmlspecialchars(formatLoyaltyRuleLabel($entry["ruleApplied"] ?? "")) ?></div>
+                                                                <?php if ($voucherValue > 0): ?>
+                                                                    <div class="small text-muted">Discount used: €<?= number_format($voucherValue, 2) ?></div>
+                                                                <?php endif; ?>
+                                                            </td>
+                                                            <td><?= htmlspecialchars($orderLabel) ?></td>
+                                                            <td class="<?= $pointsClass ?> fw-semibold"><?= $pointsPrefix . number_format($pointsDelta) ?></td>
+                                                            <td><?= number_format($balanceAfterRow) ?> pts</td>
+                                                        </tr>
+                                                    <?php endforeach; ?>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
                                 </div>
                             <?php endif; ?>
                         <?php elseif ($activeTab === "addresses"): ?>
