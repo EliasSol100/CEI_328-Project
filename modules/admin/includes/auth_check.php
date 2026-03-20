@@ -26,18 +26,30 @@ $userRole = strtolower((string)$userRoleRaw);
 // Which roles are allowed to access the admin module
 $allowedAdminRoles = ['admin', 'administrator', 'superadmin'];
 
+function adminBuildProjectBasePath(): string
+{
+    $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
+    $base = rtrim(str_replace('\\', '/', dirname(dirname(dirname($script)))), '/');
+    if ($base === '/' || $base === '.' || $base === '') {
+        return '';
+    }
+    return $base;
+}
+
+$projectBasePath = adminBuildProjectBasePath();
+
 /**
  * Hard gate:
  *  - If not logged in  -> send to login page
  *  - If logged in but not admin -> send to storefront home
  */
 if (!$userId) {
-    header('Location: /athina-eshop/authentication/login.php');
+    header('Location: ' . $projectBasePath . '/authentication/login.php');
     exit;
 }
 
 if (!in_array($userRole, $allowedAdminRoles, true)) {
-    header('Location: /athina-eshop/index.php');
+    header('Location: ' . $projectBasePath . '/index.php');
     exit;
 }
 
