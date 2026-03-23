@@ -557,9 +557,7 @@ function sendOrderConfirmationEmail(array $payload): array {
         $shippingLine = 'Not specified';
     }
 
-    require_once __DIR__ . '/../PHPMailer-master/src/Exception.php';
-    require_once __DIR__ . '/../PHPMailer-master/src/PHPMailer.php';
-    require_once __DIR__ . '/../PHPMailer-master/src/SMTP.php';
+    require_once __DIR__ . '/../vendor/autoload.php';
 
     $itemLines = [];
     foreach ($items as $item) {
@@ -685,9 +683,7 @@ function sendAdminOrderNotificationEmail(mysqli $conn, array $payload): array {
         return ['sent' => 0, 'failed' => 0];
     }
 
-    require_once __DIR__ . '/../PHPMailer-master/src/Exception.php';
-    require_once __DIR__ . '/../PHPMailer-master/src/PHPMailer.php';
-    require_once __DIR__ . '/../PHPMailer-master/src/SMTP.php';
+    require_once __DIR__ . '/../vendor/autoload.php';
 
     $body =
         "New order received.\n\n" .
