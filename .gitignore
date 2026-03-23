@@ -4,3 +4,7 @@ authentication/twilio_config.php
 # XAMPP / local environment
 /vendor/
 *.log
+*.old
+*.bak
+.DS_Store
+*.tmp
