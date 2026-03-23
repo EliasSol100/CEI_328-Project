@@ -1,9 +1,7 @@
 <?php
 if (!defined('INCLUDE_CHECK')) define('INCLUDE_CHECK', true);
 
-require_once __DIR__ . '/../PHPMailer-master/src/PHPMailer.php';
-require_once __DIR__ . '/../PHPMailer-master/src/SMTP.php';
-require_once __DIR__ . '/../PHPMailer-master/src/Exception.php';
+require_once __DIR__ . '/../vendor/autoload.php';
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception as MailerException;
