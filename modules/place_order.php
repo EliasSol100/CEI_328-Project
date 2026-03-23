@@ -80,6 +80,143 @@ function ensureOrderShippingSchema(mysqli $conn): void {
 }
 
 /**
+ * Ensure custom_orders can store auto-created made-to-order links from checkout.
+ *
+ * @param mysqli $conn
+ * @return void
+ */
+function ensureCustomOrderBridgeSchema(mysqli $conn): void {
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $tableCheck = $conn->query("SHOW TABLES LIKE 'custom_orders'");
+    if (!$tableCheck || $tableCheck->num_rows === 0) {
+        return;
+    }
+
+    // Allow guest orders (NULL userID) for auto-created made-to-order rows.
+    $conn->query("ALTER TABLE custom_orders MODIFY COLUMN userID INT(11) NULL");
+
+    $requiredColumns = [
+        'sourceOrderID' => "ALTER TABLE custom_orders ADD COLUMN sourceOrderID INT NULL AFTER accessCode",
+        'sourceOrderNumber' => "ALTER TABLE custom_orders ADD COLUMN sourceOrderNumber VARCHAR(64) NULL AFTER sourceOrderID",
+        'sourceProductID' => "ALTER TABLE custom_orders ADD COLUMN sourceProductID INT NULL AFTER sourceOrderNumber",
+        'linkedProductName' => "ALTER TABLE custom_orders ADD COLUMN linkedProductName VARCHAR(255) NULL AFTER sourceProductID",
+    ];
+
+    foreach ($requiredColumns as $columnName => $sql) {
+        $safeCol = $conn->real_escape_string($columnName);
+        $check = $conn->query("SHOW COLUMNS FROM custom_orders LIKE '{$safeCol}'");
+        $exists = ($check && $check->num_rows > 0);
+        if (!$exists) {
+            $conn->query($sql);
+        }
+    }
+}
+
+/**
+ * Auto-create Custom Orders rows for made-to-order products purchased in checkout.
+ *
+ * @param mysqli $conn
+ * @param int $orderID
+ * @param string $orderNumber
+ * @param int|null $userID
+ * @param string $email
+ * @param string $customerName
+ * @param array $madeToOrderItems
+ * @return int
+ */
+function createCustomOrdersForMadeToOrderCheckout(
+    mysqli $conn,
+    int $orderID,
+    string $orderNumber,
+    ?int $userID,
+    string $email,
+    string $customerName,
+    array $madeToOrderItems
+): int {
+    if ($orderID <= 0 || empty($madeToOrderItems)) {
+        return 0;
+    }
+
+    ensureCustomOrderBridgeSchema($conn);
+    $created = 0;
+    $status = 'pending';
+    $deadline = null;
+
+    foreach ($madeToOrderItems as $item) {
+        $productID = (int)($item['product_id'] ?? 0);
+        if ($productID <= 0) {
+            continue;
+        }
+
+        $checkStmt = $conn->prepare("SELECT customOrderID FROM custom_orders WHERE sourceOrderID = ? AND sourceProductID = ? LIMIT 1");
+        if ($checkStmt) {
+            $checkStmt->bind_param('ii', $orderID, $productID);
+            $checkStmt->execute();
+            $checkRes = $checkStmt->get_result();
+            $alreadyExists = $checkRes && $checkRes->num_rows > 0;
+            $checkStmt->close();
+            if ($alreadyExists) {
+                continue;
+            }
+        }
+
+        $productName = trim((string)($item['product_name'] ?? 'Made to Order Item'));
+        $quantity = max(1, (int)($item['quantity'] ?? 1));
+        $lineTotal = (float)($item['line_total'] ?? 0);
+        $description = "Auto-created from checkout {$orderNumber}: {$productName} x{$quantity}";
+        $accessCode = 'MTO' . strtoupper(substr(bin2hex(random_bytes(4)), 0, 8));
+
+        $insert = $conn->prepare("
+            INSERT INTO custom_orders (
+                userID,
+                email,
+                requestDescription,
+                status,
+                customerName,
+                agreedPrice,
+                deadline,
+                accessCode,
+                sourceOrderID,
+                sourceOrderNumber,
+                sourceProductID,
+                linkedProductName
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ");
+        if (!$insert) {
+            continue;
+        }
+
+        $uid = ($userID && $userID > 0) ? $userID : null;
+        $insert->bind_param(
+            'issssdssisis',
+            $uid,
+            $email,
+            $description,
+            $status,
+            $customerName,
+            $lineTotal,
+            $deadline,
+            $accessCode,
+            $orderID,
+            $orderNumber,
+            $productID,
+            $productName
+        );
+        if ($insert->execute()) {
+            $created++;
+        }
+        $insert->close();
+    }
+
+    return $created;
+}
+
+/**
  * Convert internal courier code into user-friendly label.
  *
  * @param string $courierCode
@@ -134,10 +271,12 @@ function generateOrderNumber(mysqli $conn): string {
 function placeOrder(mysqli $conn, array $input): array {
     ensureOrderShippingSchema($conn);
 
+    // ===== FIX: Removed the strict payment confirmation check =====
+    // The caller may create an order before actual payment (e.g., redirect to Stripe/PayPal).
+    // The payment status will be updated later in process_payment.php.
     $paymentConfirmed = (bool)($input['payment_confirmed'] ?? false);
-    if (!$paymentConfirmed) {
-        throw new InvalidArgumentException('Payment confirmation is required before placing an order.');
-    }
+    // No longer throwing an exception if false.
+    // =============================================================
 
     $items = $input['items'] ?? [];
     if (!is_array($items) || empty($items)) {
@@ -156,6 +295,10 @@ function placeOrder(mysqli $conn, array $input): array {
     $userID = isset($input['user_id']) && (int)$input['user_id'] > 0 ? (int)$input['user_id'] : null;
     $isGuestFlag = (int)($input['is_guest'] ?? ($userID ? 0 : 1));
     $email = trim((string)($input['email'] ?? ''));
+    $customerName = trim((string)($input['customer_name'] ?? ''));
+    if ($customerName === '') {
+        $customerName = 'Customer';
+    }
     $status = trim((string)($input['order_status'] ?? 'pending'));
     $shippingAddress = trim((string)($input['shipping_address'] ?? ''));
     $shippingCity = trim((string)($input['shipping_city'] ?? ''));
@@ -216,6 +359,29 @@ function placeOrder(mysqli $conn, array $input): array {
         throw new Exception('Failed to prepare order item insert: ' . $conn->error);
     }
 
+    $productMetaMap = [];
+    $productIds = [];
+    foreach ($items as $item) {
+        $pid = (int)($item['productID'] ?? $item['product_id'] ?? $item['product']['id'] ?? 0);
+        if ($pid > 0) {
+            $productIds[$pid] = true;
+        }
+    }
+    if (!empty($productIds)) {
+        $idsSql = implode(',', array_map('intval', array_keys($productIds)));
+        $metaRes = $conn->query("SELECT productID, nameEN, cartStatus FROM products WHERE productID IN ({$idsSql})");
+        if ($metaRes) {
+            while ($metaRow = $metaRes->fetch_assoc()) {
+                $productMetaMap[(int)$metaRow['productID']] = [
+                    'name' => trim((string)($metaRow['nameEN'] ?? 'Product')),
+                    'status' => trim((string)($metaRow['cartStatus'] ?? '')),
+                ];
+            }
+        }
+    }
+
+    $madeToOrderItems = [];
+
     foreach ($items as $item) {
         $productID = (int)($item['productID'] ?? $item['product_id'] ?? $item['product']['id'] ?? 0);
         if ($productID <= 0) {
@@ -255,14 +421,36 @@ function placeOrder(mysqli $conn, array $input): array {
         if (!$lineStmt->execute()) {
             throw new Exception('Failed to insert order line: ' . $lineStmt->error);
         }
+
+        $meta = $productMetaMap[$productID] ?? null;
+        if ($meta && strtolower((string)$meta['status']) === 'made_to_order') {
+            $madeToOrderItems[] = [
+                'product_id' => $productID,
+                'product_name' => (string)$meta['name'],
+                'quantity' => $quantity,
+                'line_total' => round($unitPrice * $quantity, 2),
+            ];
+        }
     }
     $lineStmt->close();
 
+    $createdCustomOrders = createCustomOrdersForMadeToOrderCheckout(
+        $conn,
+        $orderID,
+        $orderNumber,
+        $userID,
+        $email,
+        $customerName,
+        $madeToOrderItems
+    );
+
     // 3) Payment record
-    $provider = trim((string)($input['payment_provider'] ?? 'manual'));
-    $paymentStatus = trim((string)($input['payment_status'] ?? 'paid'));
+    $provider = trim((string)($input['payment_method'] ?? 'manual'));       // fixed: use payment_method (from checkout)
+    $paymentStatus = trim((string)($input['payment_status'] ?? 'pending')); // default to pending
     $transactionID = trim((string)($input['transaction_id'] ?? ''));
     if ($transactionID === '') {
+        // Only generate a temporary ID if payment is not yet confirmed.
+        // This can be overwritten later by the actual Stripe ID.
         $transactionID = 'TXN_' . strtoupper(bin2hex(random_bytes(5)));
     }
 
@@ -303,6 +491,9 @@ function placeOrder(mysqli $conn, array $input): array {
 
     // 6) Notify admin about the new order.
     $adminNotificationMessage = "New order placed: {$orderNumber} | Total: €" . number_format($totalAmount, 2);
+    if ($createdCustomOrders > 0) {
+        $adminNotificationMessage .= " | Custom Orders: {$createdCustomOrders}";
+    }
     notifyAdminNewOrder($conn, $adminNotificationMessage);
 
     // 7) Email all admins about the new order.
@@ -560,3 +751,4 @@ function sendAdminOrderNotificationEmail(mysqli $conn, array $payload): array {
 
     return ['sent' => $sent, 'failed' => $failed];
 }
+?>

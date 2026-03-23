@@ -3,112 +3,165 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 session_start();
 
-if (!isset($_SESSION['checkout_result'])) {
-    $projectRedirect = rtrim(str_replace('\\', '/', dirname(dirname($_SERVER['SCRIPT_NAME'] ?? ''))), '/');
-    if ($projectRedirect === '' || $projectRedirect === '.') {
-        $projectRedirect = '';
-    }
-    header('Location: ' . $projectRedirect . '/shop.php');
-    exit;
+require_once __DIR__ . '/../authentication/database.php';
+require_once __DIR__ . '/../authentication/get_config.php';
+require_once __DIR__ . '/../include/review_functions.php'; // For isOrderReviewEligible()
+
+$system_title = getSystemConfig("site_title") ?: "Creations by Athina";
+$project = '/CEI_328-Project'; // adjust if your project root is different
+
+// Get order ID from URL first, then fall back to session
+$orderId = isset($_GET['order_id']) ? (int)$_GET['order_id'] : ($_SESSION['checkout_result']['order_id'] ?? 0);
+if (!$orderId) {
+    die("<h2>No order ID provided</h2><p>Please go back to the shop.</p>");
 }
-$result = $_SESSION['checkout_result'];
 unset($_SESSION['checkout_result']);
 
 $tempPassword = $_SESSION['temp_password'] ?? null;
 unset($_SESSION['temp_password']);
 
-// Correct relative path for includes
-require_once __DIR__ . '/../authentication/database.php';
+// ---------- FETCH ORDER HEADER with payments ----------
+$orderStmt = $conn->prepare("
+    SELECT
+        o.orderID,
+        o.orderNumber,
+        o.createdAt,
+        o.totalAmount,
+        o.subtotal,
+        o.discountTotal,
+        o.shippingCost,
+        o.shipping_speed,
+        -- snake_case address columns
+        o.shipping_address,
+        o.shipping_city,
+        o.shipping_postal_code,
+        o.shipping_country,
+        -- camelCase address columns
+        o.shippingAddress,
+        o.shippingCity,
+        o.shippingPostalCode,
+        o.shippingCountry,
+        -- courier info
+        o.courier,
+        o.courierCode,
+        -- other fields
+        o.email AS guest_email,
+        o.userID,
+        o.status,
+        p.provider AS payment_method,
+        p.transactionID AS transaction_id,
+        p.paymentStatus AS payment_status
+    FROM orders o
+    LEFT JOIN (
+        SELECT orderID, provider, transactionID, paymentStatus
+        FROM payments
+        WHERE orderID = ?
+        ORDER BY paymentID DESC
+        LIMIT 1
+    ) p ON p.orderID = o.orderID
+    WHERE o.orderID = ?
+");
+$orderStmt->bind_param("ii", $orderId, $orderId);
+$orderStmt->execute();
+$orderResult = $orderStmt->get_result();
 
-$configPath = __DIR__ . '/../authentication/get_config.php';
-if (file_exists($configPath)) {
-    require_once $configPath;
-    $system_title = function_exists('getSystemConfig') ? getSystemConfig('site_title') : 'Creations by Athina';
+if (!$orderResult || $orderResult->num_rows === 0) {
+    echo "<div style='max-width:800px; margin:50px auto; padding:20px; background:#f8d7da; color:#721c24; border-radius:8px;'>";
+    echo "<h2>Order not found</h2>";
+    echo "<p>The order with ID <strong>{$orderId}</strong> does not exist in the database.</p>";
+    echo "<a href='{$project}/shop.php' class='btn btn-primary'>Return to Shop</a>";
+    echo "</div>";
+    include __DIR__ . '/../include/footer.php';
+    exit;
+}
+
+$order = $orderResult->fetch_assoc();
+$orderStmt->close();
+
+// ---------- FETCH ORDER ITEMS WITH IMAGES ----------
+$itemsStmt = $conn->prepare("
+    SELECT
+        oi.productID,
+        oi.quantity,
+        oi.unitPrice,
+        oi.giftWrapping,
+        oi.giftBagFlag,
+        oi.giftMessage,
+        p.nameEN,
+        p.nameGR,
+        ph.imageID
+    FROM order_items oi
+    LEFT JOIN products p ON oi.productID = p.productID
+    LEFT JOIN photos ph ON p.productID = ph.productID
+    WHERE oi.orderID = ?
+");
+$itemsStmt->bind_param("i", $orderId);
+$itemsStmt->execute();
+$itemsResult = $itemsStmt->get_result();
+
+$items = [];
+while ($row = $itemsResult->fetch_assoc()) {
+    $imageUrl = !empty($row['imageID'])
+        ? $project . '/modules/admin/ajax/product_image.php?id=' . $row['imageID']
+        : $project . '/assets/images/placeholder.jpg';
+    $items[] = [
+        'productID'    => (int)($row['productID'] ?? 0),
+        'name'         => $row['nameEN'] ?: $row['nameGR'] ?: 'Product',
+        'quantity'     => (int)($row['quantity'] ?? 1),
+        'unitPrice'    => (float)($row['unitPrice'] ?? 0),
+        'giftWrapping' => (int)($row['giftWrapping'] ?? 0),
+        'giftBagFlag'  => (int)($row['giftBagFlag'] ?? 0),
+        'giftMessage'  => $row['giftMessage'] ?? '',
+        'image'        => $imageUrl,
+    ];
+}
+$itemsStmt->close();
+
+// ---------- HELPER FUNCTIONS ----------
+function formatPaymentMethod($method, $transactionId = '') {
+    if (empty($method)) {
+        return 'Not specified';
+    }
+    $map = [
+        'stripe'             => 'Credit Card (Stripe)',
+        'paypal'             => 'PayPal',
+        'cash_on_delivery'   => 'Cash on Delivery',
+        'bank_transfer'      => 'Bank Transfer',
+    ];
+    $display = $map[strtolower($method)] ?? ucfirst(str_replace('_', ' ', $method));
+    if ($transactionId && in_array(strtolower($method), ['stripe', 'paypal'])) {
+        $display .= ' (Transaction: ' . htmlspecialchars($transactionId) . ')';
+    }
+    return $display;
+}
+
+function formatCourier($courier) {
+    if (empty($courier)) {
+        return 'Not available';
+    }
+    $map = [
+        'akis_express' => 'Akis Express',
+        'boxnow'       => 'BoxNow',
+        'acs'          => 'ACS',
+        'geniki'       => 'Geniki Taxydromiki',
+        'elta'         => 'ELTA',
+        'speedex'      => 'Speedex',
+    ];
+    return $map[strtolower($courier)] ?? ucfirst(str_replace('_', ' ', $courier));
+}
+
+// Check if order is eligible for reviews (using shared function)
+$reviewEligible = isOrderReviewEligible($conn, $orderId);
+$reviewUrl = $reviewEligible ? $project . '/submit_product_review.php?order_id=' . $orderId : '';
+
+// Determine courier display (try both courier and courierCode)
+$courierDisplay = '';
+if (!empty($order['courier'])) {
+    $courierDisplay = formatCourier($order['courier']);
+} elseif (!empty($order['courierCode'])) {
+    $courierDisplay = formatCourier($order['courierCode']);
 } else {
-    $system_title = 'Creations by Athina';
-}
-
-if (!$conn) die("Database connection failed");
-
-$project = rtrim(str_replace('\\', '/', dirname(dirname($_SERVER['SCRIPT_NAME'] ?? ''))), '/');
-if ($project === '' || $project === '.') {
-    $project = '';
-}
-
-$orderDetails = null;
-$orderItems = [];
-if (isset($result['order_id'])) {
-    // Schema-aligned read query: orderID/order_items.orderID.
-    $stmt = $conn->prepare("SELECT o.*, (SELECT COUNT(*) FROM order_items WHERE orderID = o.orderID) AS item_count FROM orders o WHERE o.orderID = ?");
-    if ($stmt) {
-        $stmt->bind_param("i", $result['order_id']);
-        $stmt->execute();
-        $orderResult = $stmt->get_result();
-        $orderDetails = $orderResult->fetch_assoc();
-        $stmt->close();
-    }
-
-    $itemsStmt = $conn->prepare("
-        SELECT oi.quantity, p.nameEN, p.nameGR
-        FROM order_items oi
-        LEFT JOIN products p ON p.productID = oi.productID
-        WHERE oi.orderID = ?
-        ORDER BY oi.orderItemID ASC
-    ");
-    if ($itemsStmt) {
-        $itemsStmt->bind_param("i", $result['order_id']);
-        $itemsStmt->execute();
-        $itemsRes = $itemsStmt->get_result();
-        while ($itemsRes && ($row = $itemsRes->fetch_assoc())) {
-            $label = trim((string)($row['nameEN'] ?? ''));
-            if ($label === '') {
-                $label = trim((string)($row['nameGR'] ?? ''));
-            }
-            if ($label === '') {
-                $label = 'Product';
-            }
-            $orderItems[] = [
-                'name' => $label,
-                'quantity' => max(1, (int)($row['quantity'] ?? 1)),
-            ];
-        }
-        $itemsStmt->close();
-    }
-}
-
-function buildGuestReviewKeyForOrder(int $orderId, string $orderNumber, string $email): string {
-    $payload = $orderId . "|" . strtolower(trim($email)) . "|" . trim($orderNumber);
-    return hash_hmac("sha256", $payload, "athina_guest_review_v1");
-}
-
-function isOrderReviewEligible(mysqli $conn, int $orderId): bool {
-    if ($orderId <= 0) {
-        return false;
-    }
-
-    $stmt = $conn->prepare(
-        "SELECT 1
-         FROM orders o
-         WHERE o.orderID = ?
-           AND LOWER(o.status) IN ('delivered', 'completed')
-           AND EXISTS (
-               SELECT 1
-               FROM payments p
-               WHERE p.orderID = o.orderID
-                 AND LOWER(p.paymentStatus) IN ('paid', 'completed', 'captured', 'succeeded', 'confirmed')
-               LIMIT 1
-           )
-         LIMIT 1"
-    );
-    if (!$stmt) {
-        return false;
-    }
-    $stmt->bind_param("i", $orderId);
-    $stmt->execute();
-    $res = $stmt->get_result();
-    $ok = ($res && $res->num_rows > 0);
-    $stmt->close();
-    return $ok;
+    $courierDisplay = 'Not available';
 }
 ?>
 <!DOCTYPE html>
@@ -121,138 +174,161 @@ function isOrderReviewEligible(mysqli $conn, int $orderId): bool {
     <link rel="stylesheet" href="<?= $project ?>/assets/styling/header.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        .success-container { max-width: 800px; margin: 60px auto; padding: 0 20px; }
-        .success-card { background: white; border-radius: 12px; padding: 40px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); text-align: center; }
-        .success-icon { width: 100px; height: 100px; background: #28a745; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 25px; }
-        .success-icon i { color: #fff; font-size: 52px; line-height: 1; }
-        .order-number { font-size: 24px; font-weight: 700; color: #007bff; margin: 10px 0; padding: 10px 20px; background: #f0f8ff; display: inline-block; border-radius: 50px; }
-        .account-box { background: #cce5ff; color: #004085; padding: 25px; border-radius: 8px; margin: 25px 0; text-align: left; }
-        .password-box { background: #fff; padding: 15px; border: 1px dashed #007bff; font-family: monospace; font-size: 20px; text-align: center; margin: 15px 0; }
-        .order-details { background: #f8f9fa; padding: 25px; border-radius: 8px; margin: 25px 0; text-align: left; }
+        .checkout-container { max-width: 1160px; margin: 36px auto 72px; padding: 0 20px; }
+        .checkout-title { margin: 0 0 18px; color: #2d184d; font-size: clamp(1.9rem,2.7vw,2.4rem); }
+        .order-number-badge {
+            font-size: 24px; font-weight: 700; color: #007bff;
+            padding: 10px 20px; background: #f0f8ff; border-radius: 50px;
+            display: inline-block; margin-bottom: 20px;
+        }
+        .checkout-grid { display: grid; grid-template-columns: minmax(0,1fr) 360px; gap: 28px; align-items: start; }
+        .checkout-form { border: 1px solid #e6dff2; border-radius: 18px; padding: 24px; background: #fff; box-shadow: 0 12px 28px rgba(63,32,102,0.08); }
+        .checkout-form fieldset { border: 1px solid #e5dcf2; border-radius: 14px; padding: 20px; margin-bottom: 18px; }
+        .checkout-form legend { color: #4e2f74; font-weight: 700; font-size: 14px; padding: 0 10px; }
         .detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #e9ecef; }
-        .items-dropdown { margin-top: 14px; }
-        .items-dropdown details { border: 1px solid #dbe2ea; border-radius: 8px; background: #fff; padding: 8px 10px; }
-        .items-dropdown summary { cursor: pointer; font-weight: 600; color: #3a4b61; }
-        .items-dropdown ul { margin: 10px 0 4px; padding-left: 18px; color: #334155; }
-        .items-dropdown li { margin: 4px 0; }
-        .btn { display: inline-block; padding: 14px 28px; border: none; border-radius: 6px; font-size: 16px; font-weight: 600; text-decoration: none; margin: 5px; }
+        .tracking-info { background: #e2f3ff; padding: 15px; border-radius: 8px; margin: 20px 0; }
+        .item-row { display: flex; align-items: center; padding: 15px 0; border-bottom: 1px solid #eee; }
+        .item-image { width: 60px; height: 60px; object-fit: cover; border-radius: 8px; margin-right: 15px; }
+        .btn { display: inline-block; padding: 12px 24px; border: none; border-radius: 6px; font-size: 16px; font-weight: 600; text-decoration: none; margin: 5px; cursor: pointer; transition: all 0.3s; }
         .btn-primary { background: #007bff; color: white; }
+        .btn-primary:hover { background: #0056b3; }
         .btn-success { background: #28a745; color: white; }
+        .btn-success:hover { background: #218838; }
         .btn-secondary { background: #6c757d; color: white; }
-        .btn-review { background: #495bd6; color: white; }
-        .btn-review:hover { background: #3f4fb6; }
+        .btn-secondary:hover { background: #545b62; }
+        .btn-outline { background: transparent; border: 1px solid #007bff; color: #007bff; }
+        .btn-outline:hover { background: #007bff; color: white; }
         .email-note { background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 20px 0; }
+        .button-group { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 30px; }
+        .totals-card { background: linear-gradient(180deg, #fbf9ff 0%, #f5f1fb 100%); border: 1px solid #e5dbf2; border-radius: 16px; padding: 22px; margin-top: 25px; }
+        .totals-row { display: flex; justify-content: space-between; padding: 6px 0; }
+        .totals-row.total { font-weight: 700; font-size: 20px; border-top: 2px solid #d5c8e7; margin-top: 10px; padding-top: 15px; }
+        @media (max-width: 1024px) { .checkout-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body class="site-page">
-<?php
-$headerPath = __DIR__ . '/../include/header.php';
-if (file_exists($headerPath)) {
-    $activePage = 'checkout-success';
-    include $headerPath;
-}
-?>
-<div class="success-container">
-    <div class="success-card">
-        <div class="success-icon"><i class="fas fa-check"></i></div>
-        <h1>Thank You!</h1>
-        <p style="color:#666; font-size:18px;">Your order has been placed successfully.</p>
-        <div class="order-number">Order #<?= htmlspecialchars((string)($result['order_number'] ?? $result['order_id'])) ?></div>
+<?php include __DIR__ . '/../include/header.php'; ?>
+<div class="checkout-container">
+    <h1 class="checkout-title">Order Confirmed</h1>
 
-        <?php if (!empty($result['account_created']) && $tempPassword): ?>
-            <div class="account-box">
-                <h3 style="margin-top:0;">Account Created</h3>
-                <p>Your temporary password:</p>
-                <div class="password-box"><?= htmlspecialchars($tempPassword) ?></div>
-                <p style="font-size:14px;">Please change it after logging in.</p>
-                <a href="<?= $project ?>/authentication/login.php" class="btn btn-primary" style="width:100%;">Login</a>
-            </div>
-        <?php endif; ?>
+    <div style="text-align:center;">
+        <span class="order-number-badge">Order #<?= htmlspecialchars($order['orderNumber'] ?? 'N/A') ?></span>
+    </div>
 
-        <?php if ($orderDetails): ?>
-        <div class="order-details">
-            <h3>Order Summary</h3>
-            <div class="detail-row"><span class="detail-label">Date:</span> <span><?= date('F j, Y, g:i a', strtotime((string)$orderDetails['createdAt'])) ?></span></div>
-            <div class="detail-row"><span class="detail-label">Status:</span> <span><?= htmlspecialchars((string)$orderDetails['status']) ?></span></div>
-            <div class="detail-row"><span class="detail-label">Items:</span> <span><?= $orderDetails['item_count'] ?> items</span></div>
-            <div class="detail-row"><span class="detail-label">Subtotal:</span> <span>&euro;<?= number_format((float)$orderDetails['subtotal'], 2) ?></span></div>
-            <div class="detail-row"><span class="detail-label">Shipping:</span> <span>&euro;<?= number_format((float)$orderDetails['shippingCost'], 2) ?></span></div>
-            <div class="detail-row" style="font-size:18px; font-weight:bold; color:#28a745;"><span class="detail-label">Total Paid:</span> <span>&euro;<?= number_format((float)$orderDetails['totalAmount'],2) ?></span></div>
+    <?php if ($tempPassword): ?>
+    <div class="tracking-info" style="background:#cce5ff; color:#004085; text-align:center;">
+        <h3>Account Created</h3>
+        <p>Your temporary password: <strong><?= htmlspecialchars($tempPassword) ?></strong></p>
+        <p>Please change it after logging in.</p>
+        <a href="<?= $project ?>/authentication/login.php" class="btn btn-primary">Login</a>
+    </div>
+    <?php endif; ?>
 
-            <?php if (!empty($orderItems)): ?>
-                <div class="items-dropdown">
-                    <details>
-                        <summary>View purchased items</summary>
-                        <ul>
-                            <?php foreach ($orderItems as $item): ?>
-                                <li><?= htmlspecialchars($item['name']) ?> x<?= (int)$item['quantity'] ?></li>
-                            <?php endforeach; ?>
-                        </ul>
-                    </details>
+    <div class="checkout-grid">
+        <!-- LEFT COLUMN: order details & items -->
+        <div class="checkout-form">
+            <fieldset>
+                <legend>Order Details</legend>
+                <div class="detail-row">
+                    <span>Date:</span>
+                    <span><?= date('F j, Y, g:i a', strtotime($order['createdAt'] ?? 'now')) ?></span>
                 </div>
-            <?php endif; ?>
-        </div>
-        <?php endif; ?>
+                <div class="detail-row">
+                    <span>Payment Method:</span>
+                    <span><?= htmlspecialchars(formatPaymentMethod($order['payment_method'] ?? '', $order['transaction_id'] ?? '')) ?></span>
+                </div>
+                <div class="detail-row">
+                    <span>Status:</span>
+                    <span><?= ucfirst($order['status'] ?? 'confirmed') ?></span>
+                </div>
+            </fieldset>
 
-        <?php
-        $confirmationTo = (string)($result['confirmation_email_to'] ?? ($orderDetails['email'] ?? ($_SESSION['user']['email'] ?? 'your email')));
-        $confirmationSent = !empty($result['confirmation_email_sent']);
-        $confirmationError = trim((string)($result['confirmation_email_error'] ?? ''));
-        $reviewUrl = '';
-        $reviewEligible = false;
-        if (!empty($result['order_id'])) {
-            $orderIdForReview = (int)$result['order_id'];
-            $orderNumberForReview = (string)($result['order_number'] ?? ($orderDetails['orderNumber'] ?? $orderIdForReview));
-            $orderEmailForReview = (string)($confirmationTo !== 'your email' ? $confirmationTo : '');
-            $reviewEligible = isOrderReviewEligible($conn, $orderIdForReview);
-            if ($reviewEligible) {
-                $reviewUrl = $project . '/submit_product_review.php?order_id=' . $orderIdForReview;
-                if (!isset($_SESSION['user']) && $orderEmailForReview !== '') {
-                    $guestReviewKey = buildGuestReviewKeyForOrder($orderIdForReview, $orderNumberForReview, $orderEmailForReview);
-                    $reviewUrl .= '&review_key=' . rawurlencode($guestReviewKey);
-                }
-                $reviewUrl .= '#spr-form';
-            }
-        }
-        ?>
-        <?php if ($confirmationSent): ?>
-            <div class="email-note"><i class="fas fa-envelope"></i> Confirmation sent to <strong><?= htmlspecialchars($confirmationTo) ?></strong></div>
-        <?php else: ?>
-            <div class="email-note" style="background:#f8d7da;color:#721c24;">
-                <i class="fas fa-triangle-exclamation"></i>
-                We could not send confirmation email to <strong><?= htmlspecialchars($confirmationTo) ?></strong>.
-                <?php if ($confirmationError !== ''): ?>
-                    <span style="display:block; margin-top:6px; font-size:13px;">Reason: <?= htmlspecialchars($confirmationError) ?></span>
-                <?php endif; ?>
-            </div>
-        <?php endif; ?>
+            <fieldset>
+                <legend>Shipping Details</legend>
+                <div class="detail-row">
+                    <span>Courier:</span>
+                    <span><?= htmlspecialchars($courierDisplay) ?> (<?= htmlspecialchars($order['shipping_speed'] ?? 'standard') ?>)</span>
+                </div>
+                <div class="detail-row">
+                    <span>Address:</span>
+                    <span>
+                        <?php
+                        $addrParts = array_filter([
+                            $order['shipping_address'] ?? $order['shippingAddress'] ?? '',
+                            $order['shipping_city'] ?? $order['shippingCity'] ?? '',
+                            $order['shipping_postal_code'] ?? $order['shippingPostalCode'] ?? '',
+                            $order['shipping_country'] ?? $order['shippingCountry'] ?? ''
+                        ]);
+                        echo !empty($addrParts) ? htmlspecialchars(implode(', ', $addrParts)) : '<em>Not provided</em>';
+                        ?>
+                    </span>
+                </div>
+            </fieldset>
 
-        <div>
-            <a href="<?= $project ?>/shop.php" class="btn btn-primary">Continue Shopping</a>
-            <?php if ($reviewUrl !== ''): ?>
-                <a href="<?= htmlspecialchars($reviewUrl) ?>" class="btn btn-review">Product Review</a>
+            <?php if (!empty($items)): ?>
+            <fieldset>
+                <legend>Items (<?= count($items) ?>)</legend>
+                <?php foreach ($items as $item): ?>
+                <div class="item-row">
+                    <img src="<?= $item['image'] ?>" alt="" class="item-image" onerror="this.src='<?= $project ?>/assets/images/placeholder.jpg'">
+                    <div style="flex:1;">
+                        <strong><?= htmlspecialchars($item['name']) ?></strong> x<?= $item['quantity'] ?><br>
+                        <small>€<?= number_format($item['unitPrice'], 2) ?> each</small>
+                        <?php if ($item['giftWrapping'] || $item['giftBagFlag'] || $item['giftMessage']): ?>
+                        <div style="color:#6f5f85; font-size:12px;">
+                            <?php
+                            $g = [];
+                            if ($item['giftWrapping']) $g[] = 'Gift wrap';
+                            if ($item['giftBagFlag']) $g[] = 'Gift bag';
+                            if ($item['giftMessage']) $g[] = '"'.htmlspecialchars($item['giftMessage']).'"';
+                            echo implode(' | ', $g);
+                            ?>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                    <div style="font-weight:bold;">€<?= number_format($item['unitPrice'] * $item['quantity'], 2) ?></div>
+                </div>
+                <?php endforeach; ?>
+            </fieldset>
             <?php else: ?>
-                <span class="btn btn-review" style="opacity:.65;cursor:not-allowed;" title="Available after delivery">Product Review (Locked)</span>
+            <div class="tracking-info" style="background:#f8d7da; color:#721c24;">
+                <strong>No items found for this order.</strong> This could indicate a database issue.
+            </div>
             <?php endif; ?>
-            <?php if (isset($_SESSION['user']) || !empty($result['account_created'])): ?>
-                <a href="<?= $project ?>/profile/account.php?tab=orders" class="btn btn-success">View Orders</a>
-            <?php endif; ?>
-            <a href="<?= $project ?>/contact.php" class="btn btn-secondary">Need Help?</a>
+
+            <div class="totals-card">
+                <div class="totals-row"><span>Subtotal</span> <span>€<?= number_format($order['subtotal'] ?? 0, 2) ?></span></div>
+                <?php if (($order['discountTotal'] ?? 0) > 0): ?>
+                <div class="totals-row"><span>Discount</span> <span>- €<?= number_format($order['discountTotal'], 2) ?></span></div>
+                <?php endif; ?>
+                <div class="totals-row"><span>Shipping</span> <span>€<?= number_format($order['shippingCost'] ?? 0, 2) ?></span></div>
+                <div class="totals-row total"><span>Total</span> <span>€<?= number_format($order['totalAmount'] ?? 0, 2) ?></span></div>
+            </div>
+
+            <div class="email-note">
+                <i class="fas fa-envelope"></i> Confirmation sent to 
+                <strong><?= htmlspecialchars($order['guest_email'] ?: ($_SESSION['user']['email'] ?? 'your email')) ?></strong>
+            </div>
+
+            <div class="button-group">
+                <a href="<?= $project ?>/shop.php" class="btn btn-primary"><i class="fas fa-shopping-bag"></i> Continue Shopping</a>
+                <a href="<?= $project ?>/modules/receipt.php?order_id=<?= $orderId ?>" class="btn btn-success" target="_blank"><i class="fas fa-file-invoice"></i> Download Receipt</a>
+                <?php if (!empty($order['userID'])): ?>
+                <a href="<?= $project ?>/profile/account.php?tab=orders" class="btn btn-secondary"><i class="fas fa-box"></i> View Orders</a>
+                <?php endif; ?>
+                <?php if ($reviewUrl): ?>
+                <a href="<?= htmlspecialchars($reviewUrl) ?>" class="btn btn-success"><i class="fas fa-star"></i> Write a Review</a>
+                <?php else: ?>
+                <span class="btn btn-secondary" style="opacity:.65;cursor:not-allowed;" title="Reviews become available after delivery"><i class="fas fa-star"></i> Review (Locked)</span>
+                <?php endif; ?>
+                <a href="<?= $project ?>/index.php" class="btn btn-outline"><i class="fas fa-home"></i> Home</a>
+            </div>
         </div>
 
-        <?php if (!$reviewEligible): ?>
-            <div class="email-note" style="margin-top:14px;">
-                <i class="fas fa-circle-info"></i>
-                Product review opens after order delivery and confirmed payment. You will receive a notification email with your review link.
-            </div>
-        <?php endif; ?>
+        <!-- RIGHT COLUMN (empty, but kept for layout balance) -->
+        <div></div>
     </div>
 </div>
-<?php
-$footerPath = __DIR__ . '/../include/footer.php';
-if (file_exists($footerPath)) {
-    include $footerPath;
-}
-?>
+<?php include __DIR__ . '/../include/footer.php'; ?>
 </body>
 </html>
