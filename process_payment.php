@@ -3,13 +3,72 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 session_start();
 
-define('INCLUDE_CHECK', true);
-define('PROCESS_PAYMENT_DIRECT', true);
-define('STOCK_MANAGEMENT_DIRECT', true);
-
+require_once __DIR__ . '/vendor/autoload.php'; // Composer autoloader
 require_once __DIR__ . '/authentication/database.php';
-require_once __DIR__ . '/modules/stock_management.php';
-require_once __DIR__ . '/stripe-php/stripe-php-19.5.0-alpha.3/init.php';
+require_once __DIR__ . '/authentication/get_config.php';
+require_once __DIR__ . '/config.php';
+
+\Stripe\Stripe::setApiKey(STRIPE_SECRET_KEY);
+
+$project = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
+if ($project === '' || $project === '.') {
+    $project = '';
+}
+
+$paymentIntentId = $_GET['payment_intent'] ?? null;
+$paymentIntentClientSecret = $_GET['payment_intent_client_secret'] ?? null;
+
+if (!$paymentIntentId || !$paymentIntentClientSecret) {
+    die('Invalid payment confirmation.');
+}
+
+try {
+    $intent = \Stripe\PaymentIntent::retrieve($paymentIntentId);
+
+    // Verify the client secret matches to prevent tampering
+    if ($intent->client_secret !== $paymentIntentClientSecret) {
+        die('Invalid client secret.');
+    }
+
+    $orderId = (int)($intent->metadata['order_id'] ?? 0);
+    $amount = $intent->amount / 100; // amount is in cents
+
+    if (!$orderId) {
+        die('Order not found in payment metadata.');
+    }
+
+    // Update order status based on payment intent status
+    $status = $intent->status;
+
+    // Map Stripe status to your order payment_status
+    $orderStatus = 'pending';
+    if ($status === 'succeeded') {
+        $orderStatus = 'paid';
+    } elseif ($status === 'requires_payment_method') {
+        $orderStatus = 'failed';
+    }
+
+    // Update order in database
+    $stmt = $conn->prepare("UPDATE orders SET payment_status = ?, transaction_id = ? WHERE orderID = ?");
+    $stmt->bind_param("ssi", $orderStatus, $paymentIntentId, $orderId);
+    $stmt->execute();
+    $stmt->close();
+
+    if ($status === 'succeeded') {
+        // Payment succeeded – redirect to success page
+        header('Location: ' . $project . '/modules/checkout_success.php?order_id=' . $orderId);
+        exit;
+    } else {
+        // Payment failed or requires action – redirect to checkout with error
+        $_SESSION['checkout_error'] = 'Payment failed. Please try again.';
+        header('Location: ' . $project . '/checkout.php');
+        exit;
+    }
+} catch (\Stripe\Exception\ApiErrorException $e) {
+    error_log('Stripe webhook error: ' . $e->getMessage());
+    die('Payment processing error: ' . $e->getMessage());
+}
+?>
 
 // Dompdf (optional)
 $dompdfAvailable = false;
