@@ -1,14 +1,32 @@
 <?php
 session_start();
 
-require_once "../authentication/database.php";
+require_once __DIR__ . '/../authentication/database.php';
+
+// Try Composer autoload first
+$composerAutoload = __DIR__ . '/../vendor/autoload.php';
+if (file_exists($composerAutoload)) {
+    require_once $composerAutoload;
+    $phpmailerLoaded = class_exists('PHPMailer\PHPMailer\PHPMailer');
+} else {
+    $phpmailerLoaded = false;
+}
+
+// If Composer didn't load PHPMailer, manually require files
+if (!$phpmailerLoaded) {
+    $base = __DIR__ . '/../PHPMailer-master/src/';
+    $files = ['Exception.php', 'PHPMailer.php', 'SMTP.php'];
+    foreach ($files as $file) {
+        $path = $base . $file;
+        if (!file_exists($path)) {
+            die("Required PHPMailer file not found: $path");
+        }
+        require_once $path;
+    }
+}
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
-
-require '../PHPMailer-master/src/Exception.php';
-require '../PHPMailer-master/src/PHPMailer.php';
-require '../PHPMailer-master/src/SMTP.php';
 
 /**
  * Resolve current user ID from session
