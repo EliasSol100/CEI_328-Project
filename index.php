@@ -101,12 +101,26 @@ if ($sellingFastColumn && $sellingFastColumn->num_rows === 0) {
 
 function getOrCreateWishlistID($conn, $uid) {
     $uid = (int)$uid;
-    $r = $conn->query("SELECT wishlistID FROM wishlists WHERE userID = $uid LIMIT 1");
-    if ($r && ($row = $r->fetch_assoc())) {
-        return (int)$row['wishlistID'];
+    $stmt = $conn->prepare("SELECT wishlistID FROM wishlists WHERE userID = ? LIMIT 1");
+    if ($stmt) {
+        $stmt->bind_param("i", $uid);
+        $stmt->execute();
+        $r = $stmt->get_result();
+        $row = $r ? $r->fetch_assoc() : null;
+        $stmt->close();
+        if ($row) {
+            return (int)$row['wishlistID'];
+        }
     }
-    $conn->query("INSERT INTO wishlists (userID) VALUES ($uid)");
-    return (int)$conn->insert_id;
+    $stmt = $conn->prepare("INSERT INTO wishlists (userID) VALUES (?)");
+    if ($stmt) {
+        $stmt->bind_param("i", $uid);
+        $stmt->execute();
+        $newId = (int)$stmt->insert_id;
+        $stmt->close();
+        return $newId;
+    }
+    return 0;
 }
 
 // Simple wishlist state for homepage hearts (same as shop.php)
@@ -117,11 +131,15 @@ $wishlist = isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])
 $wishlistedProductIDs = [];
 if ($isLoggedIn && !empty($userId)) {
     $wid = getOrCreateWishlistID($conn, (int)$userId);
-    $wishlistRes = $conn->query("SELECT productID FROM wishlist_items WHERE wishlistID = $wid");
-    if ($wishlistRes) {
+    $wishlistStmt = $conn->prepare("SELECT productID FROM wishlist_items WHERE wishlistID = ?");
+    if ($wishlistStmt) {
+        $wishlistStmt->bind_param("i", $wid);
+        $wishlistStmt->execute();
+        $wishlistRes = $wishlistStmt->get_result();
         while ($row = $wishlistRes->fetch_assoc()) {
             $wishlistedProductIDs[] = (int)$row['productID'];
         }
+        $wishlistStmt->close();
     }
 } elseif (isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])) {
     $wishlistedProductIDs = array_values(array_filter(array_map('intval', $_SESSION['wishlist'])));
@@ -255,6 +273,7 @@ if ($sellingFastRes) {
                                 </a>
                             <?php endif; ?>
                             <form method="post" action="wishlist_toggle.php">
+                                <?= app_csrf_input() ?>
                                 <input type="hidden" name="action" value="toggle_wishlist_item">
                                 <input type="hidden" name="product_id" value="<?= $pid ?>">
                                 <button class="wishlist-btn <?= $inWishlist ? 'is-active' : '' ?>" type="submit" title="<?= $inWishlist ? 'Remove from wishlist' : 'Add to wishlist' ?>">
@@ -309,6 +328,7 @@ if ($sellingFastRes) {
                     <div class="product-image-wrapper">
                         <div class="product-image img-product-1"></div>
                         <form method="post" action="wishlist_action.php">
+                            <?= app_csrf_input() ?>
                             <input type="hidden" name="action" value="<?php echo $fav ? 'remove_wishlist_item' : 'add_wishlist_item'; ?>">
                             <input type="hidden" name="product_key" value="flame_dragon">
                             <button class="wishlist-btn" type="submit" title="Add to wishlist">
@@ -341,6 +361,7 @@ if ($sellingFastRes) {
                     <div class="product-image-wrapper">
                         <div class="product-image img-product-2"></div>
                         <form method="post" action="wishlist_action.php">
+                            <?= app_csrf_input() ?>
                             <input type="hidden" name="action" value="<?php echo $fav ? 'remove_wishlist_item' : 'add_wishlist_item'; ?>">
                             <input type="hidden" name="product_key" value="electric_mouse">
                             <button class="wishlist-btn" type="submit" title="Add to wishlist">
@@ -373,6 +394,7 @@ if ($sellingFastRes) {
                     <div class="product-image-wrapper">
                         <div class="product-image img-product-3"></div>
                         <form method="post" action="wishlist_action.php">
+                            <?= app_csrf_input() ?>
                             <input type="hidden" name="action" value="<?php echo $fav ? 'remove_wishlist_item' : 'add_wishlist_item'; ?>">
                             <input type="hidden" name="product_key" value="lilac_turtle">
                             <button class="wishlist-btn" type="submit" title="Add to wishlist">
@@ -405,6 +427,7 @@ if ($sellingFastRes) {
                     <div class="product-image-wrapper">
                         <div class="product-image img-product-4"></div>
                         <form method="post" action="wishlist_action.php">
+                            <?= app_csrf_input() ?>
                             <input type="hidden" name="action" value="<?php echo $fav ? 'remove_wishlist_item' : 'add_wishlist_item'; ?>">
                             <input type="hidden" name="product_key" value="daisy_bunny">
                             <button class="wishlist-btn" type="submit" title="Add to wishlist">

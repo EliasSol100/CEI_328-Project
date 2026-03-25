@@ -2,6 +2,7 @@
 session_start();
 require_once "authentication/database.php";
 require_once "authentication/get_config.php";
+require_once "include/security.php";
 require_once __DIR__ . '/include/made_to_order_access.php';
 
 $system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
@@ -134,15 +135,30 @@ if ($sellingFastColumn && $sellingFastColumn->num_rows === 0) {
 
 function getOrCreateWishlistID($conn, $uid) {
     $uid = (int)$uid;
-    $r = $conn->query("SELECT wishlistID FROM wishlists WHERE userID=$uid LIMIT 1");
-    if ($r && $row = $r->fetch_assoc()) {
-        return (int)$row['wishlistID'];
+    $stmt = $conn->prepare("SELECT wishlistID FROM wishlists WHERE userID = ? LIMIT 1");
+    if ($stmt) {
+        $stmt->bind_param("i", $uid);
+        $stmt->execute();
+        $r = $stmt->get_result();
+        $row = $r ? $r->fetch_assoc() : null;
+        $stmt->close();
+        if ($row) {
+            return (int)$row['wishlistID'];
+        }
     }
-    $conn->query("INSERT INTO wishlists (userID) VALUES ($uid)");
-    return (int)$conn->insert_id;
+    $stmt = $conn->prepare("INSERT INTO wishlists (userID) VALUES (?)");
+    if ($stmt) {
+        $stmt->bind_param("i", $uid);
+        $stmt->execute();
+        $newId = (int)$stmt->insert_id;
+        $stmt->close();
+        return $newId;
+    }
+    return 0;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggle_wishlist_item') {
+    app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $pid = (int)($_POST['product_id'] ?? 0);
     $acceptHeader = $_SERVER["HTTP_ACCEPT"] ?? "";
     $isAjax = (
@@ -156,20 +172,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggl
 
         if ($userId) {
             $wid   = getOrCreateWishlistID($conn, (int)$userId);
-            $check = $conn->query("SELECT wishlistItemID FROM wishlist_items WHERE wishlistID=$wid AND productID=$pid LIMIT 1");
-            if ($check && $check->num_rows > 0) {
-                $iid = (int)$check->fetch_assoc()['wishlistItemID'];
-                $conn->query("DELETE FROM wishlist_items WHERE wishlistItemID=$iid");
+            $iid = 0;
+            $check = $conn->prepare("SELECT wishlistItemID FROM wishlist_items WHERE wishlistID = ? AND productID = ? LIMIT 1");
+            if ($check) {
+                $check->bind_param("ii", $wid, $pid);
+                $check->execute();
+                $checkRes = $check->get_result();
+                $checkRow = $checkRes ? $checkRes->fetch_assoc() : null;
+                $iid = (int)($checkRow['wishlistItemID'] ?? 0);
+                $check->close();
+            }
+            if ($iid > 0) {
+                $deleteStmt = $conn->prepare("DELETE FROM wishlist_items WHERE wishlistItemID = ?");
+                if ($deleteStmt) {
+                    $deleteStmt->bind_param("i", $iid);
+                    $deleteStmt->execute();
+                    $deleteStmt->close();
+                }
                 $inWishlist = false;
             } else {
-                $conn->query("INSERT INTO wishlist_items (wishlistID, productID) VALUES ($wid, $pid)");
+                $insertStmt = $conn->prepare("INSERT INTO wishlist_items (wishlistID, productID) VALUES (?, ?)");
+                if ($insertStmt) {
+                    $insertStmt->bind_param("ii", $wid, $pid);
+                    $insertStmt->execute();
+                    $insertStmt->close();
+                }
                 $inWishlist = true;
             }
 
-            $countRes = $conn->query("SELECT COUNT(*) AS c FROM wishlist_items WHERE wishlistID=$wid");
-            $wishlistCount = ($countRes && ($cRow = $countRes->fetch_assoc()))
-                ? (int)$cRow['c']
-                : 0;
+            $countStmt = $conn->prepare("SELECT COUNT(*) AS c FROM wishlist_items WHERE wishlistID = ?");
+            if ($countStmt) {
+                $countStmt->bind_param("i", $wid);
+                $countStmt->execute();
+                $countRes = $countStmt->get_result();
+                $cRow = $countRes ? $countRes->fetch_assoc() : null;
+                $wishlistCount = (int)($cRow['c'] ?? 0);
+                $countStmt->close();
+            }
             $_SESSION['wishlist_count'] = $wishlistCount;
         } else {
             if (!isset($_SESSION['wishlist']) || !is_array($_SESSION['wishlist'])) {
@@ -218,16 +257,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggl
 $wishlistedIDs = [];
 if ($userId) {
     $uid = (int)$userId;
-    $r   = $conn->query("
+    $stmt = $conn->prepare("
         SELECT wi.productID
         FROM wishlist_items wi
         JOIN wishlists w ON w.wishlistID = wi.wishlistID
-        WHERE w.userID = $uid
+        WHERE w.userID = ?
     ");
-    if ($r) {
+    if ($stmt) {
+        $stmt->bind_param("i", $uid);
+        $stmt->execute();
+        $r = $stmt->get_result();
         while ($row = $r->fetch_assoc()) {
             $wishlistedIDs[] = (int)$row['productID'];
         }
+        $stmt->close();
     }
 } else {
     if (isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])) {
@@ -613,6 +656,7 @@ if ($cpRes) {
                                 </div>
                                 <?php endif; ?>
                                 <form method="post" action="shop.php" style="position:absolute;top:8px;right:8px;z-index:10;">
+                                    <?= app_csrf_input() ?>
                                     <input type="hidden" name="action" value="toggle_wishlist_item">
                                     <input type="hidden" name="product_id" value="<?= $pid ?>">
                                     <button type="submit" class="shop-fav <?= $inWishlist ? 'is-active' : '' ?>" title="<?= $inWishlist ? 'Remove from wishlist' : 'Add to wishlist' ?>">
@@ -758,7 +802,10 @@ if ($cpRes) {
 
         return fetch('cart_api.php', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': window.APP_CSRF_TOKEN || ''
+            },
             body: JSON.stringify(body)
         })
         .then(r => r.json())

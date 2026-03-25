@@ -1,5 +1,6 @@
 <?php
 session_start();
+require_once __DIR__ . "/../include/security.php";
 
 // Αν ο χρήστης είναι ήδη logged in, δεν χρειάζεται να ξαναμπεί — πήγαινε στο index
 if (isset($_SESSION["user"])) {
@@ -8,6 +9,15 @@ if (isset($_SESSION["user"])) {
 }
 
 require_once "database.php";
+
+$googleState = app_oauth_state('google');
+$facebookState = app_oauth_state('facebook');
+$_SESSION['oauth_origin_google'] = 'login';
+$_SESSION['oauth_origin_facebook'] = 'login';
+
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    app_require_csrf(false, "Invalid request token. Please refresh and try again.");
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -62,6 +72,11 @@ require_once "database.php";
             <p class="mt-2 mb-3 text-muted text-center auth-divider-text">
                 Or login with your email or username
             </p>
+
+            <?php if (isset($_SESSION["registration_error"])): ?>
+                <div class="alert alert-danger"><?= htmlspecialchars((string)$_SESSION["registration_error"]) ?></div>
+                <?php unset($_SESSION["registration_error"]); ?>
+            <?php endif; ?>
 
             <?php
             // Εκτελείται μόνο όταν ο χρήστης υποβάλλει το form (πατάει Login)
@@ -160,6 +175,7 @@ require_once "database.php";
             ?>
 
             <form action="login.php" method="post" class="mt-3">
+                <?= app_csrf_input() ?>
                 <div class="form-group mb-3">
                     <label for="login_input">Username or Email Address</label>
                     <input
@@ -206,7 +222,8 @@ require_once "database.php";
                 scope: 'email profile',
                 access_type: 'online',
                 include_granted_scopes: 'true',
-                prompt: 'select_account'
+                prompt: 'select_account',
+                state: <?= json_encode($googleState, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>
             });
 
             const authUrl = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
@@ -218,7 +235,8 @@ require_once "database.php";
                 client_id: '924345056652857',
                 redirect_uri: 'http://localhost/ATHINA-ESHOP/authentication/facebook_callback.php',
                 response_type: 'code',
-                auth_type: 'rerequest'
+                auth_type: 'rerequest',
+                state: <?= json_encode($facebookState, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>
             });
 
             const fbAuthUrl = 'https://www.facebook.com/v18.0/dialog/oauth?' + params.toString();

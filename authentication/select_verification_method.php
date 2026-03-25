@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once "database.php";
+require_once __DIR__ . "/../include/security.php";
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
@@ -49,6 +50,7 @@ $email     = $userRow["email"];
 $userPhone = $userRow["phone"];
 
 if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["select_method"])) {
+    app_require_csrf(false, "Invalid request token. Please refresh and try again.");
     $method = $_POST["verification_method"] ?? "email";
 
     // 6-digit code (shared for email & phone)
@@ -160,6 +162,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["select_method"])) {
         <?php endif; ?>
 
         <form method="post" action="select_verification_method.php" id="verification-form">
+            <?= app_csrf_input() ?>
             <div class="wizard-content">
                 <div class="form-group mb-3">
                     <label for="verification_method">Verification Method</label>

@@ -5,6 +5,7 @@ error_reporting(E_ALL);
 
 session_start();
 require_once "database.php";
+require_once __DIR__ . "/../include/security.php";
 
 /*
  * IMPORTANT (localhost):
@@ -14,9 +15,17 @@ require_once "database.php";
 $clientID     = '901502356414-324b839ks2vas27hoq8hq0448qa6a0oj.apps.googleusercontent.com';
 $clientSecret = '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';
 $redirectUri  = 'http://localhost/ATHINA-ESHOP/authentication/google_callback.php';
+$redirectPage = (($_SESSION['oauth_origin_google'] ?? 'registration') === 'login') ? 'login.php' : 'registration.php';
+unset($_SESSION['oauth_origin_google']);
+
+if (!app_verify_oauth_state('google', $_GET['state'] ?? null)) {
+    $_SESSION["registration_error"] = "Google login could not be verified. Please try again.";
+    header('Location: ' . $redirectPage);
+    exit();
+}
 
 if (!isset($_GET['code'])) {
-    header('Location: registration.php');
+    header('Location: ' . $redirectPage);
     exit();
 }
 
@@ -96,7 +105,7 @@ if ($result && $result->num_rows > 0) {
 
 /* === 4. Fetch previous last_login before updating === */
 $prevLogin = null;
-$getLogin  = $conn->prepare("SELECT last_login FROM users WHERE id = ?");
+$getLogin  = $conn->prepare("SELECT last_login FROM users WHERE userID = ?");
 $getLogin->bind_param("i", $user['id']);
 $getLogin->execute();
 $loginResult = $getLogin->get_result();
@@ -105,7 +114,7 @@ if ($row = $loginResult->fetch_assoc()) {
 }
 
 /* === 5. Update last_login to now === */
-$updateLogin = $conn->prepare("UPDATE users SET last_login = NOW() WHERE id = ?");
+$updateLogin = $conn->prepare("UPDATE users SET last_login = NOW() WHERE userID = ?");
 $updateLogin->bind_param("i", $user['id']);
 $updateLogin->execute();
 

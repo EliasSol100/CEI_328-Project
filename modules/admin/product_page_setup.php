@@ -1,11 +1,13 @@
 <?php
 require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/../../include/security.php';
 
 $current_page = 'product_page_setup';
 
 /* ── Toggle colour for category (POST) ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $categoryID = (int)($_POST['categoryID'] ?? 0);
     $colorID    = (int)($_POST['colorID']    ?? 0);
     $isEnabled  = (int)($_POST['isEnabled']  ?? 0);

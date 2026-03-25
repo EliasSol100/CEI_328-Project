@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once "authentication/database.php";
+require_once "include/security.php";
 
 header("Content-Type: application/json; charset=utf-8");
 
@@ -13,10 +14,52 @@ $response = [
     "wishlistCount" => 0,
 ];
 
+function wishlistToggleGetOrCreateWishlistId(mysqli $conn, int $userId): int
+{
+    $stmt = $conn->prepare("SELECT wishlistID FROM wishlists WHERE userID = ? LIMIT 1");
+    if ($stmt) {
+        $stmt->bind_param("i", $userId);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        $row = $res ? $res->fetch_assoc() : null;
+        $stmt->close();
+        if ($row) {
+            return (int)$row["wishlistID"];
+        }
+    }
+
+    $stmt = $conn->prepare("INSERT INTO wishlists (userID) VALUES (?)");
+    if ($stmt) {
+        $stmt->bind_param("i", $userId);
+        $stmt->execute();
+        $newId = (int)$stmt->insert_id;
+        $stmt->close();
+        return $newId;
+    }
+
+    return 0;
+}
+
+function wishlistToggleCountItems(mysqli $conn, int $wishlistId): int
+{
+    $stmt = $conn->prepare("SELECT COUNT(*) AS c FROM wishlist_items WHERE wishlistID = ?");
+    if (!$stmt) {
+        return 0;
+    }
+    $stmt->bind_param("i", $wishlistId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $row = $res ? $res->fetch_assoc() : null;
+    $stmt->close();
+    return (int)($row["c"] ?? 0);
+}
+
 if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     echo json_encode($response);
     exit();
 }
+
+app_require_csrf(true, "Invalid CSRF token.");
 
 $action = $_POST["action"] ?? "";
 $productKey = $_POST["product_key"] ?? "";
@@ -80,29 +123,45 @@ if ($productId > 0 && $action === "toggle_wishlist_item") {
     $wishlistCount = 0;
 
     if ($userId > 0) {
-        $wid = 0;
-        $res = $conn->query("SELECT wishlistID FROM wishlists WHERE userID = $userId LIMIT 1");
-        if ($res && ($row = $res->fetch_assoc())) {
-            $wid = (int)$row["wishlistID"];
-        } else {
-            $conn->query("INSERT INTO wishlists (userID) VALUES ($userId)");
-            $wid = (int)$conn->insert_id;
+        $wid = wishlistToggleGetOrCreateWishlistId($conn, $userId);
+        if ($wid <= 0) {
+            $response["message"] = "Could not update wishlist.";
+            echo json_encode($response);
+            exit();
         }
 
-        $check = $conn->query("SELECT wishlistItemID FROM wishlist_items WHERE wishlistID = $wid AND productID = $productId LIMIT 1");
-        if ($check && $check->num_rows > 0) {
-            $itemId = (int)$check->fetch_assoc()["wishlistItemID"];
-            $conn->query("DELETE FROM wishlist_items WHERE wishlistItemID = $itemId");
+        $itemId = 0;
+        $check = $conn->prepare("SELECT wishlistItemID FROM wishlist_items WHERE wishlistID = ? AND productID = ? LIMIT 1");
+        if ($check) {
+            $check->bind_param("ii", $wid, $productId);
+            $check->execute();
+            $checkRes = $check->get_result();
+            $checkRow = $checkRes ? $checkRes->fetch_assoc() : null;
+            $itemId = (int)($checkRow["wishlistItemID"] ?? 0);
+            $check->close();
+        }
+
+        if ($itemId > 0) {
+            $deleteStmt = $conn->prepare("DELETE FROM wishlist_items WHERE wishlistItemID = ?");
+            if ($deleteStmt) {
+                $deleteStmt->bind_param("i", $itemId);
+                $deleteStmt->execute();
+                $deleteStmt->close();
+            }
             $inWishlist = false;
             $response["message"] = "Item removed from your wishlist.";
         } else {
-            $conn->query("INSERT INTO wishlist_items (wishlistID, productID) VALUES ($wid, $productId)");
+            $insertStmt = $conn->prepare("INSERT INTO wishlist_items (wishlistID, productID) VALUES (?, ?)");
+            if ($insertStmt) {
+                $insertStmt->bind_param("ii", $wid, $productId);
+                $insertStmt->execute();
+                $insertStmt->close();
+            }
             $inWishlist = true;
             $response["message"] = "Item added to your wishlist.";
         }
 
-        $countRes = $conn->query("SELECT COUNT(*) AS c FROM wishlist_items WHERE wishlistID = $wid");
-        $wishlistCount = ($countRes && ($cRow = $countRes->fetch_assoc())) ? (int)$cRow["c"] : 0;
+        $wishlistCount = wishlistToggleCountItems($conn, $wid);
     } else {
         $idx = array_search($productId, $_SESSION["wishlist"], true);
         if ($idx !== false) {

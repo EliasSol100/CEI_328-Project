@@ -1,6 +1,7 @@
 ﻿<?php
 require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/../../include/security.php';
 
 $current_page = 'stock_availability';
 $flash = '';
@@ -46,6 +47,7 @@ ensureProductSalesOverridesSchema($conn);
 
 /* -- Handle POST: update product inventory / status -- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $action = $_POST['action'] ?? '';
 
     if ($action === 'update_stock') {
@@ -199,10 +201,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $photoPath = null;
             if (!empty($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
                 $file     = $_FILES['photo'];
-                $mimeType = mime_content_type($file['tmp_name']);
-                $allowed  = ['image/jpeg', 'image/png', 'image/webp'];
-                if (in_array($mimeType, $allowed, true) && $file['size'] <= 2 * 1024 * 1024) {
-                    $ext      = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'][$mimeType];
+                $finfo    = new finfo(FILEINFO_MIME_TYPE);
+                $mimeType = (string)($finfo->file((string)$file['tmp_name']) ?: '');
+                if (app_allowed_image_mime($mimeType) && $file['size'] <= 2 * 1024 * 1024) {
+                    $ext      = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'][$mimeType];
                     $filename = 'type' . $typeID . '_color' . $colorID . '.' . $ext;
                     $destDir  = __DIR__ . '/../../assets/yarn_colors/';
                     if (!is_dir($destDir)) mkdir($destDir, 0755, true);

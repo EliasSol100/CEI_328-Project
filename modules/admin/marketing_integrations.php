@@ -1,12 +1,14 @@
 <?php
 require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/../../include/security.php';
 
 $current_page = 'marketing_integrations';
 $flash = '';
 
 /* ── Handle POST: save integration settings ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $platform     = $_POST['platform']     ?? '';
     $apiKey       = trim($_POST['apiKey']  ?? '');
     $listID       = trim($_POST['listID']  ?? '');

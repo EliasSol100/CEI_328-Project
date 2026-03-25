@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once "database.php";
+require_once __DIR__ . "/../include/security.php";
 
 /**
  * How the user reached this page:
@@ -24,6 +25,7 @@ if (isset($_SESSION["user"])) {
 $errors = [];
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    app_require_csrf(false, "Invalid request token. Please refresh and try again.");
     // -----------------------------
     // 1. Collect & validate inputs
     // -----------------------------
@@ -303,6 +305,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         </div>
 
         <form method="post" id="complete-profile-form">
+            <?= app_csrf_input() ?>
             <div class="wizard-content">
                 <!-- Step 1 -->
                 <div class="form-step active" id="step1">

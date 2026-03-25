@@ -5,6 +5,7 @@ error_reporting(E_ALL);
 
 session_start();
 require_once "database.php";
+require_once __DIR__ . "/../include/security.php";
 
 /*
  * Facebook OAuth config (localhost)
@@ -14,11 +15,19 @@ require_once "database.php";
 $appId        = '924345056652857';
 $appSecret    = '961389e18dd6d117327fb0ad668e8d0e';
 $redirectUri  = 'http://localhost/ATHINA-ESHOP/authentication/facebook_callback.php';
+$redirectPage = (($_SESSION['oauth_origin_facebook'] ?? 'registration') === 'login') ? 'login.php' : 'registration.php';
+unset($_SESSION['oauth_origin_facebook']);
+
+if (!app_verify_oauth_state('facebook', $_GET['state'] ?? null)) {
+    $_SESSION["registration_error"] = "Facebook login could not be verified. Please try again.";
+    header("Location: " . $redirectPage);
+    exit();
+}
 
 if (!isset($_GET['code'])) {
     // User cancelled or something went wrong at FB side
     $_SESSION["registration_error"] = "Facebook login was cancelled or failed. Please try again or use your email.";
-    header("Location: registration.php");
+    header("Location: " . $redirectPage);
     exit();
 }
 
@@ -43,7 +52,7 @@ $tokenData = json_decode($tokenResponse, true);
 
 if (!isset($tokenData['access_token'])) {
     $_SESSION["registration_error"] = "Failed to get access token from Facebook.";
-    header("Location: registration.php");
+    header("Location: " . $redirectPage);
     exit();
 }
 
@@ -66,7 +75,7 @@ $email    = $userInfo['email'] ?? '';
 if (!$email) {
     // Without an email we can't link to your user table, so bail out gracefully.
     $_SESSION["registration_error"] = "We couldn't retrieve your email from Facebook. Please sign up with your email instead.";
-    header("Location: registration.php");
+    header("Location: " . $redirectPage);
     exit();
 }
 
@@ -107,7 +116,7 @@ if ($result && $result->num_rows > 0) {
 
 /* === 4. Fetch previous last_login before updating === */
 $prevLogin = null;
-$getLogin  = $conn->prepare("SELECT last_login FROM users WHERE id = ?");
+$getLogin  = $conn->prepare("SELECT last_login FROM users WHERE userID = ?");
 $getLogin->bind_param("i", $user['id']);
 $getLogin->execute();
 $loginResult = $getLogin->get_result();
@@ -116,7 +125,7 @@ if ($row = $loginResult->fetch_assoc()) {
 }
 
 /* === 5. Update last_login to now === */
-$updateLogin = $conn->prepare("UPDATE users SET last_login = NOW() WHERE id = ?");
+$updateLogin = $conn->prepare("UPDATE users SET last_login = NOW() WHERE userID = ?");
 $updateLogin->bind_param("i", $user['id']);
 $updateLogin->execute();
 

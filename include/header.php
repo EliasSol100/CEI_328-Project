@@ -3,6 +3,7 @@
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+require_once __DIR__ . '/security.php';
 
 $isLoggedIn = isset($_SESSION["user"]);
 $wishlistCount = 0;
@@ -88,12 +89,17 @@ if ($isLoggedIn && !$initials) {
                                 <span>My Account</span>
                             </a>
 
-                            <!-- Logout (correct relative path everywhere) -->
-                            <a href="<?php echo $rootPrefix; ?>authentication/logout.php"
-                               class="dropdown-item logout-item">
-                                <i class="fas fa-right-from-bracket"></i>
-                                <span>Logout</span>
-                            </a>
+                            <form method="post"
+                                  action="<?php echo $rootPrefix; ?>authentication/logout.php"
+                                  class="dropdown-item logout-item"
+                                  style="margin:0;">
+                                <?= app_csrf_input() ?>
+                                <button type="submit"
+                                        style="all:unset;display:flex;align-items:center;gap:10px;cursor:pointer;width:100%;">
+                                    <i class="fas fa-right-from-bracket"></i>
+                                    <span>Logout</span>
+                                </button>
+                            </form>
                         </div>
                     </div>
                 <?php else: ?>
@@ -185,3 +191,4 @@ if ($isLoggedIn && !$initials) {
     }
 })();
 </script>
+<?= app_csrf_bootstrap_script() ?>

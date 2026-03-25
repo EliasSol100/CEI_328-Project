@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../../../include/security.php';
 // $current_page must be set in the parent file (e.g. 'dashboard', 'product_management')
 $current_page = $current_page ?? '';
 
@@ -43,3 +44,4 @@ $backHref = $siteRoot . '/index.php';
     </a>
   </div>
 </aside>
+<?= app_csrf_bootstrap_script() ?>

@@ -1,12 +1,14 @@
 ﻿<?php
 require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/../../include/security.php';
 
 $current_page = 'customer_management';
 $flash = '';
 
 /* Handle POST actions: add / edit / delete user */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $action = $_POST['action'] ?? '';
 
     if ($action === 'add_user') {

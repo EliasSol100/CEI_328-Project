@@ -1,18 +1,38 @@
 <?php
-// Serve product image from database blob
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../../../include/security.php';
 
 $id = (int)($_GET['id'] ?? 0);
-if (!$id) { http_response_code(404); exit; }
+if ($id <= 0) {
+    http_response_code(404);
+    exit;
+}
 
-$r = mysqli_query($conn, "SELECT photo FROM photos WHERE imageID=$id LIMIT 1");
-if (!$r || !($row = mysqli_fetch_assoc($r))) { http_response_code(404); exit; }
+$stmt = $conn->prepare("SELECT photo FROM photos WHERE imageID = ? LIMIT 1");
+if (!$stmt) {
+    http_response_code(404);
+    exit;
+}
+$stmt->bind_param("i", $id);
+$stmt->execute();
+$res = $stmt->get_result();
+$row = $res ? $res->fetch_assoc() : null;
+$stmt->close();
 
-// Detect image type
+if (!$row || !isset($row['photo'])) {
+    http_response_code(404);
+    exit;
+}
+
 $data = $row['photo'];
 $finfo = new finfo(FILEINFO_MIME_TYPE);
-$mime  = $finfo->buffer($data) ?: 'image/jpeg';
+$mimeType = (string)($finfo->buffer($data) ?: 'image/jpeg');
+if (!app_allowed_image_mime($mimeType)) {
+    http_response_code(404);
+    exit;
+}
 
-header("Content-Type: $mime");
+header('Content-Type: ' . $mimeType);
+header('X-Content-Type-Options: nosniff');
 header('Cache-Control: max-age=86400');
 echo $data;

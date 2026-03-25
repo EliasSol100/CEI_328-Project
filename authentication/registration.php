@@ -1,9 +1,19 @@
 <?php
 // Ξεκινάμε τη session για να μπορούμε να αποθηκεύουμε/διαβάζουμε session variables
 session_start();
+require_once __DIR__ . "/../include/security.php";
 
 // Φορτώνουμε τη σύνδεση με τη βάση δεδομένων από το database.php
 require_once "database.php";
+
+$googleState = app_oauth_state('google');
+$facebookState = app_oauth_state('facebook');
+$_SESSION['oauth_origin_google'] = 'registration';
+$_SESSION['oauth_origin_facebook'] = 'registration';
+
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    app_require_csrf(false, "Invalid request token. Please refresh and try again.");
+}
 
 // Αν ο χρήστης είναι ήδη συνδεδεμένος, τον στέλνουμε πίσω στην αρχική σελίδα
 if (isset($_SESSION["user"])) {
@@ -77,7 +87,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
         <!-- Εμφάνιση μηνύματος σφάλματος (αν υπάρχει από redirect) -->
         <?php if (isset($_SESSION["registration_error"])): ?>
             <div class="alert alert-danger">
-                <?= $_SESSION["registration_error"]; unset($_SESSION["registration_error"]); ?>
+                <?= htmlspecialchars((string)$_SESSION["registration_error"]) ?><?php unset($_SESSION["registration_error"]); ?>
             </div>
         <?php endif; ?>
 
@@ -111,6 +121,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
 
         <!-- Φόρμα εισαγωγής email (στέλνει POST στην ίδια σελίδα) -->
         <form method="POST" action="registration.php" class="mt-2 auth-email-form">
+            <?= app_csrf_input() ?>
             <div class="form-group mb-3 text-start">
                 <label for="manual_email" class="visually-hidden">Email</label>
                 <input
@@ -171,6 +182,40 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
     </script>
 
     <!-- Bootstrap JS (για components που χρειάζονται JavaScript) -->
+    <script>
+    document.getElementById('google-signin-btn').addEventListener('click', function (event) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        const params = new URLSearchParams({
+            state: <?= json_encode($googleState, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
+            client_id: '901502356414-324b839ks2vas27hoq8hq0448qa6a0oj.apps.googleusercontent.com',
+            redirect_uri: 'http://localhost/ATHINA-ESHOP/authentication/google_callback.php',
+            response_type: 'code',
+            scope: 'email profile',
+            access_type: 'online',
+            include_granted_scopes: 'true',
+            prompt: 'select_account'
+        });
+
+        window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
+    }, true);
+
+    document.getElementById('facebook-signin-btn').addEventListener('click', function (event) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        const params = new URLSearchParams({
+            state: <?= json_encode($facebookState, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
+            client_id: '924345056652857',
+            redirect_uri: 'http://localhost/ATHINA-ESHOP/authentication/facebook_callback.php',
+            response_type: 'code',
+            auth_type: 'rerequest'
+        });
+
+        window.location.href = 'https://www.facebook.com/v18.0/dialog/oauth?' + params.toString();
+    }, true);
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

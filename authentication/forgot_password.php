@@ -1,6 +1,7 @@
 ﻿<?php
 session_start();
 require_once __DIR__ . "/database.php";
+require_once __DIR__ . "/../include/security.php";
 
 // PHPMailer from project ROOT (one level above /authentication)
 require_once __DIR__ . "/../PHPMailer-master/src/Exception.php";
@@ -31,6 +32,7 @@ function buildResetLink(string $token): string
 }
 
 if (isset($_POST["submit"])) {
+    app_require_csrf(false, "Invalid request token. Please refresh and try again.");
     $email = trim($_POST["email"] ?? "");
 
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -181,6 +183,7 @@ if (isset($_POST["submit"])) {
                 <div class="alert alert-success"><?= htmlspecialchars($success) ?></div>
             <?php else: ?>
                 <form action="forgot_password.php" method="post">
+                    <?= app_csrf_input() ?>
                     <div class="form-group mb-3">
                         <label for="email">Email Address</label>
                         <input

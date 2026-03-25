@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once "authentication/database.php";
+require_once "include/security.php";
 
 function getCartLineAvailableStock(mysqli $conn, array $item): int {
     $productId = (int)($item['product']['id'] ?? $item['productID'] ?? 0);
@@ -37,6 +38,7 @@ function getCartLineAvailableStock(mysqli $conn, array $item): int {
 
 // ---- POST: remove item or update quantity ----
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $action = $_POST['action'] ?? '';
     $idx    = (int)($_POST['item_index'] ?? -1);
 
@@ -244,6 +246,7 @@ unset($_SESSION['cart_notice']);
                     <div class="cart-item-controls">
                         <!-- Quantity +/− -->
                         <form method="post" action="cart.php" class="qty-form">
+                            <?= app_csrf_input() ?>
                             <input type="hidden" name="action"     value="update_qty">
                             <input type="hidden" name="item_index" value="<?= $idx ?>">
                             <button class="qty-btn" type="submit" name="qty" value="<?= max(1, (int)$item['quantity'] - 1) ?>">−</button>
@@ -258,6 +261,7 @@ unset($_SESSION['cart_notice']);
 
                         <!-- Remove -->
                         <form method="post" action="cart.php">
+                            <?= app_csrf_input() ?>
                             <input type="hidden" name="action"     value="remove">
                             <input type="hidden" name="item_index" value="<?= $idx ?>">
                             <button class="cart-remove-btn" type="submit" title="Remove item" data-translate-title="removeItem">

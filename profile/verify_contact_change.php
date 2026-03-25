@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once "../authentication/database.php";
+require_once "../include/security.php";
 
 if (!isset($_SESSION["user"]) || !isset($_SESSION["user"]["id"])) {
     header("Location: ../authentication/login.php");
@@ -18,6 +19,7 @@ $successMessage = "";
 $errorMessage   = "";
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    app_require_csrf(false, "Invalid request token. Please refresh and try again.");
     $codeInput = trim($_POST["code"] ?? "");
 
     if (!$codeInput) {
@@ -100,6 +102,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     <?php endif; ?>
 
     <form method="post" class="wizard-content auth-email-form">
+        <?= app_csrf_input() ?>
         <div class="form-group">
             <label for="code">Verification Code</label>
             <input

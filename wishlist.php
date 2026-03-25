@@ -1,6 +1,7 @@
 ﻿<?php
 session_start();
 require_once "authentication/database.php";
+require_once "include/security.php";
 
 $userId = $_SESSION["user"]["id"] ?? null;
 $fullName = $_SESSION["user"]["full_name"] ?? "Guest";
@@ -17,17 +18,34 @@ $sessionCatalog = [
 ];
 
 function getOrCreateWishlistID(mysqli $conn, int $uid): int {
-    $res = $conn->query("SELECT wishlistID FROM wishlists WHERE userID = $uid LIMIT 1");
-    if ($res && ($row = $res->fetch_assoc())) {
-        return (int)$row["wishlistID"];
+    $stmt = $conn->prepare("SELECT wishlistID FROM wishlists WHERE userID = ? LIMIT 1");
+    if ($stmt) {
+        $stmt->bind_param("i", $uid);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        $row = $res ? $res->fetch_assoc() : null;
+        $stmt->close();
+        if ($row) {
+            return (int)$row["wishlistID"];
+        }
     }
-    $conn->query("INSERT INTO wishlists (userID) VALUES ($uid)");
-    return (int)$conn->insert_id;
+
+    $stmt = $conn->prepare("INSERT INTO wishlists (userID) VALUES (?)");
+    if ($stmt) {
+        $stmt->bind_param("i", $uid);
+        $stmt->execute();
+        $newId = (int)$stmt->insert_id;
+        $stmt->close();
+        return $newId;
+    }
+
+    return 0;
 }
 
 $message = "";
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    app_require_csrf(false, "Invalid request token. Please refresh and try again.");
     $action = $_POST["action"] ?? "";
 
     if ($action === "remove_wishlist_key") {
@@ -45,7 +63,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $pid = (int)($_POST["product_id"] ?? 0);
         if ($pid > 0) {
             $wid = getOrCreateWishlistID($conn, (int)$userId);
-            $conn->query("DELETE FROM wishlist_items WHERE wishlistID = $wid AND productID = $pid");
+            $stmt = $conn->prepare("DELETE FROM wishlist_items WHERE wishlistID = ? AND productID = ?");
+            if ($stmt) {
+                $stmt->bind_param("ii", $wid, $pid);
+                $stmt->execute();
+                $stmt->close();
+            }
             $message = "Item removed from wishlist.";
         }
     }
@@ -57,9 +80,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $dbCount = 0;
     if ($userId) {
         $wid = getOrCreateWishlistID($conn, (int)$userId);
-        $countRes = $conn->query("SELECT COUNT(*) AS c FROM wishlist_items WHERE wishlistID = $wid");
-        if ($countRes && ($cRow = $countRes->fetch_assoc())) {
-            $dbCount = (int)$cRow["c"];
+        $stmt = $conn->prepare("SELECT COUNT(*) AS c FROM wishlist_items WHERE wishlistID = ?");
+        if ($stmt) {
+            $stmt->bind_param("i", $wid);
+            $stmt->execute();
+            $countRes = $stmt->get_result();
+            $cRow = $countRes ? $countRes->fetch_assoc() : null;
+            $dbCount = (int)($cRow["c"] ?? 0);
+            $stmt->close();
         }
     }
     $_SESSION["wishlist_count"] = $sessionCount + $dbCount;
@@ -84,16 +112,19 @@ foreach ($sessionKeys as $key) {
 $dbItems = [];
 if ($userId) {
     $wid = getOrCreateWishlistID($conn, (int)$userId);
-    $res = $conn->query("
+    $stmt = $conn->prepare("
         SELECT p.productID, p.nameEN, p.basePrice, MIN(ph.imageID) AS imageID
         FROM wishlist_items wi
         JOIN products p ON p.productID = wi.productID
         LEFT JOIN photos ph ON ph.productID = p.productID
-        WHERE wi.wishlistID = $wid
+        WHERE wi.wishlistID = ?
         GROUP BY p.productID, p.nameEN, p.basePrice
         ORDER BY wi.addedAt DESC
     ");
-    if ($res) {
+    if ($stmt) {
+        $stmt->bind_param("i", $wid);
+        $stmt->execute();
+        $res = $stmt->get_result();
         while ($row = $res->fetch_assoc()) {
             $dbItems[] = [
                 "productID" => (int)$row["productID"],
@@ -102,6 +133,7 @@ if ($userId) {
                 "imageID" => isset($row["imageID"]) ? (int)$row["imageID"] : 0,
             ];
         }
+        $stmt->close();
     }
 }
 
@@ -152,6 +184,7 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
                                 </div>
                             </div>
                             <form method="post" action="wishlist.php">
+                                <?= app_csrf_input() ?>
                                 <input type="hidden" name="action" value="remove_wishlist_key">
                                 <input type="hidden" name="product_key" value="<?= htmlspecialchars($item["key"]) ?>">
                                 <button type="submit" aria-label="Remove item"><i class="fas fa-trash"></i></button>
@@ -175,6 +208,7 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
                                 </div>
                             </div>
                             <form method="post" action="wishlist.php">
+                                <?= app_csrf_input() ?>
                                 <input type="hidden" name="action" value="remove_wishlist_pid">
                                 <input type="hidden" name="product_id" value="<?= (int)$item["productID"] ?>">
                                 <button type="submit" aria-label="Remove item"><i class="fas fa-trash"></i></button>

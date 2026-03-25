@@ -2,6 +2,7 @@
 session_start();
 
 require_once "../authentication/database.php";
+require_once "../include/security.php";
 require_once "../include/loyalty_program.php";
 
 use PHPMailer\PHPMailer\PHPMailer;
@@ -176,6 +177,15 @@ function accountRecalcCartTotals(array $items): array {
     ];
 }
 
+function accountResetDefaultAddresses(mysqli $conn, int $userId): void {
+    $stmt = $conn->prepare("UPDATE user_addresses SET is_default = 0 WHERE user_id = ?");
+    if ($stmt) {
+        $stmt->bind_param("i", $userId);
+        $stmt->execute();
+        $stmt->close();
+    }
+}
+
 // Messages
 $successMessage = "";
 $errorMessage   = "";
@@ -190,6 +200,7 @@ if (empty($_SESSION["account_reorder_token"])) {
  * ---------------------------
  */
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    app_require_csrf(false, "Invalid request token. Please refresh the page and try again.");
     $action = $_POST["action"] ?? "";
 
     /**
@@ -395,7 +406,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     if ($action === "update_avatar") {
         if (!empty($_FILES["profile_image"]["name"])) {
             $file     = $_FILES["profile_image"];
-            $allowed  = ["jpg", "jpeg", "png", "gif", "webp"];
             $maxSize  = 2 * 1024 * 1024; // 2MB
 
             if ($file["error"] !== UPLOAD_ERR_OK) {
@@ -403,8 +413,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             } elseif ($file["size"] > $maxSize) {
                 $errorMessage = "Image must be smaller than 2MB.";
             } else {
-                $ext = strtolower(pathinfo($file["name"], PATHINFO_EXTENSION));
-                if (!in_array($ext, $allowed)) {
+                $finfo = new finfo(FILEINFO_MIME_TYPE);
+                $mimeType = (string)($finfo->file((string)$file["tmp_name"]) ?: "");
+                $extensions = [
+                    "image/jpeg" => "jpg",
+                    "image/png" => "png",
+                    "image/gif" => "gif",
+                    "image/webp" => "webp",
+                ];
+                if (!isset($extensions[$mimeType]) || !app_allowed_image_mime($mimeType)) {
                     $errorMessage = "Only JPG, JPEG, PNG, GIF or WEBP files are allowed.";
                 } else {
                     $uploadDir = __DIR__ . "/../uploads/avatars";
@@ -412,7 +429,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         mkdir($uploadDir, 0775, true);
                     }
 
-                    $filename   = "user_" . $userId . "_" . time() . "." . $ext;
+                    $filename   = "user_" . $userId . "_" . time() . "." . $extensions[$mimeType];
                     $targetPath = $uploadDir . "/" . $filename;
 
                     if (move_uploaded_file($file["tmp_name"], $targetPath)) {
@@ -454,7 +471,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         if ($country && $city && $address && $postcode) {
             if ($makeDefault) {
-                $conn->query("UPDATE user_addresses SET is_default = 0 WHERE user_id = " . $userId);
+                accountResetDefaultAddresses($conn, $userId);
             }
 
             $stmt = $conn->prepare("
@@ -503,7 +520,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $stmt->close();
 
         if ($addressRow) {
-            $conn->query("UPDATE user_addresses SET is_default = 0 WHERE user_id = " . $userId);
+            accountResetDefaultAddresses($conn, $userId);
 
             $stmt = $conn->prepare("UPDATE user_addresses SET is_default = 1 WHERE id = ?");
             $stmt->bind_param("i", $addrId);
@@ -565,7 +582,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $isDefaultNew    = $makeDefault ? 1 : $existingDefault;
 
                 if ($isDefaultNew) {
-                    $conn->query("UPDATE user_addresses SET is_default = 0 WHERE user_id = " . $userId);
+                    accountResetDefaultAddresses($conn, $userId);
                 }
 
                 $stmt = $conn->prepare("
@@ -651,7 +668,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $stmt->close();
 
                 if ($next) {
-                    $conn->query("UPDATE user_addresses SET is_default = 0 WHERE user_id = " . $userId);
+                    accountResetDefaultAddresses($conn, $userId);
 
                     $stmt = $conn->prepare("UPDATE user_addresses SET is_default = 1 WHERE id = ?");
                     $stmt->bind_param("i", $next["id"]);
@@ -1063,11 +1080,13 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                             <i class="bi bi-gear me-2"></i>
                             <span data-translate="sidebarSettings">Settings</span>
                         </a>
-                        <a href="../authentication/logout.php"
-                           class="list-group-item list-group-item-action text-danger">
+                        <form method="post" action="../authentication/logout.php">
+                            <?= app_csrf_input() ?>
+                            <button type="submit" class="list-group-item list-group-item-action text-danger w-100 text-start border-0 bg-transparent">
                             <i class="bi bi-box-arrow-right me-2"></i>
                             <span data-translate="sidebarLogout">Logout</span>
-                        </a>
+                            </button>
+                        </form>
                     </div>
                 </div>
             </div>

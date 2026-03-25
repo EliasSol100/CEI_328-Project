@@ -2,6 +2,7 @@
 session_start();
 require_once __DIR__ . "/authentication/database.php";
 require_once __DIR__ . "/authentication/get_config.php";
+require_once __DIR__ . "/include/security.php";
 require_once __DIR__ . "/include/made_to_order_access.php";
 
 $systemTitle = getSystemConfig("site_title") ?: "Creations by Athina";
@@ -232,6 +233,7 @@ $reviewInput = [
 ];
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    app_require_csrf(isset($_GET['coupon_preview']) && (string)$_GET['coupon_preview'] === '1', "Invalid request token. Please refresh and try again.");
     $action = (string)($_POST["action"] ?? "");
 
     if ($action === "submit_review") {
@@ -829,6 +831,7 @@ include __DIR__ . "/include/header.php";
                     <i class="fas fa-cart-plus"></i> Add to Cart
                 </button>
                 <form method="post" class="wishlist-form">
+                    <?= app_csrf_input() ?>
                     <input type="hidden" name="action" value="toggle_wishlist_item">
                     <input type="hidden" name="product_id" value="<?= (int)$product["productID"] ?>">
                     <button type="submit" class="shop-fav <?= $isWishlisted ? "is-active" : "" ?>" title="<?= $isWishlisted ? "Remove from wishlist" : "Add to wishlist" ?>">
@@ -883,6 +886,7 @@ include __DIR__ . "/include/header.php";
 
         <?php if ($userId > 0 && $canWriteReview): ?>
             <form method="post" class="review-form <?= $openReviewForm ? "is-open" : "" ?>" id="write-review-form">
+                <?= app_csrf_input() ?>
                 <input type="hidden" name="action" value="submit_review">
                 <div class="review-form-title">Share your experience</div>
 
@@ -951,12 +955,14 @@ include __DIR__ . "/include/header.php";
                         <?php if ($isAdmin): ?>
                             <div class="review-admin-actions">
                                 <form method="post" onsubmit="return confirm('Remove this review?');">
+                                    <?= app_csrf_input() ?>
                                     <input type="hidden" name="action" value="admin_delete_review">
                                     <input type="hidden" name="review_id" value="<?= (int)$review["id"] ?>">
                                     <button type="submit" class="submit-review-btn review-admin-danger">Delete Review</button>
                                 </form>
                                 <?php if ($review["adminReplyText"] !== ""): ?>
                                     <form method="post" onsubmit="return confirm('Remove this admin reply?');">
+                                        <?= app_csrf_input() ?>
                                         <input type="hidden" name="action" value="admin_delete_reply">
                                         <input type="hidden" name="review_id" value="<?= (int)$review["id"] ?>">
                                         <button type="submit" class="submit-review-btn review-admin-light">Remove Reply</button>
@@ -964,6 +970,7 @@ include __DIR__ . "/include/header.php";
                                 <?php endif; ?>
                             </div>
                             <form method="post" class="review-admin-reply-form">
+                                <?= app_csrf_input() ?>
                                 <input type="hidden" name="action" value="admin_reply_review">
                                 <input type="hidden" name="review_id" value="<?= (int)$review["id"] ?>">
                                 <label class="review-label" for="admin_reply_<?= (int)$review["id"] ?>">Admin Reply</label>
@@ -1372,7 +1379,10 @@ include __DIR__ . "/include/header.php";
         }
         return fetch("cart_api.php", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRF-Token": window.APP_CSRF_TOKEN || ""
+            },
             body: JSON.stringify(payload)
         })
             .then(parseJsonResponse)
@@ -1392,7 +1402,10 @@ include __DIR__ . "/include/header.php";
         body.set("coupon_code", code || "");
         return fetch("product.php?id=" + encodeURIComponent(String(productId)) + "&coupon_preview=1", {
             method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "X-CSRF-Token": window.APP_CSRF_TOKEN || ""
+            },
             body: body.toString()
         })
             .then(parseJsonResponse)
@@ -1513,7 +1526,10 @@ include __DIR__ . "/include/header.php";
 
             fetch("cart_api.php", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRF-Token": window.APP_CSRF_TOKEN || ""
+                },
                 body: JSON.stringify(payload)
             })
                 .then(function (response) {

@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . "/database.php";
+require_once __DIR__ . "/../include/security.php";
 
 $error        = "";
 $success      = "";
@@ -52,6 +53,7 @@ if ($_SERVER["REQUEST_METHOD"] === "GET") {
 
 // 2) Form submission: POST with token + new password
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    app_require_csrf(false, "Invalid request token. Please refresh and try again.");
     $token           = $_POST["token"] ?? "";
     $password        = $_POST["password"] ?? "";
     $repeat_password = $_POST["repeat_password"] ?? "";
@@ -215,6 +217,7 @@ $canShowResetForm = (!empty($token) && !empty($emailDisplay) && !empty($expiresA
                 <?php endif; ?>
 
                 <form action="reset_password.php" method="post">
+                    <?= app_csrf_input() ?>
                     <input type="hidden" name="token" value="<?= htmlspecialchars($token) ?>">
 
                     <div class="form-group mb-3">

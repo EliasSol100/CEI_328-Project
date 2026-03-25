@@ -1,5 +1,6 @@
 <?php
 session_start();
+require_once __DIR__ . "/include/security.php";
 
 header("Content-Type: application/json; charset=utf-8");
 
@@ -22,6 +23,8 @@ if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     echo json_encode($response);
     exit();
 }
+
+app_require_csrf(true, "Invalid CSRF token.");
 
 $action = $_POST["action"] ?? "";
 $productKey = $_POST["product_key"] ?? "";

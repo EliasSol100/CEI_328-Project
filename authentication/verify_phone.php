@@ -2,6 +2,7 @@
 session_start();
 require_once "database.php";
 require_once "send_sms.php";
+require_once __DIR__ . "/../include/security.php";
 
 $feedbackMessage = '';
 $feedbackClass   = 'danger';
@@ -40,6 +41,7 @@ $displayPhone = $_SESSION["phone"] ?? $userRow["phone"] ?? '';
 
 // Handle POST actions
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    app_require_csrf(false, "Invalid request token. Please refresh and try again.");
 
     // Switch back to email verification
     if (isset($_POST["switch_to_email"])) {
@@ -222,6 +224,7 @@ if (!empty($userRow["verification_expires_at"])) {
         <?php endif; ?>
 
         <form method="post" action="verify_phone.php">
+            <?= app_csrf_input() ?>
             <div class="wizard-content">
                 <p class="mb-1 text-center text-muted-small">
                     Code sent to <strong><?= htmlspecialchars($displayPhone) ?></strong>

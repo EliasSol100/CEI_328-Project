@@ -1,108 +1,120 @@
 <?php
-/**
- * AJAX handler — upload or remove a photo for a color+yarn type combination.
- * Stores the file in /assets/yarn_colors/ and saves the path in color_yarn_types.
- *
- * POST actions:
- *   upload  — expects: colorID, typeID, photo (file)
- *   remove  — expects: colorID, typeID
- */
 require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../../../include/security.php';
 
-header('Content-Type: application/json');
+header('Content-Type: application/json; charset=utf-8');
+app_require_csrf(true, 'Invalid CSRF token.');
 
-$action  = $_POST['action']  ?? '';
+$action = (string)($_POST['action'] ?? '');
 $colorID = (int)($_POST['colorID'] ?? 0);
-$typeID  = (int)($_POST['typeID']  ?? 0);
+$typeID = (int)($_POST['typeID'] ?? 0);
 
-if (!$colorID || !$typeID) {
+if ($colorID <= 0 || $typeID <= 0) {
     echo json_encode(['ok' => false, 'error' => 'Missing colorID or typeID']);
     exit;
 }
 
-// Verify the row exists
-$chk = mysqli_prepare($conn, "SELECT 1 FROM color_yarn_types WHERE colorID=? AND typeID=?");
+$chk = mysqli_prepare($conn, "SELECT 1 FROM color_yarn_types WHERE colorID = ? AND typeID = ?");
+if (!$chk) {
+    echo json_encode(['ok' => false, 'error' => 'Could not validate combination']);
+    exit;
+}
 mysqli_stmt_bind_param($chk, 'ii', $colorID, $typeID);
 mysqli_stmt_execute($chk);
-if (!mysqli_stmt_fetch($chk)) {
+mysqli_stmt_store_result($chk);
+$exists = mysqli_stmt_num_rows($chk) > 0;
+mysqli_stmt_close($chk);
+
+if (!$exists) {
     echo json_encode(['ok' => false, 'error' => 'Combination not found']);
     exit;
 }
-mysqli_stmt_close($chk);
 
-$uploadDir = realpath(__DIR__ . '/../../../assets/yarn_colors') . '/';
+$rootDir = realpath(__DIR__ . '/../../../');
+$uploadDir = realpath(__DIR__ . '/../../../assets/yarn_colors');
+if ($rootDir === false || $uploadDir === false) {
+    echo json_encode(['ok' => false, 'error' => 'Upload directory is not available']);
+    exit;
+}
+$uploadDir = rtrim($uploadDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
 
-// ── REMOVE ────────────────────────────────────────────────────────────────────
 if ($action === 'remove') {
-    // Fetch current path to delete the file
-    $sel = mysqli_prepare($conn, "SELECT photoPath FROM color_yarn_types WHERE colorID=? AND typeID=?");
-    mysqli_stmt_bind_param($sel, 'ii', $colorID, $typeID);
-    mysqli_stmt_execute($sel);
-    mysqli_stmt_bind_result($sel, $currentPath);
-    mysqli_stmt_fetch($sel);
-    mysqli_stmt_close($sel);
+    $sel = mysqli_prepare($conn, "SELECT photoPath FROM color_yarn_types WHERE colorID = ? AND typeID = ?");
+    if ($sel) {
+        mysqli_stmt_bind_param($sel, 'ii', $colorID, $typeID);
+        mysqli_stmt_execute($sel);
+        mysqli_stmt_bind_result($sel, $currentPath);
+        mysqli_stmt_fetch($sel);
+        mysqli_stmt_close($sel);
 
-    if ($currentPath) {
-        $fullPath = realpath(__DIR__ . '/../../../') . '/' . ltrim($currentPath, '/');
-        if (file_exists($fullPath)) {
-            unlink($fullPath);
+        if (!empty($currentPath)) {
+            $fullPath = $rootDir . DIRECTORY_SEPARATOR . ltrim((string)$currentPath, '/\\');
+            if (is_file($fullPath)) {
+                @unlink($fullPath);
+            }
         }
     }
 
-    $upd = mysqli_prepare($conn, "UPDATE color_yarn_types SET photoPath=NULL WHERE colorID=? AND typeID=?");
-    mysqli_stmt_bind_param($upd, 'ii', $colorID, $typeID);
-    mysqli_stmt_execute($upd);
-    mysqli_stmt_close($upd);
+    $upd = mysqli_prepare($conn, "UPDATE color_yarn_types SET photoPath = NULL WHERE colorID = ? AND typeID = ?");
+    if ($upd) {
+        mysqli_stmt_bind_param($upd, 'ii', $colorID, $typeID);
+        mysqli_stmt_execute($upd);
+        mysqli_stmt_close($upd);
+    }
 
     echo json_encode(['ok' => true]);
     exit;
 }
 
-// ── UPLOAD ────────────────────────────────────────────────────────────────────
 if ($action === 'upload') {
-    if (empty($_FILES['photo']) || $_FILES['photo']['error'] !== UPLOAD_ERR_OK) {
+    if (empty($_FILES['photo']) || (int)($_FILES['photo']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
         echo json_encode(['ok' => false, 'error' => 'No file uploaded or upload error']);
         exit;
     }
 
-    $file     = $_FILES['photo'];
-    $mimeType = mime_content_type($file['tmp_name']);
-    $allowed  = ['image/jpeg', 'image/png', 'image/webp'];
-
-    if (!in_array($mimeType, $allowed, true)) {
-        echo json_encode(['ok' => false, 'error' => 'Only JPG, PNG, WebP images are allowed']);
+    $file = $_FILES['photo'];
+    $tmpName = (string)$file['tmp_name'];
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mimeType = (string)($finfo->file($tmpName) ?: '');
+    if (!app_allowed_image_mime($mimeType)) {
+        echo json_encode(['ok' => false, 'error' => 'Only image uploads are allowed']);
         exit;
     }
-
-    if ($file['size'] > 2 * 1024 * 1024) {
+    if ((int)($file['size'] ?? 0) > 2 * 1024 * 1024) {
         echo json_encode(['ok' => false, 'error' => 'File too large (max 2 MB)']);
         exit;
     }
 
-    $ext      = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'][$mimeType];
+    $ext = [
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/gif' => 'gif',
+        'image/webp' => 'webp',
+    ][$mimeType] ?? 'jpg';
+
     $filename = 'type' . $typeID . '_color' . $colorID . '.' . $ext;
     $destPath = $uploadDir . $filename;
 
-    // Delete old file if it exists with a different extension
-    foreach (['jpg','png','webp'] as $e) {
-        $old = $uploadDir . 'type' . $typeID . '_color' . $colorID . '.' . $e;
-        if ($old !== $destPath && file_exists($old)) {
-            unlink($old);
+    foreach (['jpg', 'png', 'gif', 'webp'] as $oldExt) {
+        $old = $uploadDir . 'type' . $typeID . '_color' . $colorID . '.' . $oldExt;
+        if ($old !== $destPath && is_file($old)) {
+            @unlink($old);
         }
     }
 
-    if (!move_uploaded_file($file['tmp_name'], $destPath)) {
+    if (!move_uploaded_file($tmpName, $destPath)) {
         echo json_encode(['ok' => false, 'error' => 'Failed to save file']);
         exit;
     }
 
     $dbPath = 'assets/yarn_colors/' . $filename;
-
-    $upd = mysqli_prepare($conn, "UPDATE color_yarn_types SET photoPath=? WHERE colorID=? AND typeID=?");
-    mysqli_stmt_bind_param($upd, 'sii', $dbPath, $colorID, $typeID);
-    mysqli_stmt_execute($upd);
-    mysqli_stmt_close($upd);
+    $upd = mysqli_prepare($conn, "UPDATE color_yarn_types SET photoPath = ? WHERE colorID = ? AND typeID = ?");
+    if ($upd) {
+        mysqli_stmt_bind_param($upd, 'sii', $dbPath, $colorID, $typeID);
+        mysqli_stmt_execute($upd);
+        mysqli_stmt_close($upd);
+    }
 
     echo json_encode(['ok' => true, 'path' => $dbPath]);
     exit;

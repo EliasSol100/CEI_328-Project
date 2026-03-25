@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/../../include/security.php';
 
 $current_page = 'analytics_reports';
 $flash = '';
@@ -114,6 +115,7 @@ if ($range === 'custom') {
 $filtersQuery = http_build_query($currentFilters);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $action = $_POST['action'] ?? '';
     if ($action === 'record_cost') {
         $costDate = $_POST['costDate'] ?? date('Y-m-d');

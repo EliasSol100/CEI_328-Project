@@ -1,84 +1,142 @@
 <?php
+require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../../../include/security.php';
+
+header('Content-Type: application/json; charset=utf-8');
+
+$method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+if ($method === 'POST') {
+    app_require_csrf(true, 'Invalid CSRF token.');
+}
+
 session_write_close();
 
-header('Content-Type: application/json');
-
-$action    = $_POST['action']    ?? $_GET['action']    ?? '';
+$action = (string)($_POST['action'] ?? $_GET['action'] ?? '');
 $productID = (int)($_POST['productID'] ?? $_GET['productID'] ?? 0);
-$colorID   = (int)($_POST['colorID']   ?? $_GET['colorID']   ?? 0);
-$id        = (int)($_POST['id']        ?? $_GET['id']        ?? 0);
+$colorID = (int)($_POST['colorID'] ?? $_GET['colorID'] ?? 0);
+$id = (int)($_POST['id'] ?? $_GET['id'] ?? 0);
 
-/* ── Upload ── */
-if ($action === 'upload' && $productID && $colorID) {
-    if (empty($_FILES['photo']['tmp_name'])) {
+if ($action === 'upload' && $productID > 0 && $colorID > 0) {
+    if (empty($_FILES['photo']['tmp_name']) || (int)($_FILES['photo']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
         echo json_encode(['ok' => false, 'error' => 'No file received']);
         exit;
     }
-    $file    = $_FILES['photo'];
-    $ext     = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-    $allowed = ['jpg','jpeg','png','webp','gif'];
-    if (!in_array($ext, $allowed)) {
-        echo json_encode(['ok' => false, 'error' => 'Invalid file type']);
+
+    $file = $_FILES['photo'];
+    $tmpName = (string)$file['tmp_name'];
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mimeType = (string)($finfo->file($tmpName) ?: '');
+    if (!app_allowed_image_mime($mimeType)) {
+        echo json_encode(['ok' => false, 'error' => 'Invalid image type']);
         exit;
     }
-    $dir = __DIR__ . '/../../../assets/product_color_photos/';
-    if (!is_dir($dir)) mkdir($dir, 0755, true);
+    if ((int)($file['size'] ?? 0) > 5 * 1024 * 1024) {
+        echo json_encode(['ok' => false, 'error' => 'Image is too large']);
+        exit;
+    }
 
-    $filename  = 'pcp_' . $productID . '_' . $colorID . '_' . uniqid() . '.jpg';
-    $dest      = $dir . $filename;
-
-    /* Resize & save as JPEG max 800px wide */
-    $src = imagecreatefromstring(file_get_contents($file['tmp_name']));
+    $sourceData = file_get_contents($tmpName);
+    $src = is_string($sourceData) ? imagecreatefromstring($sourceData) : false;
     if ($src === false) {
         echo json_encode(['ok' => false, 'error' => 'Invalid image']);
         exit;
     }
-    $ow = imagesx($src); $oh = imagesy($src);
+
+    $dir = __DIR__ . '/../../../assets/product_color_photos/';
+    if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+        imagedestroy($src);
+        echo json_encode(['ok' => false, 'error' => 'Could not create upload directory']);
+        exit;
+    }
+
+    $filename = 'pcp_' . $productID . '_' . $colorID . '_' . uniqid('', true) . '.jpg';
+    $dest = $dir . $filename;
+
+    $ow = imagesx($src);
+    $oh = imagesy($src);
     $maxW = 800;
     if ($ow > $maxW) {
-        $nw = $maxW; $nh = (int)round($oh * $maxW / $ow);
+        $nw = $maxW;
+        $nh = (int)round($oh * $maxW / max(1, $ow));
     } else {
-        $nw = $ow;   $nh = $oh;
+        $nw = $ow;
+        $nh = $oh;
     }
+
     $dst = imagecreatetruecolor($nw, $nh);
     imagecopyresampled($dst, $src, 0, 0, 0, 0, $nw, $nh, $ow, $oh);
     imagejpeg($dst, $dest, 85);
-    imagedestroy($src); imagedestroy($dst);
+    imagedestroy($src);
+    imagedestroy($dst);
 
     $photoPath = 'assets/product_color_photos/' . $filename;
 
-    /* get next sortOrder */
-    $r = $conn->query("SELECT COALESCE(MAX(sortOrder),0)+1 FROM product_color_photos WHERE productID=$productID AND colorID=$colorID");
-    $sort = (int)$r->fetch_row()[0];
+    $sort = 1;
+    $sortStmt = $conn->prepare("SELECT COALESCE(MAX(sortOrder), 0) + 1 AS nextSort FROM product_color_photos WHERE productID = ? AND colorID = ?");
+    if ($sortStmt) {
+        $sortStmt->bind_param('ii', $productID, $colorID);
+        $sortStmt->execute();
+        $sortRes = $sortStmt->get_result();
+        $sortRow = $sortRes ? $sortRes->fetch_assoc() : null;
+        $sort = (int)($sortRow['nextSort'] ?? 1);
+        $sortStmt->close();
+    }
 
-    $stmt = $conn->prepare("INSERT INTO product_color_photos (productID, colorID, photoPath, sortOrder) VALUES (?,?,?,?)");
+    $stmt = $conn->prepare("INSERT INTO product_color_photos (productID, colorID, photoPath, sortOrder) VALUES (?, ?, ?, ?)");
+    if (!$stmt) {
+        @unlink($dest);
+        echo json_encode(['ok' => false, 'error' => 'Could not save photo']);
+        exit;
+    }
     $stmt->bind_param('iisi', $productID, $colorID, $photoPath, $sort);
     $stmt->execute();
-    $newId = $conn->insert_id;
+    $newId = (int)$stmt->insert_id;
     $stmt->close();
 
     echo json_encode(['ok' => true, 'id' => $newId, 'photoPath' => $photoPath, 'sortOrder' => $sort]);
     exit;
 }
 
-/* ── Delete ── */
-if ($action === 'delete' && $id) {
-    $r = $conn->query("SELECT photoPath FROM product_color_photos WHERE id=$id");
-    if ($row = $r->fetch_assoc()) {
-        $full = __DIR__ . '/../../../' . $row['photoPath'];
-        if (file_exists($full)) unlink($full);
-        $conn->query("DELETE FROM product_color_photos WHERE id=$id");
+if ($action === 'delete' && $id > 0) {
+    $stmt = $conn->prepare("SELECT photoPath FROM product_color_photos WHERE id = ?");
+    if ($stmt) {
+        $stmt->bind_param('i', $id);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        $row = $res ? $res->fetch_assoc() : null;
+        $stmt->close();
+        if ($row) {
+            $full = __DIR__ . '/../../../' . ltrim((string)$row['photoPath'], '/');
+            if (is_file($full)) {
+                @unlink($full);
+            }
+        }
     }
+
+    $deleteStmt = $conn->prepare("DELETE FROM product_color_photos WHERE id = ?");
+    if ($deleteStmt) {
+        $deleteStmt->bind_param('i', $id);
+        $deleteStmt->execute();
+        $deleteStmt->close();
+    }
+
     echo json_encode(['ok' => true]);
     exit;
 }
 
-/* ── List ── */
-if ($action === 'list' && $productID && $colorID) {
+if ($action === 'list' && $productID > 0 && $colorID > 0) {
     $rows = [];
-    $r = $conn->query("SELECT id, photoPath, sortOrder FROM product_color_photos WHERE productID=$productID AND colorID=$colorID ORDER BY sortOrder ASC");
-    while ($row = $r->fetch_assoc()) $rows[] = $row;
+    $stmt = $conn->prepare("SELECT id, photoPath, sortOrder FROM product_color_photos WHERE productID = ? AND colorID = ? ORDER BY sortOrder ASC");
+    if ($stmt) {
+        $stmt->bind_param('ii', $productID, $colorID);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        while ($res && ($row = $res->fetch_assoc())) {
+            $rows[] = $row;
+        }
+        $stmt->close();
+    }
     echo json_encode(['ok' => true, 'photos' => $rows]);
     exit;
 }

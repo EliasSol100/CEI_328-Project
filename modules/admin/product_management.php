@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/../../include/security.php';
 require_once __DIR__ . '/../../include/made_to_order_access.php';
 
 $current_page = 'product_management';
@@ -90,15 +91,39 @@ function productMgmtSendPrivateLinkEmail(string $customerEmail, string $productN
     return false;
 }
 
+function productMgmtReadUploadedImageBlob(array $files, int $index): ?string
+{
+    $tmpName = (string)($files['tmp_name'][$index] ?? '');
+    $error = (int)($files['error'][$index] ?? UPLOAD_ERR_NO_FILE);
+    if ($error !== UPLOAD_ERR_OK || $tmpName === '' || !is_file($tmpName)) {
+        return null;
+    }
+
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mimeType = (string)($finfo->file($tmpName) ?: '');
+    if (!app_allowed_image_mime($mimeType)) {
+        return null;
+    }
+
+    $photoData = file_get_contents($tmpName);
+    return is_string($photoData) ? $photoData : null;
+}
+
 /* ── Handle POST actions ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $action = $_POST['action'] ?? '';
     $photoDeleteId = (int)($_POST['photo_delete'] ?? 0);
 
     if ($photoDeleteId > 0) {
         $productID = (int)($_POST['productID'] ?? 0);
         if ($productID > 0) {
-            mysqli_query($conn, "DELETE FROM photos WHERE imageID=$photoDeleteId AND productID=$productID");
+            $stmt = mysqli_prepare($conn, "DELETE FROM photos WHERE imageID = ? AND productID = ?");
+            if ($stmt) {
+                mysqli_stmt_bind_param($stmt, 'ii', $photoDeleteId, $productID);
+                mysqli_stmt_execute($stmt);
+                mysqli_stmt_close($stmt);
+            }
         }
         $q2 = trim((string)($_POST['q'] ?? ''));
         $sf2 = trim((string)($_POST['status_filter'] ?? ''));
@@ -174,7 +199,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 foreach ($_FILES['photos']['tmp_name'] as $idx => $tmpName) {
                     if ($added >= 4) break;
                     if ($_FILES['photos']['error'][$idx] !== UPLOAD_ERR_OK) continue;
-                    $photoData = file_get_contents($tmpName);
+                    $photoData = productMgmtReadUploadedImageBlob($_FILES['photos'], (int)$idx);
+                    if ($photoData === null) continue;
                     $stmtPhoto = mysqli_prepare($conn, "INSERT INTO photos (photo, productID) VALUES (?, ?)");
                     mysqli_stmt_bind_param($stmtPhoto, 'si', $photoData, $newProductID);
                     mysqli_stmt_execute($stmtPhoto);
@@ -268,14 +294,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             mysqli_stmt_execute($stmt);
 
             if (isset($_FILES['photos']) && is_array($_FILES['photos']['tmp_name'])) {
-                $cntRes = mysqli_query($conn, "SELECT COUNT(*) AS cnt FROM photos WHERE productID=$id");
-                $existing = (int)(mysqli_fetch_assoc($cntRes)['cnt'] ?? 0);
+                $existing = 0;
+                $cntStmt = mysqli_prepare($conn, "SELECT COUNT(*) AS cnt FROM photos WHERE productID = ?");
+                if ($cntStmt) {
+                    mysqli_stmt_bind_param($cntStmt, 'i', $id);
+                    mysqli_stmt_execute($cntStmt);
+                    $cntRes = mysqli_stmt_get_result($cntStmt);
+                    $cntRow = $cntRes ? mysqli_fetch_assoc($cntRes) : null;
+                    $existing = (int)($cntRow['cnt'] ?? 0);
+                    mysqli_stmt_close($cntStmt);
+                }
                 $canAdd   = max(0, 4 - $existing);
                 $added    = 0;
                 foreach ($_FILES['photos']['tmp_name'] as $idx => $tmpName) {
                     if ($added >= $canAdd) break;
                     if ($_FILES['photos']['error'][$idx] !== UPLOAD_ERR_OK) continue;
-                    $photoData = file_get_contents($tmpName);
+                    $photoData = productMgmtReadUploadedImageBlob($_FILES['photos'], (int)$idx);
+                    if ($photoData === null) continue;
                     $stmtPhoto = mysqli_prepare($conn, "INSERT INTO photos (photo, productID) VALUES (?,?)");
                     mysqli_stmt_bind_param($stmtPhoto, 'si', $photoData, $id);
                     mysqli_stmt_execute($stmtPhoto);
@@ -304,7 +339,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $imageID   = (int)($_POST['imageID']   ?? 0);
         $productID = (int)($_POST['productID'] ?? 0);
         if ($imageID > 0 && $productID > 0) {
-            mysqli_query($conn, "DELETE FROM photos WHERE imageID=$imageID AND productID=$productID");
+            $stmt = mysqli_prepare($conn, "DELETE FROM photos WHERE imageID = ? AND productID = ?");
+            if ($stmt) {
+                mysqli_stmt_bind_param($stmt, 'ii', $imageID, $productID);
+                mysqli_stmt_execute($stmt);
+                mysqli_stmt_close($stmt);
+            }
         }
         $q2 = trim((string)($_POST['q'] ?? ''));
         $sf2 = trim((string)($_POST['status_filter'] ?? ''));
@@ -359,8 +399,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = (int)($_POST['productID'] ?? 0);
 
         // Check if this product appears in any order (must preserve history)
-        $chkOrders = mysqli_query($conn, "SELECT 1 FROM order_items WHERE productID=$id LIMIT 1");
-        $hasOrders = $chkOrders && mysqli_num_rows($chkOrders) > 0;
+        $hasOrders = false;
+        $chkOrders = mysqli_prepare($conn, "SELECT 1 FROM order_items WHERE productID = ? LIMIT 1");
+        if ($chkOrders) {
+            mysqli_stmt_bind_param($chkOrders, 'i', $id);
+            mysqli_stmt_execute($chkOrders);
+            $chkRes = mysqli_stmt_get_result($chkOrders);
+            $hasOrders = $chkRes && mysqli_num_rows($chkRes) > 0;
+            mysqli_stmt_close($chkOrders);
+        }
 
         if ($hasOrders) {
             // Soft-delete: mark as discontinued so it disappears from shop
@@ -370,19 +417,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flash = 'warn:Product has existing orders and cannot be fully deleted — it has been marked as Discontinued and hidden from the shop.';
         } else {
             // Hard-delete: remove dependent rows first, then the product
-            mysqli_query($conn, "DELETE FROM wishlist_items WHERE productID=$id");
-            mysqli_query($conn, "DELETE FROM reviews WHERE productID=$id");
-            mysqli_query($conn, "DELETE FROM photos WHERE productID=$id");
+            $deleteWishlist = mysqli_prepare($conn, "DELETE FROM wishlist_items WHERE productID = ?");
+            if ($deleteWishlist) {
+                mysqli_stmt_bind_param($deleteWishlist, 'i', $id);
+                mysqli_stmt_execute($deleteWishlist);
+                mysqli_stmt_close($deleteWishlist);
+            }
+            $deleteReviews = mysqli_prepare($conn, "DELETE FROM reviews WHERE productID = ?");
+            if ($deleteReviews) {
+                mysqli_stmt_bind_param($deleteReviews, 'i', $id);
+                mysqli_stmt_execute($deleteReviews);
+                mysqli_stmt_close($deleteReviews);
+            }
+            $deletePhotos = mysqli_prepare($conn, "DELETE FROM photos WHERE productID = ?");
+            if ($deletePhotos) {
+                mysqli_stmt_bind_param($deletePhotos, 'i', $id);
+                mysqli_stmt_execute($deletePhotos);
+                mysqli_stmt_close($deletePhotos);
+            }
             // variation_stock references product_variations, so delete that first
-            $vRes = mysqli_query($conn, "SELECT variationID FROM product_variations WHERE productID=$id");
+            $vStmt = mysqli_prepare($conn, "SELECT variationID FROM product_variations WHERE productID = ?");
+            $vRes = false;
+            if ($vStmt) {
+                mysqli_stmt_bind_param($vStmt, 'i', $id);
+                mysqli_stmt_execute($vStmt);
+                $vRes = mysqli_stmt_get_result($vStmt);
+            }
             if ($vRes) {
                 while ($vRow = mysqli_fetch_assoc($vRes)) {
                     $vid = (int)$vRow['variationID'];
-                    mysqli_query($conn, "DELETE FROM variation_stock WHERE variationID=$vid");
+                    $deleteStock = mysqli_prepare($conn, "DELETE FROM variation_stock WHERE variationID = ?");
+                    if ($deleteStock) {
+                        mysqli_stmt_bind_param($deleteStock, 'i', $vid);
+                        mysqli_stmt_execute($deleteStock);
+                        mysqli_stmt_close($deleteStock);
+                    }
                 }
             }
-            mysqli_query($conn, "DELETE FROM product_variations WHERE productID=$id");
-            mysqli_query($conn, "DELETE FROM products WHERE productID=$id");
+            if ($vStmt) {
+                mysqli_stmt_close($vStmt);
+            }
+            $deleteVariations = mysqli_prepare($conn, "DELETE FROM product_variations WHERE productID = ?");
+            if ($deleteVariations) {
+                mysqli_stmt_bind_param($deleteVariations, 'i', $id);
+                mysqli_stmt_execute($deleteVariations);
+                mysqli_stmt_close($deleteVariations);
+            }
+            $deleteProduct = mysqli_prepare($conn, "DELETE FROM products WHERE productID = ?");
+            if ($deleteProduct) {
+                mysqli_stmt_bind_param($deleteProduct, 'i', $id);
+                mysqli_stmt_execute($deleteProduct);
+                mysqli_stmt_close($deleteProduct);
+            }
             $flash = 'ok:Product deleted successfully.';
         }
     }
@@ -504,9 +590,13 @@ if ($r) {
 $editProduct = null;
 if (isset($_GET['edit'])) {
     $eid = (int)$_GET['edit'];
-    $r   = mysqli_query($conn, "SELECT * FROM products WHERE productID=$eid");
-    if ($r) {
-        $editProduct = mysqli_fetch_assoc($r);
+    $stmt = mysqli_prepare($conn, "SELECT * FROM products WHERE productID = ?");
+    if ($stmt) {
+        mysqli_stmt_bind_param($stmt, 'i', $eid);
+        mysqli_stmt_execute($stmt);
+        $r = mysqli_stmt_get_result($stmt);
+        $editProduct = $r ? mysqli_fetch_assoc($r) : null;
+        mysqli_stmt_close($stmt);
     }
 }
 
@@ -812,7 +902,7 @@ $statusFilterOptions = [
           <select name="category" class="form-input">
             <option value="">— Select —</option>
             <?php foreach ($categories as $cat): ?>
-              <option value="<?= $cat ?>"><?= $cat ?></option>
+              <option value="<?= htmlspecialchars((string)$cat) ?>"><?= htmlspecialchars((string)$cat) ?></option>
             <?php endforeach; ?>
           </select>
         </div>
@@ -820,7 +910,7 @@ $statusFilterOptions = [
           <label class="form-label">Availability</label>
           <select name="cartStatus" class="form-input">
             <?php foreach ($statuses as $val=>$lbl): ?>
-              <option value="<?= $val ?>"><?= $lbl ?></option>
+              <option value="<?= htmlspecialchars((string)$val) ?>"><?= htmlspecialchars((string)$lbl) ?></option>
             <?php endforeach; ?>
           </select>
         </div>
@@ -933,7 +1023,7 @@ $statusFilterOptions = [
           <select name="category" class="form-input">
             <option value="">— Select —</option>
             <?php foreach ($categories as $cat): ?>
-              <option value="<?= $cat ?>" <?= $editProduct['category']===$cat?'selected':'' ?>><?= $cat ?></option>
+              <option value="<?= htmlspecialchars((string)$cat) ?>" <?= $editProduct['category']===$cat?'selected':'' ?>><?= htmlspecialchars((string)$cat) ?></option>
             <?php endforeach; ?>
           </select>
         </div>
@@ -941,7 +1031,7 @@ $statusFilterOptions = [
           <label class="form-label">Availability</label>
           <select name="cartStatus" class="form-input">
             <?php foreach ($statuses as $val=>$lbl): ?>
-              <option value="<?= $val ?>" <?= $editProduct['cartStatus']===$val?'selected':'' ?>><?= $lbl ?></option>
+              <option value="<?= htmlspecialchars((string)$val) ?>" <?= $editProduct['cartStatus']===$val?'selected':'' ?>><?= htmlspecialchars((string)$lbl) ?></option>
             <?php endforeach; ?>
           </select>
         </div>
@@ -1174,6 +1264,7 @@ function pcpUpload() {
     fd.append('productID', pid);
     fd.append('colorID',   cid);
     fd.append('photo',     file);
+    fd.append('csrf_token', window.APP_CSRF_TOKEN || '');
     fetch(pcpAjax, { method: 'POST', body: fd })
       .then(function(r){ return r.json(); })
       .then(function(data) {
@@ -1193,6 +1284,7 @@ function pcpDelete(id, btn) {
   var fd = new FormData();
   fd.append('action', 'delete');
   fd.append('id', id);
+  fd.append('csrf_token', window.APP_CSRF_TOKEN || '');
   fetch(pcpAjax, { method: 'POST', body: fd })
     .then(function(r){ return r.json(); })
     .then(function(data) {

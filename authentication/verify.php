@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once "database.php";
+require_once __DIR__ . "/../include/security.php";
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
@@ -104,6 +105,7 @@ function generateEmailVerificationCode(mysqli $conn, int $userId, string $email)
 // 2. Handle POST actions (verify / resend / switch)
 // ------------------------------------
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    app_require_csrf(false, "Invalid request token. Please refresh and try again.");
 
     // 2a. Switch to phone verification
     if (isset($_POST["switch_to_phone"])) {
@@ -275,6 +277,7 @@ if (!empty($userRow["verification_expires_at"])) {
         <?php endif; ?>
 
         <form action="verify.php" method="post">
+            <?= app_csrf_input() ?>
             <div class="wizard-content">
 
                 <?php if ($userRow): ?>
