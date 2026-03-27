@@ -3,81 +3,87 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 session_start();
 
-define('INCLUDE_CHECK', true);
-define('PROCESS_PAYMENT_DIRECT', true);
-define('STOCK_MANAGEMENT_DIRECT', true);
-
+require_once __DIR__ . '/vendor/autoload.php'; // Composer autoloader
 require_once __DIR__ . '/authentication/database.php';
-require_once __DIR__ . '/modules/stock_management.php';
+require_once __DIR__ . '/authentication/get_config.php';
+require_once __DIR__ . '/config.php';
 
-// Try Composer autoload first (recommended)
-$composerAutoload = __DIR__ . '/vendor/autoload.php';
-if (file_exists($composerAutoload)) {
-    require_once $composerAutoload;
-    $composerAvailable = true;
-    $dompdfAvailable = class_exists('Dompdf\Dompdf');
-} else {
-    $composerAvailable = false;
-    $dompdfAvailable = false;
-    error_log("Composer autoload not found at $composerAutoload");
+\Stripe\Stripe::setApiKey(STRIPE_SECRET_KEY);
+
+$project = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
+if ($project === '' || $project === '.') {
+    $project = '';
 }
 
-// If Composer didn't load Stripe, try manual Stripe paths
-if (!$composerAvailable || !class_exists('Stripe\Stripe')) {
-    $stripePaths = [
-        __DIR__ . '/stripe-php/stripe-php-19.5.0-alpha.3/init.php',
-        __DIR__ . '/stripe-php/init.php',
-        __DIR__ . '/stripe-php/Stripe.php',
-    ];
-    $stripeLoaded = false;
-    foreach ($stripePaths as $path) {
-        if (file_exists($path)) {
-            require_once $path;
-            $stripeLoaded = true;
-            break;
-        }
-    }
-    if (!$stripeLoaded) {
-        die('Stripe library not found. Please check the Stripe installation.');
-    }
+$paymentIntentId = $_GET['payment_intent'] ?? null;
+$paymentIntentClientSecret = $_GET['payment_intent_client_secret'] ?? null;
+
+if (!$paymentIntentId || !$paymentIntentClientSecret) {
+    die('Invalid payment confirmation.');
 }
 
-// If Composer didn't load PHPMailer, try manual includes
-if (!$composerAvailable || !class_exists('PHPMailer\PHPMailer\PHPMailer')) {
-    $phpmailerPaths = [
-        __DIR__ . '/PHPMailer-master/src/PHPMailer.php',
-        __DIR__ . '/PHPMailer-master/PHPMailer.php',
-        __DIR__ . '/PHPMailer/src/PHPMailer.php',
-        __DIR__ . '/PHPMailer/PHPMailer.php',
-    ];
-    $phpmailerLoaded = false;
-    foreach ($phpmailerPaths as $path) {
-        if (file_exists($path)) {
-            require_once $path;
-            $phpmailerLoaded = true;
-            break;
-        }
-    }
-    if (!$phpmailerLoaded) {
-        die('PHPMailer not found. Please check the PHPMailer installation.');
-    }
-    // Also include SMTP and Exception if needed
-    $smtpPath = str_replace('PHPMailer.php', 'SMTP.php', $path);
-    if (file_exists($smtpPath)) require_once $smtpPath;
-    $exceptionPath = str_replace('PHPMailer.php', 'Exception.php', $path);
-    if (file_exists($exceptionPath)) require_once $exceptionPath;
-}
+try {
+    $intent = \Stripe\PaymentIntent::retrieve($paymentIntentId);
 
-// If Dompdf still not available, try the fallback autoloader
-if (!$dompdfAvailable) {
-    $dompdfAutoloadPath = __DIR__ . '/PHPMailer-master/vendor/autoload.php';
-    if (file_exists($dompdfAutoloadPath)) {
-        require_once $dompdfAutoloadPath;
-        $dompdfAvailable = true;
+    // Verify the client secret matches to prevent tampering
+    if ($intent->client_secret !== $paymentIntentClientSecret) {
+        die('Invalid client secret.');
+    }
+
+    $orderId = (int)($intent->metadata['order_id'] ?? 0);
+    $amount = $intent->amount / 100; // amount is in cents
+
+    if (!$orderId) {
+        die('Order not found in payment metadata.');
+    }
+
+    // Update order status based on payment intent status
+    $status = $intent->status;
+
+    // Map Stripe status to your order payment_status
+    $orderStatus = 'pending';
+    if ($status === 'succeeded') {
+        $orderStatus = 'paid';
+    } elseif ($status === 'requires_payment_method') {
+        $orderStatus = 'failed';
+    }
+
+    // Update order in database
+    $stmt = $conn->prepare("UPDATE orders SET payment_status = ?, transaction_id = ? WHERE orderID = ?");
+    $stmt->bind_param("ssi", $orderStatus, $paymentIntentId, $orderId);
+    $stmt->execute();
+    $stmt->close();
+
+    if ($status === 'succeeded') {
+        // Payment succeeded – redirect to success page
+        header('Location: ' . $project . '/modules/checkout_success.php?order_id=' . $orderId);
+        exit;
     } else {
-        error_log("Dompdf autoload not found; PDF attachment will be skipped.");
+        // Payment failed or requires action – redirect to checkout with error
+        $_SESSION['checkout_error'] = 'Payment failed. Please try again.';
+        header('Location: ' . $project . '/checkout.php');
+        exit;
     }
+} catch (\Stripe\Exception\ApiErrorException $e) {
+    error_log('Stripe webhook error: ' . $e->getMessage());
+    die('Payment processing error: ' . $e->getMessage());
 }
+?>
+
+// Dompdf (optional)
+$dompdfAvailable = false;
+$dompdfAutoloadPath = __DIR__ . '/PHPMailer-master/vendor/autoload.php';
+if (file_exists($dompdfAutoloadPath)) {
+    require_once $dompdfAutoloadPath;
+    $dompdfAvailable = true;
+} else {
+    error_log("Dompdf autoload not found at $dompdfAutoloadPath; PDF attachment will be skipped.");
+}
+
+// Include PHPMailer manually
+require_once __DIR__ . '/PHPMailer-master/src/PHPMailer.php';
+require_once __DIR__ . '/PHPMailer-master/src/SMTP.php';
+require_once __DIR__ . '/PHPMailer-master/src/Exception.php';
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception as MailerException;
@@ -90,7 +96,6 @@ define('SMTP_PASS', '!g3$~8tYju*D');
 define('SMTP_PORT', 587);
 define('SMTP_SECURE', 'tls');
 // ===========================================
-
 
 /**
  * Helper: courier name from code
@@ -120,7 +125,7 @@ function cleanCountryName($country) {
 }
 
 /**
- * Generate PDF receipt – clean monochrome style
+ * Generate PDF receipt – clean monochrome style (like 0.png)
  */
 function generateReceiptPDF($conn, $orderId, $siteUrl) {
     global $dompdfAvailable;
@@ -212,11 +217,11 @@ function generateReceiptPDF($conn, $orderId, $siteUrl) {
 
         $itemsHtml .= '
         <tr>
-            <td style="padding:8px; border-bottom:1px solid #ddd;"><strong>' . $name . '</strong><br><small>SKU: ' . $sku . '</small>' . $giftText . '<\/td>
-            <td style="padding:8px; border-bottom:1px solid #ddd; text-align:center;">' . $qty . '<\/td>
-            <td style="padding:8px; border-bottom:1px solid #ddd; text-align:right;">€' . $price . '<\/td>
-            <td style="padding:8px; border-bottom:1px solid #ddd; text-align:right;">€' . $lineTotal . '<\/td>
-         <\/tr>';
+            <td style="padding:8px; border-bottom:1px solid #ddd;"><strong>' . $name . '</strong><br><small>SKU: ' . $sku . '</small>' . $giftText . '</td>
+            <td style="padding:8px; border-bottom:1px solid #ddd; text-align:center;">' . $qty . '</td>
+            <td style="padding:8px; border-bottom:1px solid #ddd; text-align:right;">€' . $price . '</td>
+            <td style="padding:8px; border-bottom:1px solid #ddd; text-align:right;">€' . $lineTotal . '</td>
+          </tr>';
     }
 
     // Build HTML – clean monochrome layout
@@ -345,12 +350,12 @@ function generateReceiptPDF($conn, $orderId, $siteUrl) {
     </div>
 
     <h3>Order Items</h3>
-     <table
+    <table>
         <thead>
-             <tr><th>Item</th><th style="width:60px;">Qty</th><th style="width:100px;">Unit Price</th><th style="width:100px;">Total</th></tr>
+            <tr><th>Item</th><th style="width:60px;">Qty</th><th style="width:100px;">Unit Price</th><th style="width:100px;">Total</th></tr>
         </thead>
         <tbody>' . $itemsHtml . '</tbody>
-     </table>
+    </table>
 
     <div class="totals">
         <p>Subtotal: €' . $subtotal . '</p>
@@ -548,7 +553,7 @@ function sendCustomerEmail($conn, $orderId, $customerEmail, $customerName, $pdfC
         <h3 style="color:#6a1b9a;">Order Items</h3>
         <table class="order-summary">
             <thead>
-                 <tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr>
+                <tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr>
             </thead>
             <tbody>' . $itemsHtml . '</tbody>
         </table>
@@ -588,6 +593,7 @@ function sendCustomerEmail($conn, $orderId, $customerEmail, $customerName, $pdfC
 
         $mail->setFrom(SMTP_USER, 'Creations by Athina');
         $mail->addAddress($customerEmail, $customerName);
+        $mail->addBCC('chrisanton1705@gmail.com'); // Backup BCC (replace with your email)
         $mail->isHTML(true);
         $mail->Subject = "Order Confirmation #{$orderNumber}";
         $mail->Body    = $body;
@@ -607,111 +613,131 @@ function sendCustomerEmail($conn, $orderId, $customerEmail, $customerName, $pdfC
 }
 
 /**
- * Send admin notification email with full order details (HTML) – original style with admin reminder
+ * Send admin notification email with full order details (HTML)
  */
 function sendAdminEmail($conn, $orderId, $pdfContent = null, $siteUrl = '') {
-    // Fetch order details (including user data for billing)
-    $order = $conn->query("
-        SELECT 
-            o.orderNumber, o.createdAt,
-            o.subtotal, o.discountTotal, o.shippingCost, o.totalAmount,
-            o.payment_method, o.courier, o.shipping_speed,
-            o.shipping_address, o.shipping_city, o.shipping_postal_code, o.shipping_country,
-            o.email, o.userID, o.status, o.transaction_id,
-            u.full_name AS customerName,
-            u.phone AS customerPhone,
-            u.address AS billing_address,
-            u.city AS billing_city,
-            u.postcode AS billing_postal_code,
-            u.country AS billing_country
-        FROM orders o
-        LEFT JOIN users u ON u.userID = o.userID
-        WHERE o.orderID = $orderId
-    ")->fetch_assoc();
-    if (!$order) {
-        error_log("Admin email: order not found for ID $orderId");
-        return ['success' => false, 'error' => 'Order not found'];
-    }
+    $debugFile = __DIR__ . '/admin_email_debug.log';
+    file_put_contents($debugFile, "sendAdminEmail: START for order $orderId\n", FILE_APPEND);
+    try {
+        if (!function_exists('courierLabelFromCode')) {
+            file_put_contents($debugFile, "sendAdminEmail: courierLabelFromCode missing\n", FILE_APPEND);
+            return ['success' => false, 'error' => 'Missing courierLabelFromCode'];
+        }
+        if (!function_exists('cleanCountryName')) {
+            file_put_contents($debugFile, "sendAdminEmail: cleanCountryName missing\n", FILE_APPEND);
+            return ['success' => false, 'error' => 'Missing cleanCountryName'];
+        }
 
-    // Fetch order items
-    $items = $conn->query("
-        SELECT 
-            oi.quantity, oi.unitPrice,
-            oi.giftWrapping, oi.giftBagFlag, oi.giftMessage,
-            p.nameEN, p.nameGR, p.sku
-        FROM order_items oi
-        LEFT JOIN products p ON oi.productID = p.productID
-        WHERE oi.orderID = $orderId
-    ");
-    if (!$items) {
-        error_log("Admin email: items query failed for order $orderId");
-        return ['success' => false, 'error' => 'Items query failed'];
-    }
+        file_put_contents($debugFile, "sendAdminEmail: about to fetch order\n", FILE_APPEND);
+        $order = $conn->query("
+            SELECT 
+                o.orderNumber, o.createdAt,
+                o.subtotal, o.discountTotal, o.shippingCost, o.totalAmount,
+                o.payment_method, o.courier, o.shipping_speed,
+                o.shipping_address, o.shipping_city, o.shipping_postal_code, o.shipping_country,
+                o.email, o.userID, o.status, o.transaction_id,
+                u.full_name AS customerName,
+                u.phone AS customerPhone,
+                u.address AS billing_address,
+                u.city AS billing_city,
+                u.postcode AS billing_postal_code,
+                u.country AS billing_country
+            FROM orders o
+            LEFT JOIN users u ON u.userID = o.userID
+            WHERE o.orderID = $orderId
+        ");
+        if (!$order) {
+            file_put_contents($debugFile, "sendAdminEmail: query failed\n", FILE_APPEND);
+            return ['success' => false, 'error' => 'Query failed'];
+        }
+        $order = $order->fetch_assoc();
+        if (!$order) {
+            file_put_contents($debugFile, "sendAdminEmail: order not found for $orderId\n", FILE_APPEND);
+            return ['success' => false, 'error' => 'Order not found'];
+        }
+        file_put_contents($debugFile, "sendAdminEmail: order found, orderNumber = " . ($order['orderNumber'] ?? 'N/A') . "\n", FILE_APPEND);
 
-    // Build display data
-    $orderNumber = $order['orderNumber'] ?? 'ORD-' . $orderId;
-    $orderDate = date('F j, Y', strtotime($order['createdAt']));
-    $orderTime = date('g:i a', strtotime($order['createdAt']));
-    $subtotal = number_format((float)$order['subtotal'], 2);
-    $discount = number_format((float)($order['discountTotal'] ?? 0), 2);
-    $shipping = number_format((float)$order['shippingCost'], 2);
-    $total = number_format((float)$order['totalAmount'], 2);
-    $customerName = $order['customerName'] ?: ($order['email'] ?: 'Guest');
-    $customerEmail = $order['email'] ?? '—';
-    $customerPhone = $order['customerPhone'] ?: 'Not provided';
-    $paymentMethod = ucfirst(str_replace('_', ' ', $order['payment_method'] ?? 'N/A'));
-    $transactionId = htmlspecialchars($order['transaction_id'] ?? '—');
-    $courierLabel = courierLabelFromCode($order['courier']);
-    $shippingSpeed = $order['shipping_speed'] ?? 'standard';
-    $orderStatus = ucfirst($order['status']);
+        file_put_contents($debugFile, "sendAdminEmail: about to fetch items\n", FILE_APPEND);
+        $items = $conn->query("
+            SELECT 
+                oi.quantity, oi.unitPrice,
+                oi.giftWrapping, oi.giftBagFlag, oi.giftMessage,
+                p.nameEN, p.nameGR, p.sku
+            FROM order_items oi
+            LEFT JOIN products p ON oi.productID = p.productID
+            WHERE oi.orderID = $orderId
+        ");
+        if (!$items) {
+            file_put_contents($debugFile, "sendAdminEmail: items query failed\n", FILE_APPEND);
+            return ['success' => false, 'error' => 'Items query failed'];
+        }
+        file_put_contents($debugFile, "sendAdminEmail: items fetched\n", FILE_APPEND);
 
-    // Clean country names
-    $billingCountry = cleanCountryName($order['billing_country'] ?? '');
-    $shippingCountry = cleanCountryName($order['shipping_country'] ?? '');
+        // Build data (same as before)
+        $orderNumber = $order['orderNumber'] ?? 'ORD-' . $orderId;
+        $orderDate = date('F j, Y', strtotime($order['createdAt']));
+        $orderTime = date('g:i a', strtotime($order['createdAt']));
+        $subtotal = number_format((float)$order['subtotal'], 2);
+        $discount = number_format((float)($order['discountTotal'] ?? 0), 2);
+        $shipping = number_format((float)$order['shippingCost'], 2);
+        $total = number_format((float)$order['totalAmount'], 2);
+        $customerName = $order['customerName'] ?: ($order['email'] ?: 'Guest');
+        $customerEmail = $order['email'] ?? '—';
+        $customerPhone = $order['customerPhone'] ?: 'Not provided';
+        $paymentMethod = ucfirst(str_replace('_', ' ', $order['payment_method'] ?? 'N/A'));
+        $transactionId = htmlspecialchars($order['transaction_id'] ?? '—');
+        $courierLabel = courierLabelFromCode($order['courier']);
+        $shippingSpeed = $order['shipping_speed'] ?? 'standard';
+        $orderStatus = ucfirst($order['status']);
 
-    // Addresses
-    $shippingParts = array_filter([
-        $order['shipping_address'],
-        $order['shipping_city'],
-        $order['shipping_postal_code'],
-        $shippingCountry
-    ]);
-    $shippingAddress = $shippingParts ? implode(', ', $shippingParts) : 'Not provided';
+        // Clean country names
+        $billingCountry = cleanCountryName($order['billing_country'] ?? '');
+        $shippingCountry = cleanCountryName($order['shipping_country'] ?? '');
 
-    $billingParts = array_filter([
-        $order['billing_address'] ?: $order['shipping_address'],
-        $order['billing_city'] ?: $order['shipping_city'],
-        $order['billing_postal_code'] ?: $order['shipping_postal_code'],
-        $billingCountry
-    ]);
-    $billingAddress = $billingParts ? implode(', ', $billingParts) : 'Not provided';
+        // Addresses
+        $shippingParts = array_filter([
+            $order['shipping_address'],
+            $order['shipping_city'],
+            $order['shipping_postal_code'],
+            $shippingCountry
+        ]);
+        $shippingAddress = $shippingParts ? implode(', ', $shippingParts) : 'Not provided';
 
-    // Items HTML
-    $itemsHtml = '';
-    while ($item = $items->fetch_assoc()) {
-        $name = htmlspecialchars($item['nameEN'] ?: $item['nameGR'] ?: 'Product');
-        $sku = htmlspecialchars($item['sku'] ?? '—');
-        $qty = (int)$item['quantity'];
-        $price = number_format((float)$item['unitPrice'], 2);
-        $lineTotal = number_format($qty * $item['unitPrice'], 2);
+        $billingParts = array_filter([
+            $order['billing_address'] ?: $order['shipping_address'],
+            $order['billing_city'] ?: $order['shipping_city'],
+            $order['billing_postal_code'] ?: $order['shipping_postal_code'],
+            $billingCountry
+        ]);
+        $billingAddress = $billingParts ? implode(', ', $billingParts) : 'Not provided';
 
-        $giftBits = [];
-        if (!empty($item['giftWrapping'])) $giftBits[] = 'Gift Wrap (+€2.00)';
-        if (!empty($item['giftBagFlag'])) $giftBits[] = 'Gift Bag (+€1.50)';
-        if (!empty($item['giftMessage'])) $giftBits[] = 'Message: "' . htmlspecialchars($item['giftMessage']) . '"';
-        $giftText = $giftBits ? '<br><small>' . implode(' | ', $giftBits) . '</small>' : '';
+        // Items HTML
+        $itemsHtml = '';
+        while ($item = $items->fetch_assoc()) {
+            $name = htmlspecialchars($item['nameEN'] ?: $item['nameGR'] ?: 'Product');
+            $sku = htmlspecialchars($item['sku'] ?? '—');
+            $qty = (int)$item['quantity'];
+            $price = number_format((float)$item['unitPrice'], 2);
+            $lineTotal = number_format($qty * $item['unitPrice'], 2);
 
-        $itemsHtml .= '
-          <tr>
-            <td style="padding:8px; border-bottom:1px solid #ede2ff;"><strong>' . $name . '</strong><br><small>SKU: ' . $sku . '</small>' . $giftText . '</td>
-            <td style="padding:8px; border-bottom:1px solid #ede2ff; text-align:center;">' . $qty . '</td>
-            <td style="padding:8px; border-bottom:1px solid #ede2ff; text-align:right;">€' . $price . '</td>
-            <td style="padding:8px; border-bottom:1px solid #ede2ff; text-align:right;">€' . $lineTotal . '</td>
-          </tr>';
-    }
+            $giftBits = [];
+            if (!empty($item['giftWrapping'])) $giftBits[] = 'Gift Wrap (+€2.00)';
+            if (!empty($item['giftBagFlag'])) $giftBits[] = 'Gift Bag (+€1.50)';
+            if (!empty($item['giftMessage'])) $giftBits[] = 'Message: "' . htmlspecialchars($item['giftMessage']) . '"';
+            $giftText = $giftBits ? '<br><small>' . implode(' | ', $giftBits) . '</small>' : '';
 
-    // Build HTML – admin email (same style as customer email but with admin note)
-    $body = '<!DOCTYPE html>
+            $itemsHtml .= '
+              <tr>
+                <td style="padding:8px; border-bottom:1px solid #ede2ff;"><strong>' . $name . '</strong><br><small>SKU: ' . $sku . '</small>' . $giftText . '</td>
+                <td style="padding:8px; border-bottom:1px solid #ede2ff; text-align:center;">' . $qty . '</td>
+                <td style="padding:8px; border-bottom:1px solid #ede2ff; text-align:right;">€' . $price . '</td>
+                <td style="padding:8px; border-bottom:1px solid #ede2ff; text-align:right;">€' . $lineTotal . '</td>
+              </tr>';
+        }
+
+        file_put_contents($debugFile, "sendAdminEmail: building HTML body\n", FILE_APPEND);
+        // Build HTML – admin email with reminder (original style)
+        $body = '<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -773,7 +799,7 @@ function sendAdminEmail($conn, $orderId, $pdfContent = null, $siteUrl = '') {
         <h3 style="color:#6a1b9a;">Order Items</h3>
         <table class="order-summary">
             <thead>
-                 <tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr>
+                <tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr>
             </thead>
             <tbody>' . $itemsHtml . '</tbody>
         </table>
@@ -788,7 +814,7 @@ function sendAdminEmail($conn, $orderId, $pdfContent = null, $siteUrl = '') {
         <div class="admin-note">
             <strong>📦 Action Required:</strong> After you ship this order, please update its status to <strong>"In Transit"</strong> in the admin panel.<br>
             The customer will automatically receive a separate email with tracking information when you change the status.<br>
-            <strong>Admin panel:</strong> <a href="' . $siteUrl . '/admin/order_management.php?view=' . $orderId . '">Click here to view order</a>
+            <strong>Admin panel:</strong> /admin/order_management.php?view=' . $orderId . '
         </div>
 
         <p>If you need to contact the customer, use: ' . htmlspecialchars($customerEmail) . '</p>
@@ -801,10 +827,10 @@ function sendAdminEmail($conn, $orderId, $pdfContent = null, $siteUrl = '') {
 </body>
 </html>';
 
-    $plainBody = strip_tags(str_replace(['</p>','<br>'], "\n", $body));
+        $plainBody = strip_tags(str_replace(['</p>','<br>'], "\n", $body));
 
-    $mail = new PHPMailer(true);
-    try {
+        file_put_contents($debugFile, "sendAdminEmail: about to send email\n", FILE_APPEND);
+        $mail = new PHPMailer(true);
         $mail->isSMTP();
         $mail->Host       = SMTP_HOST;
         $mail->SMTPAuth   = true;
@@ -815,7 +841,7 @@ function sendAdminEmail($conn, $orderId, $pdfContent = null, $siteUrl = '') {
 
         $mail->setFrom(SMTP_USER, 'Creations by Athina');
         $mail->addAddress(ADMIN_EMAIL, 'Admin');
-        $mail->addBCC('chrisanton1705@gmail.com'); 
+        $mail->addBCC('chrisanton1705@gmail.com'); // Backup BCC (replace with your email)
         $mail->isHTML(true);
         $mail->Subject = "New Order Alert: #{$orderNumber}";
         $mail->Body    = $body;
@@ -826,15 +852,15 @@ function sendAdminEmail($conn, $orderId, $pdfContent = null, $siteUrl = '') {
         }
 
         $mail->send();
-        error_log("Admin email sent successfully for order $orderId to " . ADMIN_EMAIL);
+        file_put_contents($debugFile, "sendAdminEmail: SUCCESSFULLY SENT\n", FILE_APPEND);
         return ['success' => true, 'error' => ''];
-    } catch (MailerException $e) {
-        $error = $mail->ErrorInfo;
-        error_log("Admin email failed for order $orderId: " . $error);
+    } catch (Exception $e) {
+        $error = $e->getMessage();
+        file_put_contents($debugFile, "sendAdminEmail: EXCEPTION - " . $error . "\n");
+        file_put_contents($debugFile, "Stack trace: " . $e->getTraceAsString() . "\n", FILE_APPEND);
         return ['success' => false, 'error' => $error];
     }
 }
-
 // ----------------------------------------------------------------------
 // Main payment processing
 // ----------------------------------------------------------------------
@@ -954,7 +980,11 @@ try {
     if ($customerEmail) {
         $customerEmailResult = sendCustomerEmail($conn, $orderId, $customerEmail, $customerName, $pdfContent, $siteUrl);
     }
+    $debugFile = __DIR__ . '/admin_email_debug.log';
+    file_put_contents($debugFile, "=== " . date('Y-m-d H:i:s') . " ===\n", FILE_APPEND);
+    file_put_contents($debugFile, "Main: about to call sendAdminEmail for order $orderId\n", FILE_APPEND);
     $adminEmailResult = sendAdminEmail($conn, $orderId, $pdfContent, $siteUrl);
+    file_put_contents($debugFile, "Main: sendAdminEmail result = " . json_encode($adminEmailResult) . "\n", FILE_APPEND);
 
     $_SESSION['checkout_result'] = [
         'order_id'                => $orderId,
@@ -975,34 +1005,14 @@ try {
     error_log("Payment error: " . $e->getMessage());
     die('Payment failed: ' . $e->getMessage());
 }
-// ==================== DEBUG: Test admin email manually ====================
+// Test admin email – visit process_payment.php?test_admin=123 (replace 123 with a real order ID)
 if (isset($_GET['test_admin']) && is_numeric($_GET['test_admin'])) {
     $testOrderId = (int)$_GET['test_admin'];
     echo "<h2>Testing admin email for order ID: $testOrderId</h2>";
-
-    // Re‑create site URL (same as in main processing)
-    $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
-    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-    $basePath = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
-    if ($basePath === '' || $basePath === '.') $basePath = '';
-    $siteUrl = $protocol . '://' . $host . $basePath;
-
-    // Call the admin email function
-    $result = sendAdminEmail($conn, $testOrderId, null, $siteUrl);
-
+    $result = sendAdminEmail($conn, $testOrderId, null, $siteUrl ?? '');
     echo "<pre>";
     print_r($result);
     echo "</pre>";
-
-    // If it succeeded, you can also output the email body to inspect it
-    if ($result['success']) {
-        echo "<hr><h3>Email body (HTML):</h3>";
-        // We need to re‑generate the email body to display it (you could copy the body-building code here)
-        // But for simplicity, we'll just say "Check your inbox/spam folder".
-        echo "<p>Admin email sent successfully. Please check your spam folder if it does not appear in the inbox.</p>";
-    } else {
-        echo "<p><strong>Error:</strong> " . htmlspecialchars($result['error']) . "</p>";
-    }
     exit;
 }
 ?>

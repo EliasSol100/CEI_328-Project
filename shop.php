@@ -2,6 +2,8 @@
 session_start();
 require_once "authentication/database.php";
 require_once "authentication/get_config.php";
+require_once "include/security.php";
+require_once __DIR__ . '/include/made_to_order_access.php';
 
 $system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
 $logo_path = getSystemConfig("logo_path") ?: "assets/images/athina-eshop-logo.png";
@@ -12,6 +14,7 @@ if (!file_exists($logo_path) && file_exists("assets/images/athina-eshop-logo.png
 if (!file_exists($logo_path)) {
     $logo_path = "assets/images/athina-eshop-logo.png";
 }
+ensureMadeToOrderProductSchema($conn);
 
 // --------- User / Profile handling ----------
 $role     = "guest";
@@ -62,6 +65,40 @@ if (isset($_SESSION["user"])) {
 $GLOBALS['header_user_full_name'] = $fullName;
 $GLOBALS['header_user_role']      = $role;
 
+if (isset($_GET['mto_pid']) && isset($_GET['mto_token'])) {
+    $mtoPid = (int)($_GET['mto_pid'] ?? 0);
+    $mtoToken = trim((string)($_GET['mto_token'] ?? ''));
+    $grant = grantMadeToOrderAccessFromLink($conn, $mtoPid, $mtoToken);
+
+    if (!empty($grant['ok'])) {
+        $_SESSION['shop_mto_flash'] = 'ok:Private made-to-order product unlocked for your account.';
+    } else {
+        $reason = (string)($grant['reason'] ?? 'invalid_link');
+        if ($reason === 'login_required') {
+            $_SESSION['shop_mto_flash'] = 'err:Sign in with the assigned customer email to access this private product.';
+        } elseif ($reason === 'email_mismatch') {
+            $_SESSION['shop_mto_flash'] = 'err:This private product belongs to a different customer email.';
+        } else {
+            $_SESSION['shop_mto_flash'] = 'err:Invalid or expired private product link.';
+        }
+    }
+
+    $safeQuery = $_GET;
+    unset($safeQuery['mto_pid'], $safeQuery['mto_token']);
+    $redirectUrl = 'shop.php';
+    if (!empty($safeQuery)) {
+        $redirectUrl .= '?' . http_build_query($safeQuery);
+    }
+    header('Location: ' . $redirectUrl);
+    exit();
+}
+
+$shopMtoFlash = '';
+if (isset($_SESSION['shop_mto_flash'])) {
+    $shopMtoFlash = (string)$_SESSION['shop_mto_flash'];
+    unset($_SESSION['shop_mto_flash']);
+}
+
 function ensureProductSalesOverridesSchema(mysqli $conn): void {
     static $checked = false;
     if ($checked) {
@@ -98,15 +135,30 @@ if ($sellingFastColumn && $sellingFastColumn->num_rows === 0) {
 
 function getOrCreateWishlistID($conn, $uid) {
     $uid = (int)$uid;
-    $r = $conn->query("SELECT wishlistID FROM wishlists WHERE userID=$uid LIMIT 1");
-    if ($r && $row = $r->fetch_assoc()) {
-        return (int)$row['wishlistID'];
+    $stmt = $conn->prepare("SELECT wishlistID FROM wishlists WHERE userID = ? LIMIT 1");
+    if ($stmt) {
+        $stmt->bind_param("i", $uid);
+        $stmt->execute();
+        $r = $stmt->get_result();
+        $row = $r ? $r->fetch_assoc() : null;
+        $stmt->close();
+        if ($row) {
+            return (int)$row['wishlistID'];
+        }
     }
-    $conn->query("INSERT INTO wishlists (userID) VALUES ($uid)");
-    return (int)$conn->insert_id;
+    $stmt = $conn->prepare("INSERT INTO wishlists (userID) VALUES (?)");
+    if ($stmt) {
+        $stmt->bind_param("i", $uid);
+        $stmt->execute();
+        $newId = (int)$stmt->insert_id;
+        $stmt->close();
+        return $newId;
+    }
+    return 0;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggle_wishlist_item') {
+    app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $pid = (int)($_POST['product_id'] ?? 0);
     $acceptHeader = $_SERVER["HTTP_ACCEPT"] ?? "";
     $isAjax = (
@@ -120,20 +172,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggl
 
         if ($userId) {
             $wid   = getOrCreateWishlistID($conn, (int)$userId);
-            $check = $conn->query("SELECT wishlistItemID FROM wishlist_items WHERE wishlistID=$wid AND productID=$pid LIMIT 1");
-            if ($check && $check->num_rows > 0) {
-                $iid = (int)$check->fetch_assoc()['wishlistItemID'];
-                $conn->query("DELETE FROM wishlist_items WHERE wishlistItemID=$iid");
+            $iid = 0;
+            $check = $conn->prepare("SELECT wishlistItemID FROM wishlist_items WHERE wishlistID = ? AND productID = ? LIMIT 1");
+            if ($check) {
+                $check->bind_param("ii", $wid, $pid);
+                $check->execute();
+                $checkRes = $check->get_result();
+                $checkRow = $checkRes ? $checkRes->fetch_assoc() : null;
+                $iid = (int)($checkRow['wishlistItemID'] ?? 0);
+                $check->close();
+            }
+            if ($iid > 0) {
+                $deleteStmt = $conn->prepare("DELETE FROM wishlist_items WHERE wishlistItemID = ?");
+                if ($deleteStmt) {
+                    $deleteStmt->bind_param("i", $iid);
+                    $deleteStmt->execute();
+                    $deleteStmt->close();
+                }
                 $inWishlist = false;
             } else {
-                $conn->query("INSERT INTO wishlist_items (wishlistID, productID) VALUES ($wid, $pid)");
+                $insertStmt = $conn->prepare("INSERT INTO wishlist_items (wishlistID, productID) VALUES (?, ?)");
+                if ($insertStmt) {
+                    $insertStmt->bind_param("ii", $wid, $pid);
+                    $insertStmt->execute();
+                    $insertStmt->close();
+                }
                 $inWishlist = true;
             }
 
-            $countRes = $conn->query("SELECT COUNT(*) AS c FROM wishlist_items WHERE wishlistID=$wid");
-            $wishlistCount = ($countRes && ($cRow = $countRes->fetch_assoc()))
-                ? (int)$cRow['c']
-                : 0;
+            $countStmt = $conn->prepare("SELECT COUNT(*) AS c FROM wishlist_items WHERE wishlistID = ?");
+            if ($countStmt) {
+                $countStmt->bind_param("i", $wid);
+                $countStmt->execute();
+                $countRes = $countStmt->get_result();
+                $cRow = $countRes ? $countRes->fetch_assoc() : null;
+                $wishlistCount = (int)($cRow['c'] ?? 0);
+                $countStmt->close();
+            }
             $_SESSION['wishlist_count'] = $wishlistCount;
         } else {
             if (!isset($_SESSION['wishlist']) || !is_array($_SESSION['wishlist'])) {
@@ -182,16 +257,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggl
 $wishlistedIDs = [];
 if ($userId) {
     $uid = (int)$userId;
-    $r   = $conn->query("
+    $stmt = $conn->prepare("
         SELECT wi.productID
         FROM wishlist_items wi
         JOIN wishlists w ON w.wishlistID = wi.wishlistID
-        WHERE w.userID = $uid
+        WHERE w.userID = ?
     ");
-    if ($r) {
+    if ($stmt) {
+        $stmt->bind_param("i", $uid);
+        $stmt->execute();
+        $r = $stmt->get_result();
         while ($row = $r->fetch_assoc()) {
             $wishlistedIDs[] = (int)$row['productID'];
         }
+        $stmt->close();
     }
 } else {
     if (isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])) {
@@ -202,13 +281,23 @@ if ($userId) {
 // Keep header wishlist counter in sync on this request.
 $_SESSION['wishlist_count'] = count($wishlistedIDs);
 
+$accessibleMadeToOrderIds = getAccessibleMadeToOrderProductIds($conn);
+$catalogVisibilityWhere = "p.cartStatus IN ('active', 'low_stock', 'out_of_stock')";
+if (!empty($accessibleMadeToOrderIds)) {
+    $catalogVisibilityWhere .= " OR (p.cartStatus = 'made_to_order' AND p.productID IN (" . implode(',', array_map('intval', $accessibleMadeToOrderIds)) . "))";
+}
+$categoryVisibilityWhere = "cartStatus IN ('active', 'low_stock', 'out_of_stock')";
+if (!empty($accessibleMadeToOrderIds)) {
+    $categoryVisibilityWhere .= " OR (cartStatus = 'made_to_order' AND productID IN (" . implode(',', array_map('intval', $accessibleMadeToOrderIds)) . "))";
+}
+
 // Load distinct active categories
 $categories = [];
 $catRes = $conn->query("
     SELECT DISTINCT category
     FROM products
     WHERE category IS NOT NULL AND category != ''
-      AND cartStatus IN ('active', 'low_stock', 'out_of_stock', 'made_to_order')
+      AND ({$categoryVisibilityWhere})
     ORDER BY category ASC
 ");
 if ($catRes) {
@@ -223,7 +312,7 @@ $maxPrice = 100;
 $priceBoundsRes = $conn->query("
     SELECT MIN(basePrice) AS min_price, MAX(basePrice) AS max_price
     FROM products
-    WHERE cartStatus IN ('active', 'low_stock', 'out_of_stock', 'made_to_order')
+    WHERE ({$categoryVisibilityWhere})
 ");
 if ($priceBoundsRes && ($bounds = $priceBoundsRes->fetch_assoc())) {
     if ($bounds['min_price'] !== null && $bounds['max_price'] !== null) {
@@ -276,7 +365,7 @@ $sql = "
         GROUP BY productID
     ) os ON os.productID = p.productID
     LEFT JOIN product_sales_overrides pso ON pso.productID = p.productID
-    WHERE p.cartStatus IN ('active', 'low_stock', 'out_of_stock', 'made_to_order')
+    WHERE ({$catalogVisibilityWhere})
 ";
 
 $bindTypes = '';
@@ -345,6 +434,15 @@ if ($revRes) {
         ];
     }
 }
+
+// Load product_color_photos per product (for carousel)
+$colorPhotosByProduct = [];
+$cpRes = $conn->query("SELECT productID, photoPath FROM product_color_photos ORDER BY productID, sortOrder ASC");
+if ($cpRes) {
+    while ($row = $cpRes->fetch_assoc()) {
+        $colorPhotosByProduct[(int)$row['productID']][] = $row['photoPath'];
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -395,6 +493,13 @@ if ($revRes) {
                     Find your favorite handmade crochet creations
                 </p>
             </div>
+
+            <?php if ($shopMtoFlash !== ''): ?>
+            <?php [$shopFlashType, $shopFlashMsg] = array_pad(explode(':', $shopMtoFlash, 2), 2, ''); ?>
+            <div class="flash flash-<?= $shopFlashType === 'ok' ? 'success' : 'error' ?>" style="margin-bottom:16px;">
+                <?= htmlspecialchars($shopFlashMsg) ?>
+            </div>
+            <?php endif; ?>
 
             <div class="shop-layout">
                 <!-- FILTER SIDEBAR -->
@@ -500,7 +605,8 @@ if ($revRes) {
                             $isOutStock = ((string)$p['cartStatus'] === 'out_of_stock') || ((int)$p['inventory'] <= 0 && (string)$p['cartStatus'] !== 'made_to_order');
                             $isLowStock = ((string)$p['cartStatus'] === 'low_stock') || (!$isOutStock && (int)$p['inventory'] > 0 && (int)$p['inventory'] <= 3);
                             $catName   = $p['category'] ?? '';
-                            $imageIDs = !empty($p['imageIDs']) ? array_map('intval', explode(',', $p['imageIDs'])) : [];
+                            $imageIDs   = !empty($p['imageIDs']) ? array_map('intval', explode(',', $p['imageIDs'])) : [];
+                            $colorPaths = $colorPhotosByProduct[$pid] ?? [];
                             $rev    = $reviewData[$pid] ?? ['cnt' => 0, 'avg' => 0.0];
                             $stars  = '';
                             $filled = (int)round($rev['avg']);
@@ -520,16 +626,26 @@ if ($revRes) {
                                 <?php if (!empty($p['isSellingFast'])): ?>
                                 <span class="shop-selling-fast-badge">Selling Fast</span>
                                 <?php endif; ?>
-                                <?php if (!empty($imageIDs)): ?>
-                                <div id="carousel-<?= $pid ?>" class="carousel slide shop-carousel" data-bs-ride="carousel" data-bs-interval="3000">
+                                <?php
+                                    // Combine blob photos + color photos
+                                    $allSlides = [];
+                                    foreach ($imageIDs as $imgID) {
+                                        $allSlides[] = ['type' => 'blob', 'src' => 'modules/admin/ajax/product_image.php?id=' . $imgID];
+                                    }
+                                    foreach ($colorPaths as $cp) {
+                                        $allSlides[] = ['type' => 'path', 'src' => $cp];
+                                    }
+                                ?>
+                                <?php if (!empty($allSlides)): ?>
+                                <div id="carousel-<?= $pid ?>" class="carousel slide shop-carousel" data-bs-ride="carousel" data-bs-interval="2000">
                                     <div class="carousel-inner">
-                                        <?php foreach ($imageIDs as $cidx => $imgID): ?>
+                                        <?php foreach ($allSlides as $cidx => $slide): ?>
                                         <div class="carousel-item <?= $cidx === 0 ? 'active' : '' ?>">
-                                            <img src="modules/admin/ajax/product_image.php?id=<?= $imgID ?>" alt="<?= htmlspecialchars($p['nameEN']) ?>">
+                                            <img src="<?= htmlspecialchars($slide['src']) ?>" alt="<?= htmlspecialchars($p['nameEN']) ?>">
                                         </div>
                                         <?php endforeach; ?>
                                     </div>
-                                    <?php if (count($imageIDs) > 1): ?>
+                                    <?php if (count($allSlides) > 1): ?>
                                     <button class="carousel-control-prev" type="button" data-bs-target="#carousel-<?= $pid ?>" data-bs-slide="prev">
                                         <span class="carousel-control-prev-icon"></span>
                                     </button>
@@ -540,6 +656,7 @@ if ($revRes) {
                                 </div>
                                 <?php endif; ?>
                                 <form method="post" action="shop.php" style="position:absolute;top:8px;right:8px;z-index:10;">
+                                    <?= app_csrf_input() ?>
                                     <input type="hidden" name="action" value="toggle_wishlist_item">
                                     <input type="hidden" name="product_id" value="<?= $pid ?>">
                                     <button type="submit" class="shop-fav <?= $inWishlist ? 'is-active' : '' ?>" title="<?= $inWishlist ? 'Remove from wishlist' : 'Add to wishlist' ?>">
@@ -685,7 +802,10 @@ if ($revRes) {
 
         return fetch('cart_api.php', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': window.APP_CSRF_TOKEN || ''
+            },
             body: JSON.stringify(body)
         })
         .then(r => r.json())

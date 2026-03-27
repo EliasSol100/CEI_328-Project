@@ -5,7 +5,7 @@ session_start();
 
 require_once __DIR__ . '/authentication/database.php';
 require_once __DIR__ . '/authentication/get_config.php';
-require_once __DIR__ . '/vendor/autoload.php';
+require_once __DIR__ . '/stripe-php/stripe-php-19.5.0-alpha.3/init.php';
 require_once __DIR__ . '/config.php';
 
 $system_title = getSystemConfig("site_title") ?: "Creations by Athina";
