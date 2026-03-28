@@ -31,10 +31,8 @@ if ($stmt->get_result()->num_rows === 0) {
 }
 $stmt->close();
 
-// Fetch order data (shipping details, items) with product ID
+// Fetch order data (shipping details)
 $orderData = [];
-$items = [];
-
 $stmt = $conn->prepare("
     SELECT
         o.orderID,
@@ -66,10 +64,12 @@ if ($row = $res->fetch_assoc()) {
 }
 $stmt->close();
 
-// Fetch items – include productID for stock check
+// Fetch items – include variationID
+$items = [];
 $stmt = $conn->prepare("
     SELECT oi.quantity, oi.unitPrice, oi.giftWrapping, oi.giftBagFlag, oi.giftMessage,
-           p.nameEN, p.nameGR, p.basePrice, p.productID
+           p.nameEN, p.nameGR, p.basePrice, p.productID,
+           oi.variationID
     FROM order_items oi
     LEFT JOIN products p ON oi.productID = p.productID
     WHERE oi.orderID = ?
@@ -86,32 +86,67 @@ while ($row = $res->fetch_assoc()) {
         'giftWrapping'  => (bool)$row['giftWrapping'],
         'giftBagFlag'   => (bool)$row['giftBagFlag'],
         'giftMessage'   => $row['giftMessage'],
+        'variationID'   => isset($row['variationID']) ? (int)$row['variationID'] : null,
     ];
 }
 $stmt->close();
 
-// ----- STOCK CHECK BEFORE PAYMENT -----
+// ----- STOCK CHECK BEFORE PAYMENT (supports variants) -----
 $stockError = false;
 $outOfStockItems = [];
 
 foreach ($items as $item) {
     $productId = $item['productID'];
     $quantity = $item['quantity'];
-    $stmt = $conn->prepare("SELECT inventory FROM products WHERE productID = ?");
-    $stmt->bind_param("i", $productId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $row = $result->fetch_assoc();
-    $available = (int)($row['inventory'] ?? 0);
-    $stmt->close();
+    $variationId = $item['variationID'] ?? null;
 
-    if ($available < $quantity) {
-        $stockError = true;
-        $outOfStockItems[] = [
-            'name' => $item['name'],
-            'available' => $available,
-            'requested' => $quantity
-        ];
+    $available = 0;
+    $productName = $item['name'];
+
+    if ($variationId && $variationId > 0) {
+        // Check variant stock from product_variations.stock
+        $stmt = $conn->prepare("
+            SELECT stock, p.nameEN
+            FROM product_variations pv
+            LEFT JOIN products p ON p.productID = pv.productID
+            WHERE pv.variationID = ?
+        ");
+        $stmt->bind_param("i", $variationId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $row = $result->fetch_assoc();
+        if ($row) {
+            $available = (int)($row['stock'] ?? 0);
+            $productName = $row['nameEN'] ?? $item['name'];
+        }
+        $stmt->close();
+
+        if ($available < $quantity) {
+            $stockError = true;
+            $outOfStockItems[] = [
+                'name' => $productName,
+                'available' => $available,
+                'requested' => $quantity
+            ];
+        }
+    } else {
+        // Check product inventory (no variant)
+        $stmt = $conn->prepare("SELECT inventory FROM products WHERE productID = ?");
+        $stmt->bind_param("i", $productId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $row = $result->fetch_assoc();
+        $available = (int)($row['inventory'] ?? 0);
+        $stmt->close();
+
+        if ($available < $quantity) {
+            $stockError = true;
+            $outOfStockItems[] = [
+                'name' => $productName,
+                'available' => $available,
+                'requested' => $quantity
+            ];
+        }
     }
 }
 
@@ -125,7 +160,91 @@ if ($stockError) {
     exit;
 }
 // ------------------------------------------
+/**
+                 * Check whether a product has any variation rows.
+                */
+                function productHasVariationRows(mysqli $conn, int                  $productId): bool {
+                static $cache = [];
+                if (array_key_exists($productId, $cache)) {
+                    return $cache[$productId];
+                }
+                $stmt = $conn->prepare("SELECT 1 FROM product_variations WHERE productID = ? LIMIT 1");
+                if (!$stmt) {
+                return false;
+                }
+                $stmt->bind_param("i", $productId);
+                $stmt->execute();
+                $row = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                $cache[$productId] = (bool)$row;
+                return $cache[$productId];
+                }
+                $stockErrors = [];
+$productCache = [];
 
+foreach ($cartItems as $item) {
+    $productId = (int)($item['productID'] ?? $item['product_id'] ?? $item['product']['id'] ?? 0);
+    $quantity = (int)($item['quantity'] ?? 1);
+    if ($productId <= 0) continue;
+
+    // Fetch product data with row lock
+    if (!isset($productCache[$productId])) {
+        $stmt = $conn->prepare("SELECT inventory, nameEN, hasVariants FROM products WHERE productID = ? FOR UPDATE");
+        $stmt->bind_param("i", $productId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $productCache[$productId] = $result->fetch_assoc();
+        $stmt->close();
+    }
+    $productData = $productCache[$productId];
+    if (!$productData) {
+        $stockErrors[] = "Product #{$productId} not found.";
+        continue;
+    }
+
+    $hasVariants = (int)$productData['hasVariants'];
+    $hasVariationRows = productHasVariationRows($conn, $productId);
+    $productName = $productData['nameEN'] ?? "Product #{$productId}";
+    $available = (int)$productData['inventory']; // fallback
+
+    // Extract variation ID if any
+    $variationId = null;
+    if (isset($item['variation']['variationID'])) {
+        $variationId = (int)$item['variation']['variationID'];
+    } elseif (isset($item['variation_id'])) {
+        $variationId = (int)$item['variation_id'];
+    }
+
+    // Only treat as variant if hasVariants=1 AND there are actual variation rows
+    if ($hasVariants === 1 && $hasVariationRows) {
+        if ($variationId && $variationId > 0) {
+            $stmt = $conn->prepare("SELECT stock FROM product_variations WHERE variationID = ? FOR UPDATE");
+            $stmt->bind_param("i", $variationId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $row = $result->fetch_assoc();
+            if ($row) {
+                $available = (int)($row['stock'] ?? 0);
+            } else {
+                // Variation ID exists but no row – fall back to product inventory
+                $available = (int)$productData['inventory'];
+            }
+            $stmt->close();
+        } else {
+            // Product has variation rows but cart has no variation ID – treat as out of stock
+            $available = 0;
+        }
+    }
+    // else: product has no variations (or hasVariants=1 but no rows) – use $available = product inventory
+
+    if ($available < $quantity) {
+        $stockErrors[] = "Insufficient stock for {$productName}: ordered {$quantity}, available {$available}.";
+    }
+}
+
+if (!empty($stockErrors)) {
+    throw new RuntimeException(implode(', ', $stockErrors));
+}     
 $isLoggedIn = isset($_SESSION['user']);
 
 // Stripe Payment Intent (card only)
@@ -156,7 +275,6 @@ include __DIR__ . '/include/header.php';
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://js.stripe.com/v3/"></script>
     <style>
-        /* Your existing styles (unchanged) */
         .checkout-container { max-width: 1160px; margin: 36px auto 72px; padding: 0 20px; }
         .checkout-title { margin: 0 0 18px; color: #2d184d; font-size: clamp(1.9rem,2.7vw,2.4rem); line-height: 1.1; letter-spacing: 0.2px; }
         .checkout-grid { display: grid; grid-template-columns: minmax(0,1fr) 360px; gap: 28px; align-items: start; }

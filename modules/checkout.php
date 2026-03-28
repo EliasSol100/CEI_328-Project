@@ -1,7 +1,9 @@
-<?php
+﻿<?php
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 session_start();
+unset($_SESSION['checkout_error'], $_SESSION['paypal_order_id'], $_SESSION['paypal_total']);
+
 define('INCLUDE_CHECK', true);
 
 // Correct relative path: go up one level from 'modules' to project root, then into 'authentication'
@@ -20,6 +22,30 @@ if (file_exists($configPath)) {
 if (!$conn || $conn->connect_error) {
     die("Database connection failed: " . ($conn->connect_error ?? 'Unknown error'));
 }
+
+// --- AJAX handler for pickup points ---
+if (isset($_GET['ajax_get_pickup_points'])) {
+    header('Content-Type: application/json');
+    $courier = $_GET['courier'] ?? '';
+    $country = $_GET['country'] ?? '';
+    $city = $_GET['city'] ?? '';
+    $postal = $_GET['postal'] ?? '';
+
+    $points = [];
+    if ($courier && $country) {
+        $stmt = $conn->prepare("SELECT name, address, city, postal_code, lat, lng FROM courier_pickup_points WHERE courier_code = ? AND country = ? AND is_active = 1");
+        $stmt->bind_param("ss", $courier, $country);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        while ($row = $res->fetch_assoc()) {
+            $points[] = $row;
+        }
+        $stmt->close();
+    }
+    echo json_encode($points);
+    exit;
+}
+// --- end AJAX handler ---
 
 function ensurePromotionCouponColumn(mysqli $conn): void {
     static $checked = false;
@@ -394,19 +420,6 @@ if (!isset($formData['shipping_country']) || trim((string)$formData['shipping_co
     $formData['shipping_country'] = checkoutNormalizeCountry($fallbackCountry, $availableCountries);
 }
 
-if ($isLoggedIn) {
-    if (!isset($formData['use_saved_address'])) {
-        $formData['use_saved_address'] = ($_SERVER['REQUEST_METHOD'] === 'POST') ? '0' : ($hasDefaultAddressData ? '1' : '0');
-    }
-    if ((string)$formData['use_saved_address'] === '1' && $hasDefaultAddressData) {
-        if (trim((string)($formData['shipping_address'] ?? '')) === '') $formData['shipping_address'] = (string)$defaultAddress['address'];
-        if (trim((string)($formData['shipping_city'] ?? '')) === '') $formData['shipping_city'] = (string)$defaultAddress['city'];
-        if (trim((string)($formData['shipping_postal_code'] ?? '')) === '') $formData['shipping_postal_code'] = (string)$defaultAddress['postal_code'];
-        if (trim((string)($formData['shipping_country'] ?? '')) === '') $formData['shipping_country'] = checkoutNormalizeCountry((string)$defaultAddress['country'], $availableCountries);
-        if (trim((string)($formData['shipping_label'] ?? '')) === '') $formData['shipping_label'] = (string)$defaultAddress['label'];
-    }
-}
-
 $selectedCountry = checkoutNormalizeCountry((string)($formData['shipping_country'] ?? ''), $availableCountries);
 $formData['shipping_country'] = $selectedCountry;
 $selectedSpeed = (string)$formData['shipping_speed'];
@@ -427,6 +440,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $isCouponOnlyPost = ($couponAction !== '');
     $isLoyaltyOnlyPost = ($loyaltyAction !== '');
     if ($isCouponOnlyPost) {
+        // coupon handling (unchanged)
         if ($couponAction === 'remove') {
             unset($_SESSION['cart_coupon_code']);
             $selectedCouponCode = '';
@@ -472,6 +486,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($selectedLoyaltyPoints > 0 && !isset($formData['loyalty_points'])) $formData['loyalty_points'] = (string)$selectedLoyaltyPoints;
         $displayTotal = max(0, ($cartTotal - $couponDiscount - $loyaltyDiscount) + $displayShippingCost);
     } elseif ($isLoyaltyOnlyPost) {
+        // loyalty handling (unchanged)
         $formData['loyalty_points'] = trim((string)($_POST['loyalty_points'] ?? ''));
         if (!$isLoggedIn || $userId <= 0) {
             checkoutResetLoyaltySelection();
@@ -511,6 +526,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             : 0;
         $displayTotal = max(0, ($cartTotal - $couponDiscount - $loyaltyDiscount) + $displayShippingCost);
     } else {
+        // Full checkout submission
         $required = [
             'shipping_address' => 'Shipping address',
             'shipping_city' => 'City',
@@ -622,46 +638,182 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $earnedPoints = loyaltyCalculateEarnedPoints($loyaltyEarnEligibleAmount);
                 $totalAmount = max(0, ($cartTotal - $combinedDiscountTotal) + $shippingCost);
 
+                // ------------------------------------------------------------------
+                // CORRECTED STOCK VALIDATION (uses hasVariants from products)
+                // ------------------------------------------------------------------
+                /**
+                 * Check whether a product has any variation rows.
+                */
+                function productHasVariationRows(mysqli $conn, int                  $productId): bool {
+                static $cache = [];
+                if (array_key_exists($productId, $cache)) {
+                    return $cache[$productId];
+                }
+                $stmt = $conn->prepare("SELECT 1 FROM product_variations WHERE productID = ? LIMIT 1");
+                if (!$stmt) {
+                return false;
+                }
+                $stmt->bind_param("i", $productId);
+                $stmt->execute();
+                $row = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                $cache[$productId] = (bool)$row;
+                return $cache[$productId];
+                }
+                $stockErrors = [];
+                $productCache = [];
+
+                foreach ($cartItems as $item) {
+                    $productId = (int)($item['productID'] ?? $item['product_id'] ?? $item['product']['id'] ?? 0);
+                    $quantity = (int)($item['quantity'] ?? 1);
+                    if ($productId <= 0) continue;
+
+                    // Fetch product data with row lock
+                    if (!isset($productCache[$productId])) {
+                        $stmt = $conn->prepare("SELECT inventory, nameEN, hasVariants FROM products WHERE productID = ? FOR UPDATE");
+                        $stmt->bind_param("i", $productId);
+                        $stmt->execute();
+                        $result = $stmt->get_result();
+                        $productCache[$productId] = $result->fetch_assoc();
+                        $stmt->close();
+                    }
+                    $productData = $productCache[$productId];
+                    if (!$productData) {
+                        $stockErrors[] = "Product #{$productId} not found.";
+                        continue;
+                    }
+
+                    $hasVariants = (int)$productData['hasVariants'];
+                    $productName = $productData['nameEN'] ?? "Product #{$productId}";
+                    $available = (int)$productData['inventory']; // default to product inventory
+
+                    // Extract variation ID if any
+                    $variationId = null;
+                    if (isset($item['variation']['variationID'])) {
+                        $variationId = (int)$item['variation']['variationID'];
+                    } elseif (isset($item['variation_id'])) {
+                        $variationId = (int)$item['variation_id'];
+                    }
+
+                    // Only use variant stock if product has variants AND a variation ID is present
+                    if ($hasVariants === 1 && $variationId && $variationId > 0) {
+                        $stmt = $conn->prepare("SELECT stock FROM product_variations WHERE variationID = ? FOR UPDATE");
+                        $stmt->bind_param("i", $variationId);
+                        $stmt->execute();
+                        $result = $stmt->get_result();
+                        $row = $result->fetch_assoc();
+                        if ($row) {
+                            $available = (int)($row['stock'] ?? 0);
+                        } else {
+                            // Variation not found – fallback to product inventory
+                            $available = (int)$productData['inventory'];
+                        }
+                        $stmt->close();
+                    } elseif ($hasVariants === 1 && !$variationId) {
+                        // Product has variants but cart has no variation ID – treat as out of stock
+                        $available = 0;
+                    }
+                    // If $hasVariants === 0, $available already is product inventory (no change)
+
+                    if ($available < $quantity) {
+                        $stockErrors[] = "Insufficient stock for {$productName}: ordered {$quantity}, available {$available}.";
+                    }
+                }
+                if (!empty($stockErrors)) {
+                    throw new RuntimeException(implode(', ', $stockErrors));
+                }
+                // ------------------------------------------------------------------
+
                 $placed = placeOrder($conn, [
-    'payment_confirmed' => false,
-    'items' => $cartItems,
-    'user_id' => $userId > 0 ? $userId : null,
-    'is_guest' => $isLoggedIn ? 0 : 1,
-    'email' => $isLoggedIn ? $userEmail : trim((string)($_POST['email'] ?? '')),
-    'customer_name' => $isLoggedIn ? (string)$userFullName : trim((string)($_POST['full_name'] ?? 'Customer')),
-    'order_status' => 'pending',
-    'payment_status' => 'pending',
-    'payment_method' => trim((string)($_POST['payment_method'] ?? 'stripe')), // ← changed from payment_provider
-    'subtotal' => $cartTotal,
-    'discount_total' => $combinedDiscountTotal,
-    'shipping_cost' => $shippingCost,
-    'total_amount' => $totalAmount,
-    'shipping_address' => trim((string)($_POST['shipping_address'] ?? '')),
-    'shipping_city' => trim((string)($_POST['shipping_city'] ?? '')),
-    'shipping_postal_code' => trim((string)($_POST['shipping_postal_code'] ?? '')),
-    'shipping_country' => $shippingCountry,
-    'shipping_label' => trim((string)($_POST['shipping_label'] ?? '')),
-    'courier' => $courier,
-    'shipping_priority' => $shippingSpeed,
-    'fulfillment_mode' => $fulfillmentMode,
-]);
+                    'payment_confirmed' => false,
+                    'items' => $cartItems,
+                    'user_id' => $userId > 0 ? $userId : null,
+                    'is_guest' => $isLoggedIn ? 0 : 1,
+                    'email' => $isLoggedIn ? $userEmail : trim((string)($_POST['email'] ?? '')),
+                    'customer_name' => $isLoggedIn ? (string)$userFullName : trim((string)($_POST['full_name'] ?? 'Customer')),
+                    'order_status' => 'pending',
+                    'payment_status' => 'pending',
+                    'payment_method' => trim((string)($_POST['payment_method'] ?? 'stripe')),
+                    'subtotal' => $cartTotal,
+                    'discount_total' => $combinedDiscountTotal,
+                    'shipping_cost' => $shippingCost,
+                    'total_amount' => $totalAmount,
+                    'shipping_address' => trim((string)($_POST['shipping_address'] ?? '')),
+                    'shipping_city' => trim((string)($_POST['shipping_city'] ?? '')),
+                    'shipping_postal_code' => trim((string)($_POST['shipping_postal_code'] ?? '')),
+                    'shipping_country' => $shippingCountry,
+                    'shipping_label' => trim((string)($_POST['shipping_label'] ?? '')),
+                    'courier' => $courier,
+                    'shipping_priority' => $shippingSpeed,
+                    'fulfillment_mode' => $fulfillmentMode,
+                ]);
                 $orderId = (int)$placed['order_id'];
-                // Store all relevant checkout details in session for later use (especially for email)
-                $_SESSION['checkout_data'] = [
-                     'order_id'            => $orderId,
-                     'payment_method'      => $paymentMethod,
-                     'courier'             => $courier,
-                     'shipping_speed'      => $shippingSpeed,
-                     'shipping_address'    => trim((string)($_POST['shipping_address'] ?? '')),
-                     'shipping_city'       => trim((string)($_POST['shipping_city'] ?? '')),
-                     'shipping_postal_code'=> trim((string)($_POST['shipping_postal_code'] ?? '')),
-                     'shipping_country'    => $shippingCountry,
-                     'total_amount'        => $totalAmount,
-                     'order_number'        => $orderNumber,
-                     'email'               => $isLoggedIn ? $userEmail : trim((string)($_POST['email'] ?? '')),
-                     'full_name'           => $isLoggedIn ? (string)$userFullName : trim((string)($_POST['full_name'] ?? 'Customer')),
-];
                 $orderNumber = (string)$placed['order_number'];
+
+                // ========== CREATE ACCOUNT FOR GUEST IF CHECKBOX CHECKED ==========
+                $createdAccountUserId = 0;
+                if (!$isLoggedIn && isset($_POST['create_account']) && $_POST['create_account'] === 'yes') {
+                    $guestEmail = trim((string)($_POST['email'] ?? ''));
+                    $guestFullName = trim((string)($_POST['full_name'] ?? ''));
+                    $guestPhone = trim((string)($_POST['phone'] ?? ''));
+
+                    // Check if email already exists
+                    $checkUser = $conn->prepare("SELECT userID FROM users WHERE email = ?");
+                    $checkUser->bind_param("s", $guestEmail);
+                    $checkUser->execute();
+                    $checkUser->store_result();
+                    if ($checkUser->num_rows === 0) {
+                        // Generate a random password (user will reset later)
+                        $tempPassword = bin2hex(random_bytes(8));
+                        $hashedPassword = password_hash($tempPassword, PASSWORD_DEFAULT);
+
+                        $insertUser = $conn->prepare("INSERT INTO users (full_name, email, phone, password, address, city, postcode, country, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())");
+                        $insertUser->bind_param("ssssssss", $guestFullName, $guestEmail, $guestPhone, $hashedPassword, $shippingAddress, $shippingCity, $shippingPostalCode, $shippingCountry);
+                        if ($insertUser->execute()) {
+                            $createdAccountUserId = $conn->insert_id;
+
+                            // Link order to the new user
+                            $linkOrder = $conn->prepare("UPDATE orders SET userID = ?, is_guest = 0 WHERE orderID = ?");
+                            $linkOrder->bind_param("ii", $createdAccountUserId, $orderId);
+                            $linkOrder->execute();
+
+                            // Optionally save the address as default
+                            if (checkoutTableExists($conn, 'user_addresses')) {
+                                $insertAddr = $conn->prepare("INSERT INTO user_addresses (user_id, label, country, city, address, postcode, is_default, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, NOW())");
+                                $defaultLabel = 'Home';
+                                $insertAddr->bind_param("isssss", $createdAccountUserId, $defaultLabel, $shippingCountry, $shippingCity, $shippingAddress, $shippingPostalCode);
+                                $insertAddr->execute();
+                            }
+
+                            // Log the user in
+                            $_SESSION['user'] = [
+                                'id' => $createdAccountUserId,
+                                'email' => $guestEmail,
+                                'full_name' => $guestFullName
+                            ];
+                            // Store temp password for display on success page
+                            $_SESSION['temp_password'] = $tempPassword;
+                        }
+                    }
+                    $checkUser->close();
+                }
+                // ====================================================
+
+                // Store checkout data in session
+                $_SESSION['checkout_data'] = [
+                    'order_id'            => $orderId,
+                    'payment_method'      => $paymentMethod,
+                    'courier'             => $courier,
+                    'shipping_speed'      => $shippingSpeed,
+                    'shipping_address'    => trim((string)($_POST['shipping_address'] ?? '')),
+                    'shipping_city'       => trim((string)($_POST['shipping_city'] ?? '')),
+                    'shipping_postal_code'=> trim((string)($_POST['shipping_postal_code'] ?? '')),
+                    'shipping_country'    => $shippingCountry,
+                    'total_amount'        => $totalAmount,
+                    'order_number'        => $orderNumber,
+                    'email'               => $isLoggedIn ? $userEmail : trim((string)($_POST['email'] ?? '')),
+                    'full_name'           => $isLoggedIn ? (string)$userFullName : trim((string)($_POST['full_name'] ?? 'Customer')),
+                ];
 
                 $loyaltyOutcome = [];
                 if ($selectedLoyaltyPoints > 0 && $userId > 0) {
@@ -678,13 +830,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $conn->commit();
 
                 // Determine which payment page to use
-if ($paymentMethod === 'stripe') {
-    $paymentPage = 'payment_stripe.php';
-} else {
-    $paymentPage = 'payment_paypal.php';
-}
-header('Location: ' . $project . '/' . $paymentPage . '?order_id=' . $orderId . '&total=' . urlencode($totalAmount));
-exit;
+                if ($paymentMethod === 'stripe') {
+                    $paymentPage = 'payment_stripe.php';
+                } else {
+                    $paymentPage = 'payment_paypal.php';
+                }
+                header('Location: ' . $project . '/' . $paymentPage . '?order_id=' . $orderId . '&total=' . urlencode($totalAmount));
+                exit;
 
             } catch (Exception $e) {
                 $conn->rollback();
@@ -707,6 +859,47 @@ exit;
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="../assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/translations.js') ?>" defer></script>
+    <style>
+        .btn-secondary {
+            background: #f0eaff;
+            border: 1px solid #8a4dd6;
+            color: #4a2a7a;
+            padding: 8px 16px;
+            border-radius: 40px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-secondary:hover {
+            background: #e1d5f5;
+            border-color: #6b3a9e;
+        }
+        .courier-map-frame {
+            height: 300px;
+            width: 100%;
+            margin-top: 15px;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #e6dff2;
+        }
+        .courier-map-points span {
+            display: inline-block;
+            background: #f5f0ff;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            margin: 4px;
+            border: 1px solid #e0d4f0;
+        }
+        .courier-map-points span.is-closest {
+            background: #8a4dd6;
+            color: white;
+            border-color: #8a4dd6;
+        }
+    </style>
 </head>
 <body class="site-page">
 <?php
@@ -755,13 +948,17 @@ if (file_exists($headerPath)) {
 
                 <fieldset>
                     <legend data-translate="checkoutShipping">Shipping</legend>
-                    <?php if ($isLoggedIn && $hasDefaultAddressData): ?>
+                    <?php if ($isLoggedIn): ?>
                     <div class="form-group">
                         <label class="option-label">
-                            <input type="checkbox" id="use_saved_address" name="use_saved_address" value="1" <?= (($formData['use_saved_address'] ?? '0') === '1') ? 'checked' : '' ?>>
-                            Auto-fill with my default address
+                            <input type="checkbox" id="autofill-checkbox" name="autofill_checkbox" value="1" <?= ($hasDefaultAddressData && ($_POST['autofill_checkbox'] ?? '1') === '1') ? 'checked' : '' ?>>
+                            Use my default address
                         </label>
-                        <span class="form-helper">Uses your default address from My Account. You can still edit every field manually.</span>
+                        <?php if ($hasDefaultAddressData): ?>
+                            <span class="form-helper">Automatically fill shipping details from your saved address.</span>
+                        <?php else: ?>
+                            <span class="form-helper">No saved address found. Please fill the fields below.</span>
+                        <?php endif; ?>
                     </div>
                     <?php endif; ?>
                     <div class="form-group">
@@ -931,7 +1128,11 @@ if (file_exists($headerPath)) {
                 <?php if (!$isLoggedIn): ?>
                 <fieldset>
                     <legend data-translate="checkoutOptional">Optional</legend>
-                    <label class="option-label"><input type="checkbox" name="create_account" value="yes" <?= isset($formData['create_account'])?'checked':'' ?>> <span data-translate="checkoutCreateAccount">Create an account with these details</span></label>
+                    <label class="option-label">
+                        <input type="checkbox" name="create_account" value="yes" <?= isset($formData['create_account'])?'checked':'' ?>>
+                        <span data-translate="checkoutCreateAccount">Create an account with these details</span>
+                    </label>
+                    <span class="form-helper">We'll create an account for you. You can set a password later.</span>
                 </fieldset>
                 <?php endif; ?>
 
@@ -985,7 +1186,7 @@ if (file_exists($headerPath)) {
             <div class="courier-map-card" id="courier-map-card">
                 <h3 id="courier-map-title">Courier Locations</h3>
                 <p id="courier-map-hint">Select a courier to preview pickup spots.</p>
-                <div id="courier-map-frame" class="courier-map-frame" aria-label="Courier pickup spot map"></div>
+                <div id="courier-map-frame" class="courier-map-frame"></div>
                 <div class="courier-map-links" id="courier-map-links"></div>
                 <div class="courier-map-points" id="courier-map-points"></div>
             </div>
@@ -1002,126 +1203,10 @@ if (file_exists($headerPath)) {
     var shippingRatesByCountry = <?= json_encode($shippingRatesByCountry) ?>;
     var countryCouriers = <?= json_encode($countryCouriers) ?>;
     var defaultAddress = <?= json_encode($defaultAddress) ?>;
-
+    var availableCountries = <?= json_encode($availableCountries) ?>;
     var countryBounds = {
         Cyprus: [[34.56, 32.15], [35.75, 34.95]],
         Greece: [[34.76, 19.34], [41.82, 29.89]]
-    };
-
-    var cityCenters = {
-        Cyprus: {
-            nicosia: { lat: 35.1856, lng: 33.3823 },
-            lefkosia: { lat: 35.1856, lng: 33.3823 },
-            limassol: { lat: 34.6841, lng: 33.0379 },
-            lemesos: { lat: 34.6841, lng: 33.0379 },
-            larnaca: { lat: 34.9167, lng: 33.6290 },
-            paphos: { lat: 34.7754, lng: 32.4257 },
-            pafos: { lat: 34.7754, lng: 32.4257 },
-            paralimni: { lat: 35.0396, lng: 33.9819 },
-            famagusta: { lat: 35.0396, lng: 33.9819 }
-        },
-        Greece: {
-            athens: { lat: 37.9838, lng: 23.7275 },
-            athina: { lat: 37.9838, lng: 23.7275 },
-            thessaloniki: { lat: 40.6401, lng: 22.9444 },
-            patra: { lat: 38.2466, lng: 21.7346 },
-            patras: { lat: 38.2466, lng: 21.7346 },
-            heraklion: { lat: 35.3387, lng: 25.1442 },
-            iraklio: { lat: 35.3387, lng: 25.1442 },
-            larissa: { lat: 39.6390, lng: 22.4191 },
-            volos: { lat: 39.3610, lng: 22.9420 },
-            ioannina: { lat: 39.6650, lng: 20.8537 },
-            chania: { lat: 35.5138, lng: 24.0180 }
-        }
-    };
-
-    var countryDefaults = {
-        Cyprus: { lat: 35.1400, lng: 33.3600 },
-        Greece: { lat: 38.1200, lng: 23.7200 }
-    };
-
-    var mapConfigs = {
-        akis_express: {
-            title: 'Akis Express Pickup Spots',
-            country: 'Cyprus',
-            color: '#8a4dd6',
-            points: [
-                { name: 'Akis Express Latsia Hub', city: 'Nicosia', postal: '2235', district: 'nicosia', country: 'Cyprus', lat: 35.1032, lng: 33.3838 },
-                { name: 'Akis Express Limassol Center', city: 'Limassol', postal: '3012', district: 'limassol', country: 'Cyprus', lat: 34.6841, lng: 33.0379 },
-                { name: 'Akis Express Larnaca Drosia', city: 'Larnaca', postal: '6035', district: 'larnaca', country: 'Cyprus', lat: 34.9157, lng: 33.6142 },
-                { name: 'Akis Express Paphos Kiniras', city: 'Paphos', postal: '8011', district: 'paphos', country: 'Cyprus', lat: 34.7736, lng: 32.4260 },
-                { name: 'Akis Express Paphos Hellados', city: 'Paphos', postal: '8020', district: 'paphos', country: 'Cyprus', lat: 34.7664, lng: 32.4215 }
-            ],
-            links: [{ href: 'https://akisexpress.com.cy/', label: 'Akis Express Official' }]
-        },
-        boxnow: {
-            title: 'BoxNow Locker Pickup Spots',
-            country: 'Cyprus',
-            color: '#f58f3d',
-            points: [
-                { name: 'BoxNow Locker Strovolos', city: 'Nicosia', postal: '2018', district: 'nicosia', country: 'Cyprus', lat: 35.1285, lng: 33.3450 },
-                { name: 'BoxNow Locker Mesa Geitonia', city: 'Limassol', postal: '4003', district: 'limassol', country: 'Cyprus', lat: 34.6935, lng: 33.0547 },
-                { name: 'BoxNow Locker Finikoudes', city: 'Larnaca', postal: '6022', district: 'larnaca', country: 'Cyprus', lat: 34.9140, lng: 33.6350 },
-                { name: 'BoxNow Locker Paphos Center', city: 'Paphos', postal: '8010', district: 'paphos', country: 'Cyprus', lat: 34.7748, lng: 32.4245 },
-                { name: 'BoxNow Locker Paralimni', city: 'Paralimni', postal: '5290', district: 'paralimni', country: 'Cyprus', lat: 35.0396, lng: 33.9819 }
-            ],
-            links: [{ href: 'https://boxnow.cy/en/locker-finder', label: 'BoxNow Cyprus Locker Finder' }]
-        },
-        acs: {
-            title: 'ACS Pickup Spots',
-            country: 'Cyprus',
-            color: '#2c7be5',
-            points: [
-                { name: 'ACS Strovolos Branch', city: 'Nicosia', postal: '2018', district: 'nicosia', country: 'Cyprus', lat: 35.1487, lng: 33.3416 },
-                { name: 'ACS Agia Zoni Branch', city: 'Limassol', postal: '3031', district: 'limassol', country: 'Cyprus', lat: 34.6830, lng: 33.0441 },
-                { name: 'ACS Aradippou Branch', city: 'Larnaca', postal: '7101', district: 'larnaca', country: 'Cyprus', lat: 34.9498, lng: 33.5911 },
-                { name: 'ACS Mesogi Branch', city: 'Paphos', postal: '8280', district: 'paphos', country: 'Cyprus', lat: 34.8217, lng: 32.4622 },
-                { name: 'ACS Chloraka Branch', city: 'Paphos', postal: '8010', district: 'paphos', country: 'Cyprus', lat: 34.7929, lng: 32.4068 }
-            ],
-            links: [{ href: 'https://www.acscourier.net/en/home', label: 'ACS Official' }]
-        },
-        elta_courier: {
-            title: 'ELTA Courier Pickup Spots',
-            country: 'Greece',
-            color: '#3fa77b',
-            points: [
-                { name: 'ELTA Athens Central', city: 'Athens', postal: '10557', district: 'athens', country: 'Greece', lat: 37.9755, lng: 23.7348 },
-                { name: 'ELTA Thessaloniki Center', city: 'Thessaloniki', postal: '54624', district: 'thessaloniki', country: 'Greece', lat: 40.6380, lng: 22.9444 },
-                { name: 'ELTA Patra Center', city: 'Patra', postal: '26221', district: 'patras', country: 'Greece', lat: 38.2460, lng: 21.7350 },
-                { name: 'ELTA Heraklion Center', city: 'Heraklion', postal: '71202', district: 'heraklion', country: 'Greece', lat: 35.3393, lng: 25.1333 },
-                { name: 'ELTA Larissa Center', city: 'Larissa', postal: '41222', district: 'larissa', country: 'Greece', lat: 39.6390, lng: 22.4191 },
-                { name: 'ELTA Ioannina Center', city: 'Ioannina', postal: '45444', district: 'ioannina', country: 'Greece', lat: 39.6651, lng: 20.8520 }
-            ],
-            links: [{ href: 'https://www.elta-courier.gr/', label: 'ELTA Courier Official' }]
-        },
-        speedex: {
-            title: 'Speedex Pickup Spots',
-            country: 'Greece',
-            color: '#d96459',
-            points: [
-                { name: 'Speedex Athens Hub', city: 'Athens', postal: '10437', district: 'athens', country: 'Greece', lat: 37.9860, lng: 23.7207 },
-                { name: 'Speedex Thessaloniki Hub', city: 'Thessaloniki', postal: '54627', district: 'thessaloniki', country: 'Greece', lat: 40.6420, lng: 22.9285 },
-                { name: 'Speedex Patra Point', city: 'Patra', postal: '26222', district: 'patras', country: 'Greece', lat: 38.2445, lng: 21.7252 },
-                { name: 'Speedex Heraklion Point', city: 'Heraklion', postal: '71306', district: 'heraklion', country: 'Greece', lat: 35.3235, lng: 25.1312 },
-                { name: 'Speedex Larissa Point', city: 'Larissa', postal: '41334', district: 'larissa', country: 'Greece', lat: 39.6320, lng: 22.4225 },
-                { name: 'Speedex Chania Point', city: 'Chania', postal: '73134', district: 'chania', country: 'Greece', lat: 35.5098, lng: 24.0323 }
-            ],
-            links: [{ href: 'https://www.speedex.gr/', label: 'Speedex Official' }]
-        },
-        geniki: {
-            title: 'Geniki Taxydromiki Pickup Spots',
-            country: 'Greece',
-            color: '#5661d9',
-            points: [
-                { name: 'Geniki Athens Hub', city: 'Athens', postal: '17778', district: 'athens', country: 'Greece', lat: 37.9641, lng: 23.6978 },
-                { name: 'Geniki Thessaloniki Hub', city: 'Thessaloniki', postal: '54628', district: 'thessaloniki', country: 'Greece', lat: 40.6507, lng: 22.9346 },
-                { name: 'Geniki Patra Point', city: 'Patra', postal: '26223', district: 'patras', country: 'Greece', lat: 38.2490, lng: 21.7427 },
-                { name: 'Geniki Heraklion Point', city: 'Heraklion', postal: '71307', district: 'heraklion', country: 'Greece', lat: 35.3321, lng: 25.1288 },
-                { name: 'Geniki Larissa Point', city: 'Larissa', postal: '41335', district: 'larissa', country: 'Greece', lat: 39.6375, lng: 22.4140 },
-                { name: 'Geniki Ioannina Point', city: 'Ioannina', postal: '45445', district: 'ioannina', country: 'Greece', lat: 39.6630, lng: 20.8453 }
-            ],
-            links: [{ href: 'https://www.taxydromiki.com/', label: 'Geniki Taxydromiki Official' }]
-        }
     };
 
     // DOM element references
@@ -1140,7 +1225,6 @@ if (file_exists($headerPath)) {
     var courierMapPoints = document.getElementById('courier-map-points');
     var countryEl = document.getElementById('shipping_country');
     var postalEl = document.getElementById('shipping_postal_code');
-    var useSavedAddressEl = document.getElementById('use_saved_address');
     var shippingAddressEl = document.getElementById('shipping_address');
     var shippingCityEl = document.getElementById('shipping_city');
     var shippingLabelEl = document.getElementById('shipping_label');
@@ -1243,181 +1327,10 @@ if (file_exists($headerPath)) {
         if (!courierEl.value && keys.length > 0) courierEl.value = keys[0];
     }
 
-    // ========== DISTRICT DETECTION ==========
-    function getSelectedDistrict() {
-        var country = selectedCountry();
-        var cityValue = shippingCityEl ? shippingCityEl.value : '';
-        var postalValue = postalEl ? postalEl.value : '';
-
-        // Try postal code first
-        var postalInfo = getPostalCenter(country, postalValue);
-        if (postalInfo && postalInfo.district) return postalInfo.district;
-
-        // Then try city name
-        var cityKey = normalizeKey(cityValue);
-        var cityToDistrict = {
-            'nicosia': 'nicosia', 'lefkosia': 'nicosia',
-            'limassol': 'limassol', 'lemesos': 'limassol',
-            'larnaca': 'larnaca',
-            'paphos': 'paphos', 'pafos': 'paphos',
-            'paralimni': 'paralimni', 'famagusta': 'paralimni',
-            'athens': 'athens', 'athina': 'athens',
-            'thessaloniki': 'thessaloniki',
-            'patras': 'patras',
-            'heraklion': 'heraklion', 'iraklio': 'heraklion',
-            'larissa': 'larissa',
-            'volos': 'volos',
-            'ioannina': 'ioannina',
-            'chania': 'chania'
-        };
-        if (cityToDistrict[cityKey]) return cityToDistrict[cityKey];
-
-        return null;
-    }
-
-    function getPostalCenter(country, postalValue) {
-        var digits = String(postalValue || '').replace(/\D/g, '');
-        if (digits === '') return null;
-
-        if (country === 'Cyprus') {
-            var first = Number(digits.charAt(0));
-            if (first === 1 || first === 2) return { lat: 35.1856, lng: 33.3823, district: 'nicosia' };
-            if (first === 3 || first === 4) return { lat: 34.6841, lng: 33.0379, district: 'limassol' };
-            if (first === 8) return { lat: 34.7754, lng: 32.4257, district: 'paphos' };
-            if (first === 5 || first === 6 || first === 7) return { lat: 34.9167, lng: 33.6290, district: 'larnaca' };
-            return { lat: 35.1400, lng: 33.3600, district: 'nicosia' };
-        }
-
-        if (country === 'Greece') {
-            var prefix = Number(digits.slice(0, 2));
-            if (prefix >= 10 && prefix <= 19) return { lat: 37.9838, lng: 23.7275, district: 'athens' };
-            if (prefix >= 20 && prefix <= 29) return { lat: 38.2466, lng: 21.7346, district: 'patras' };
-            if (prefix >= 30 && prefix <= 39) return { lat: 39.3610, lng: 22.9420, district: 'volos' };
-            if (prefix >= 40 && prefix <= 43) return { lat: 39.6390, lng: 22.4191, district: 'larissa' };
-            if (prefix >= 45 && prefix <= 46) return { lat: 39.6650, lng: 20.8537, district: 'ioannina' };
-            if (prefix >= 54 && prefix <= 57) return { lat: 40.6401, lng: 22.9444, district: 'thessaloniki' };
-            if (prefix >= 70 && prefix <= 74) return { lat: 35.3387, lng: 25.1442, district: 'heraklion' };
-            return { lat: 38.1200, lng: 23.7200, district: 'athens' };
-        }
-
-        return null;
-    }
-
     // ========== PICKUP DROPDOWN (distance based) ==========
-    function populatePickupDropdowns() {
-        var country = selectedCountry();
-        var maxDistanceKm = 20;   // Show only points within this distance (km)
-        var maxClosest = 5;       // Show at most this many points
-
-        function fillClosestSelect(selectId, points, targetPoint) {
-            var select = document.getElementById(selectId);
-            if (!select) return;
-
-            if (!targetPoint) {
-                select.innerHTML = '<option value="">-- Επιλέξτε Σημείο --</option>';
-                points.forEach(function(point) {
-                    var opt = document.createElement('option');
-                    opt.value = point.name;
-                    opt.textContent = point.name + ' (' + point.city + ')';
-                    select.appendChild(opt);
-                });
-                return;
-            }
-
-            var withDist = points.map(function(point) {
-                return {
-                    point: point,
-                    dist: haversineKm(targetPoint, point)
-                };
-            });
-
-            var withinRadius = withDist.filter(function(item) { return item.dist <= maxDistanceKm; });
-            var candidates = withinRadius.length > 0 ? withinRadius : withDist.slice();
-            candidates.sort(function(a, b) { return a.dist - b.dist; });
-            var closest = candidates.slice(0, maxClosest);
-
-            select.innerHTML = '<option value="">-- Επιλέξτε Σημείο --</option>';
-            closest.forEach(function(item) {
-                var opt = document.createElement('option');
-                opt.value = item.point.name;
-                var distKm = item.dist.toFixed(1);
-                opt.textContent = item.point.name + ' (' + item.point.city + ') – ' + distKm + ' km';
-                select.appendChild(opt);
-            });
-
-            if (closest.length === 0) {
-                select.innerHTML = '<option value="">-- Κανένα σημείο κοντά --</option>';
-            }
-        }
-
-        var targetPoint = resolveTargetPoint(country);
-
-        if (mapConfigs.akis_express && mapConfigs.akis_express.points) {
-            fillClosestSelect('akis_pickup_point', mapConfigs.akis_express.points, targetPoint);
-        }
-        if (mapConfigs.acs && mapConfigs.acs.points) {
-            fillClosestSelect('acs_pickup_point', mapConfigs.acs.points, targetPoint);
-        }
-        if (mapConfigs.boxnow && mapConfigs.boxnow.points) {
-            fillClosestSelect('boxnow_pickup_point', mapConfigs.boxnow.points, targetPoint);
-        }
-
-        togglePickupWrappers();
-    }
-
-    function togglePickupWrappers() {
-        if (!courierEl) return;
-
-        var isAkis = (courierEl.value === 'akis_express');
-        var isAcs = (courierEl.value === 'acs');
-        var isBoxnow = (courierEl.value === 'boxnow');
-        var mode = selectedMode();
-
-        var akisWrapper = document.getElementById('akis-point-wrapper');
-        var acsWrapper = document.getElementById('acs-point-wrapper');
-        var boxnowWrapper = document.getElementById('boxnow-point-wrapper');
-
-        var showAkis = isAkis && (mode === 'pickup');
-        var showAcs = isAcs && (mode === 'pickup');
-        var showBoxnow = isBoxnow;   // BoxNow always visible when selected
-
-        if (akisWrapper) {
-            akisWrapper.style.display = showAkis ? '' : 'none';
-            var akisSelect = document.getElementById('akis_pickup_point');
-            if (akisSelect) akisSelect.required = showAkis;
-        }
-        if (acsWrapper) {
-            acsWrapper.style.display = showAcs ? '' : 'none';
-            var acsSelect = document.getElementById('acs_pickup_point');
-            if (acsSelect) acsSelect.required = showAcs;
-        }
-        if (boxnowWrapper) {
-            boxnowWrapper.style.display = showBoxnow ? '' : 'none';
-            var boxnowSelect = document.getElementById('boxnow_pickup_point');
-            if (boxnowSelect) boxnowSelect.required = showBoxnow;
-        }
-    }
-
-    // ========== MAP FUNCTIONS ==========
-    function getCityCenter(country, cityValue) {
-        var lookup = cityCenters[country] || {};
-        var key = normalizeKey(cityValue);
-        if (key !== '' && lookup[key]) return lookup[key];
-        return null;
-    }
-
-    function resolveTargetPoint(country) {
-        var cityPoint = getCityCenter(country, shippingCityEl ? shippingCityEl.value : '');
-        if (cityPoint) return cityPoint;
-        var postalInfo = getPostalCenter(country, postalEl ? postalEl.value : '');
-        if (postalInfo) return { lat: postalInfo.lat, lng: postalInfo.lng };
-        return countryDefaults[country] || { lat: 35.14, lng: 33.36 };
-    }
-
-    function toRad(deg) { return deg * (Math.PI / 180); }
-
     function haversineKm(a, b) {
         var earth = 6371;
+        function toRad(deg) { return deg * (Math.PI / 180); }
         var dLat = toRad(b.lat - a.lat);
         var dLng = toRad(b.lng - a.lng);
         var lat1 = toRad(a.lat);
@@ -1428,95 +1341,130 @@ if (file_exists($headerPath)) {
         return 2 * earth * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
     }
 
-    function pointKey(point) {
-        return [point.name, point.city, point.postal].join('|');
+    function getCityCenter(country, cityValue) {
+        var cityCenters = {
+            Cyprus: {
+                nicosia: { lat: 35.1856, lng: 33.3823 },
+                lefkosia: { lat: 35.1856, lng: 33.3823 },
+                limassol: { lat: 34.6841, lng: 33.0379 },
+                lemesos: { lat: 34.6841, lng: 33.0379 },
+                larnaca: { lat: 34.9167, lng: 33.6290 },
+                paphos: { lat: 34.7754, lng: 32.4257 },
+                pafos: { lat: 34.7754, lng: 32.4257 },
+                paralimni: { lat: 35.0396, lng: 33.9819 },
+                famagusta: { lat: 35.0396, lng: 33.9819 }
+            },
+            Greece: {
+                athens: { lat: 37.9838, lng: 23.7275 },
+                athina: { lat: 37.9838, lng: 23.7275 },
+                thessaloniki: { lat: 40.6401, lng: 22.9444 },
+                patra: { lat: 38.2466, lng: 21.7346 },
+                patras: { lat: 38.2466, lng: 21.7346 },
+                heraklion: { lat: 35.3387, lng: 25.1442 },
+                iraklio: { lat: 35.3387, lng: 25.1442 },
+                larissa: { lat: 39.6390, lng: 22.4191 },
+                volos: { lat: 39.3610, lng: 22.9420 },
+                ioannina: { lat: 39.6650, lng: 20.8537 },
+                chania: { lat: 35.5138, lng: 24.0180 }
+            }
+        };
+        var lookup = cityCenters[country] || {};
+        var key = normalizeKey(cityValue);
+        if (key !== '' && lookup[key]) return lookup[key];
+        return null;
+    }
+
+    function getPostalCenter(country, postalValue) {
+        var digits = String(postalValue || '').replace(/\D/g, '');
+        if (digits === '') return null;
+        if (country === 'Cyprus') {
+            var first = Number(digits.charAt(0));
+            if (first === 1 || first === 2) return { lat: 35.1856, lng: 33.3823 };
+            if (first === 3 || first === 4) return { lat: 34.6841, lng: 33.0379 };
+            if (first === 8) return { lat: 34.7754, lng: 32.4257 };
+            if (first === 5 || first === 6 || first === 7) return { lat: 34.9167, lng: 33.6290 };
+            return { lat: 35.1400, lng: 33.3600 };
+        }
+        if (country === 'Greece') {
+            var prefix = Number(digits.slice(0, 2));
+            if (prefix >= 10 && prefix <= 19) return { lat: 37.9838, lng: 23.7275 };
+            if (prefix >= 20 && prefix <= 29) return { lat: 38.2466, lng: 21.7346 };
+            if (prefix >= 30 && prefix <= 39) return { lat: 39.3610, lng: 22.9420 };
+            if (prefix >= 40 && prefix <= 43) return { lat: 39.6390, lng: 22.4191 };
+            if (prefix >= 45 && prefix <= 46) return { lat: 39.6650, lng: 20.8537 };
+            if (prefix >= 54 && prefix <= 57) return { lat: 40.6401, lng: 22.9444 };
+            if (prefix >= 70 && prefix <= 74) return { lat: 35.3387, lng: 25.1442 };
+            return { lat: 38.1200, lng: 23.7200 };
+        }
+        return null;
+    }
+
+    function resolveTargetPoint(country) {
+        var cityPoint = getCityCenter(country, shippingCityEl ? shippingCityEl.value : '');
+        if (cityPoint) return cityPoint;
+        var postalInfo = getPostalCenter(country, postalEl ? postalEl.value : '');
+        if (postalInfo) return postalInfo;
+        var defaults = { Cyprus: { lat: 35.1400, lng: 33.3600 }, Greece: { lat: 38.1200, lng: 23.7200 } };
+        return defaults[country] || defaults.Cyprus;
     }
 
     function findClosestPoint(points, targetPoint) {
-        if (!Array.isArray(points) || points.length === 0) return null;
-        if (!targetPoint) return points[0];
+        if (!points || points.length === 0) return null;
         var closest = points[0];
-        var shortest = Infinity;
-        points.forEach(function (point) {
-            var distance = haversineKm(targetPoint, point);
-            if (distance < shortest) {
-                shortest = distance;
-                closest = point;
+        var shortest = haversineKm(targetPoint, points[0]);
+        for (var i = 1; i < points.length; i++) {
+            var dist = haversineKm(targetPoint, points[i]);
+            if (dist < shortest) {
+                shortest = dist;
+                closest = points[i];
             }
-        });
+        }
         return closest;
     }
 
     function formatPointLabel(point) {
-        if (!point) return '';
-        return point.name + ' - ' + point.city + ' ' + point.postal;
+        return point.name + ' - ' + point.city + ' ' + (point.postal_code || '');
     }
 
-    function buildCourierConfig() {
+    // ========== DYNAMIC MAP LOADING ==========
+    async function fetchPickupPoints(courier, country, city, postal) {
+        var url = '?ajax_get_pickup_points=1&courier=' + encodeURIComponent(courier) +
+                  '&country=' + encodeURIComponent(country) +
+                  '&city=' + encodeURIComponent(city) +
+                  '&postal=' + encodeURIComponent(postal);
+        var response = await fetch(url);
+        return await response.json();
+    }
+
+    async function updateCourierMap() {
+        var courier = courierEl.value;
         var country = selectedCountry();
-        var courier = courierEl ? courierEl.value : '';
+        var city = shippingCityEl ? shippingCityEl.value : '';
+        var postal = postalEl ? postalEl.value : '';
+
+        if (!courier || !country) {
+            renderEmptyMap();
+            return;
+        }
+
+        var points = await fetchPickupPoints(courier, country, city, postal);
         var mode = selectedMode();
-        var courierOptions = countryCouriers[country] || {};
 
-        if (!courier || !courierOptions[courier]) {
-            courier = Object.keys(courierOptions)[0] || '';
-        }
-
-        var base = courier ? mapConfigs[courier] : null;
-        if (!base) {
-            return {
-                title: 'Courier Pickup Spots',
-                hint: 'Select a courier to preview pickup spots.',
-                color: '#8a4dd6',
-                links: [],
-                points: [],
-                closestPoint: null,
-                mode: mode,
-                coverage: countryBounds[country] || null
-            };
-        }
-
-        var points = (base.points || []).filter(function (point) {
-            return normalizeCountry(point.country || country) === country;
-        });
-
-        var target = resolveTargetPoint(country);
-        var closest = findClosestPoint(points, target);
-        var mapPoints = points.slice();
-
-        if (mode === 'delivery') {
-            mapPoints = closest ? [closest] : (points.length > 0 ? [points[0]] : []);
-        }
-
-        return {
-            title: base.title,
-            hint: mode === 'delivery'
-                ? 'Showing the closest pickup point for the selected courier.'
-                : 'Showing pickup points for the selected courier.',
-            color: base.color,
-            links: base.links || [],
-            points: mapPoints,
-            closestPoint: closest,
+        var config = {
+            title: (countryCouriers[country] && countryCouriers[country][courier]) ? countryCouriers[country][courier] + ' Pickup Points' : 'Pickup Points',
+            hint: mode === 'delivery' ? 'Showing all available points.' : 'Showing all points. Choose one from the dropdown.',
+            points: points,
             mode: mode,
-            coverage: countryBounds[country] || null
+            color: '#8a4dd6'
         };
+        renderMap(config);
     }
 
     function renderMap(config) {
-        if (courierMapTitle) courierMapTitle.textContent = config.title || 'Courier Pickup Spots';
-        if (courierMapHint) courierMapHint.textContent = config.hint || '';
+        if (courierMapTitle) courierMapTitle.textContent = config.title;
+        if (courierMapHint) courierMapHint.textContent = config.hint;
 
-        if (courierMapLinks) {
-            courierMapLinks.innerHTML = '';
-            (config.links || []).forEach(function (link) {
-                var a = document.createElement('a');
-                a.href = link.href;
-                a.target = '_blank';
-                a.rel = 'noopener noreferrer';
-                a.textContent = link.label;
-                courierMapLinks.appendChild(a);
-            });
-        }
+        if (courierMapLinks) courierMapLinks.innerHTML = '';
 
         if (courierMapPoints) {
             courierMapPoints.innerHTML = '';
@@ -1524,20 +1472,15 @@ if (file_exists($headerPath)) {
                 var emptyChip = document.createElement('span');
                 emptyChip.textContent = 'No pickup points available for this courier.';
                 courierMapPoints.appendChild(emptyChip);
-            } else if (config.mode === 'delivery' && config.closestPoint) {
-                var closestOnly = document.createElement('span');
-                closestOnly.classList.add('is-closest');
-                closestOnly.textContent = 'Closest: ' + formatPointLabel(config.closestPoint);
-                courierMapPoints.appendChild(closestOnly);
             } else {
-                var closestKey = config.closestPoint ? pointKey(config.closestPoint) : '';
-                (config.points || []).forEach(function (point) {
+                var targetPoint = resolveTargetPoint(selectedCountry());
+                var closest = findClosestPoint(config.points, targetPoint);
+                config.points.forEach(function (point) {
                     var chip = document.createElement('span');
-                    if (closestKey !== '' && pointKey(point) === closestKey) {
+                    chip.textContent = formatPointLabel(point);
+                    if (closest && point.name === closest.name) {
                         chip.classList.add('is-closest');
-                        chip.textContent = formatPointLabel(point) + ' (Closest)';
-                    } else {
-                        chip.textContent = formatPointLabel(point);
+                        chip.textContent += ' (Closest)';
                     }
                     courierMapPoints.appendChild(chip);
                 });
@@ -1557,26 +1500,31 @@ if (file_exists($headerPath)) {
                 fillOpacity: 1,
                 weight: 2
             });
-            marker.bindPopup('<strong>' + point.name + '</strong><br>' + point.city + ' ' + point.postal + ', ' + point.country);
+            marker.bindPopup('<strong>' + point.name + '</strong><br>' + point.address + '<br>' + point.city + ' ' + (point.postal_code || ''));
             marker.addTo(mapLayer);
             bounds.push([point.lat, point.lng]);
         });
 
-        // If there are points, fit bounds; otherwise, center on user's target or default
         if (bounds.length > 1) {
             map.fitBounds(bounds, { padding: [18, 18] });
         } else if (bounds.length === 1) {
             map.setView(bounds[0], 11);
         } else {
-            // No points – center on user's target point (if available) or default
             var target = resolveTargetPoint(selectedCountry());
             map.setView([target.lat, target.lng], 10);
         }
     }
 
-    function updateCourierMap() {
-        var config = buildCourierConfig();
-        renderMap(config);
+    function renderEmptyMap() {
+        if (courierMapTitle) courierMapTitle.textContent = 'Courier Locations';
+        if (courierMapHint) courierMapHint.textContent = 'Select a courier to preview pickup spots.';
+        if (courierMapPoints) courierMapPoints.innerHTML = '<span>Pickup points will appear here.</span>';
+        if (courierMapLinks) courierMapLinks.innerHTML = '';
+        if (map && mapLayer) {
+            mapLayer.clearLayers();
+            var defaultCenter = { lat: 35.14, lng: 33.36 };
+            map.setView([defaultCenter.lat, defaultCenter.lng], 7);
+        }
     }
 
     // ========== POSTAL VALIDATION ==========
@@ -1620,32 +1568,7 @@ if (file_exists($headerPath)) {
         validatePostalCode();
     }
 
-    // ========== SAVED ADDRESS ==========
-    function applySavedAddress(forceFill) {
-        if (!useSavedAddressEl || !useSavedAddressEl.checked) return;
-        if (!defaultAddress) return;
-        var savedCountry = normalizeCountry(defaultAddress.country || '');
-        if (countryEl && (forceFill || !countryEl.value)) countryEl.value = savedCountry;
-        if (shippingAddressEl && defaultAddress.address && (forceFill || shippingAddressEl.value.trim() === '')) shippingAddressEl.value = defaultAddress.address;
-        if (shippingCityEl && defaultAddress.city && (forceFill || shippingCityEl.value.trim() === '')) shippingCityEl.value = defaultAddress.city;
-        if (postalEl && defaultAddress.postal_code && (forceFill || postalEl.value.trim() === '')) postalEl.value = String(defaultAddress.postal_code).replace(/\D/g, '');
-        if (shippingLabelEl && defaultAddress.label && (forceFill || shippingLabelEl.value.trim() === '')) shippingLabelEl.value = defaultAddress.label;
-
-        refreshCourierOptions();
-        updateSpeedLabels();
-        applyPostalRule();
-        updateTotals();
-        updateCourierMap();
-        populatePickupDropdowns();
-    }
-
     // ========== EVENT LISTENERS ==========
-    if (useSavedAddressEl) {
-        useSavedAddressEl.addEventListener('change', function () {
-            if (useSavedAddressEl.checked) applySavedAddress(true);
-        });
-    }
-
     if (countryEl) {
         countryEl.addEventListener('change', function () {
             refreshCourierOptions();
@@ -1653,7 +1576,6 @@ if (file_exists($headerPath)) {
             applyPostalRule();
             updateTotals();
             updateCourierMap();
-            populatePickupDropdowns();
             togglePickupWrappers();
         });
     }
@@ -1662,7 +1584,6 @@ if (file_exists($headerPath)) {
         courierEl.addEventListener('change', function () {
             updateTotals();
             updateCourierMap();
-            populatePickupDropdowns();
             togglePickupWrappers();
         });
     }
@@ -1686,24 +1607,87 @@ if (file_exists($headerPath)) {
             sanitizePostalInput();
             validatePostalCode();
             updateCourierMap();
-            populatePickupDropdowns();
         });
         postalEl.addEventListener('blur', function () {
             validatePostalCode();
             updateCourierMap();
-            populatePickupDropdowns();
         });
     }
 
     if (shippingCityEl) {
         shippingCityEl.addEventListener('input', function () {
             updateCourierMap();
-            populatePickupDropdowns();
         });
         shippingCityEl.addEventListener('blur', function () {
             updateCourierMap();
-            populatePickupDropdowns();
         });
+    }
+
+    function togglePickupWrappers() {
+        var courier = courierEl.value;
+        var mode = selectedMode();
+        var akisWrapper = document.getElementById('akis-point-wrapper');
+        var acsWrapper = document.getElementById('acs-point-wrapper');
+        var boxnowWrapper = document.getElementById('boxnow-point-wrapper');
+        if (akisWrapper) akisWrapper.style.display = (courier === 'akis_express' && mode === 'pickup') ? '' : 'none';
+        if (acsWrapper) acsWrapper.style.display = (courier === 'acs' && mode === 'pickup') ? '' : 'none';
+        if (boxnowWrapper) boxnowWrapper.style.display = (courier === 'boxnow') ? '' : 'none';
+    }
+
+    // ========== AUTOFILL BUTTON ==========
+    var autofillBtn = document.getElementById('autofill-address-btn');
+    if (autofillBtn) {
+        autofillBtn.addEventListener('click', function() {
+            if (defaultAddress && (defaultAddress.address || defaultAddress.city || defaultAddress.postal_code)) {
+                if (shippingAddressEl) shippingAddressEl.value = defaultAddress.address || '';
+                if (shippingCityEl) shippingCityEl.value = defaultAddress.city || '';
+                if (postalEl) postalEl.value = defaultAddress.postal_code || '';
+                if (countryEl) countryEl.value = normalizeCountry(defaultAddress.country || '');
+                if (shippingLabelEl) shippingLabelEl.value = defaultAddress.label || '';
+
+                refreshCourierOptions();
+                updateSpeedLabels();
+                applyPostalRule();
+                updateTotals();
+                updateCourierMap();
+                togglePickupWrappers();
+
+                document.querySelector('.checkout-form').scrollIntoView({ behavior: 'smooth' });
+            } else {
+                alert('No saved address found. Please fill the address fields manually or save an address in your account.');
+            }
+        });
+    }
+
+    // ========== AUTOFILL CHECKBOX HANDLER ==========
+    var autofillCheckbox = document.getElementById('autofill-checkbox');
+    if (autofillCheckbox) {
+        function handleAutofill() {
+            if (autofillCheckbox.checked) {
+                if (defaultAddress && (defaultAddress.address || defaultAddress.city || defaultAddress.postal_code)) {
+                    if (shippingAddressEl) shippingAddressEl.value = defaultAddress.address || '';
+                    if (shippingCityEl) shippingCityEl.value = defaultAddress.city || '';
+                    if (postalEl) postalEl.value = defaultAddress.postal_code || '';
+                    if (countryEl) countryEl.value = normalizeCountry(defaultAddress.country || '');
+                    if (shippingLabelEl) shippingLabelEl.value = defaultAddress.label || '';
+
+                    refreshCourierOptions();
+                    updateSpeedLabels();
+                    applyPostalRule();
+                    updateTotals();
+                    updateCourierMap();
+                    togglePickupWrappers();
+                }
+            }
+        }
+
+        // On page load, if checkbox is checked and fields are empty, fill them
+        var fieldsEmpty = (!shippingAddressEl.value && !shippingCityEl.value && !postalEl.value);
+        if (autofillCheckbox.checked && fieldsEmpty) {
+            handleAutofill();
+        }
+
+        autofillCheckbox.addEventListener('change', handleAutofill);
     }
 
     // Initialisation
@@ -1711,9 +1695,7 @@ if (file_exists($headerPath)) {
     updateSpeedLabels();
     applyPostalRule();
     updateTotals();
-    populatePickupDropdowns();
     togglePickupWrappers();
-    applySavedAddress(false);
     updateCourierMap();
 })();
 </script>

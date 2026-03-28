@@ -1,4 +1,6 @@
 ﻿<?php
+require_once __DIR__ . '/../vendor/autoload.php';
+
 /**
  * Place Order Module
  *
@@ -271,12 +273,10 @@ function generateOrderNumber(mysqli $conn): string {
 function placeOrder(mysqli $conn, array $input): array {
     ensureOrderShippingSchema($conn);
 
-    // ===== FIX: Removed the strict payment confirmation check =====
     // The caller may create an order before actual payment (e.g., redirect to Stripe/PayPal).
     // The payment status will be updated later in process_payment.php.
     $paymentConfirmed = (bool)($input['payment_confirmed'] ?? false);
     // No longer throwing an exception if false.
-    // =============================================================
 
     $items = $input['items'] ?? [];
     if (!is_array($items) || empty($items)) {
@@ -313,13 +313,13 @@ function placeOrder(mysqli $conn, array $input): array {
     }
 
     // 1) Order header
-    $stmt = $conn->prepare(
-        "INSERT INTO orders (
-            orderNumber, userID, isGuestFlag, email, status,
-            subtotal, discountTotal, shippingCost, totalAmount,
-            shippingAddress, shippingCity, shippingPostalCode, shippingCountry, shippingLabel, courierCode, shippingPriority, fulfillmentMode
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    );
+    $sql = "INSERT INTO `orders` (
+    `orderNumber`, `userID`, `isGuestFlag`, `email`, `status`,
+    `subtotal`, `discountTotal`, `shippingCost`, `totalAmount`,
+    `shippingAddress`, `shippingCity`, `shippingPostalCode`, `shippingCountry`,
+    `shippingLabel`, `courierCode`, `shippingPriority`, `fulfillmentMode`
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    $stmt = $conn->prepare($sql);
     if (!$stmt) {
         throw new Exception('Failed to prepare order insert: ' . $conn->error);
     }
@@ -344,7 +344,9 @@ function placeOrder(mysqli $conn, array $input): array {
         $fulfillmentMode
     );
     if (!$stmt->execute()) {
-        throw new Exception('Failed to insert order header: ' . $stmt->error);
+        $error = 'Failed to insert order header: ' . $stmt->error;
+        error_log($error);
+        throw new Exception($error);
     }
     $orderID = (int)$stmt->insert_id;
     $stmt->close();
@@ -359,6 +361,7 @@ function placeOrder(mysqli $conn, array $input): array {
         throw new Exception('Failed to prepare order item insert: ' . $conn->error);
     }
 
+    // Get product metadata (name, cartStatus) for all products in the order
     $productMetaMap = [];
     $productIds = [];
     foreach ($items as $item) {
@@ -445,12 +448,10 @@ function placeOrder(mysqli $conn, array $input): array {
     );
 
     // 3) Payment record
-    $provider = trim((string)($input['payment_method'] ?? 'manual'));       // fixed: use payment_method (from checkout)
-    $paymentStatus = trim((string)($input['payment_status'] ?? 'pending')); // default to pending
+    $provider = trim((string)($input['payment_method'] ?? 'manual'));
+    $paymentStatus = trim((string)($input['payment_status'] ?? 'pending'));
     $transactionID = trim((string)($input['transaction_id'] ?? ''));
     if ($transactionID === '') {
-        // Only generate a temporary ID if payment is not yet confirmed.
-        // This can be overwritten later by the actual Stripe ID.
         $transactionID = 'TXN_' . strtoupper(bin2hex(random_bytes(5)));
     }
 
@@ -486,7 +487,6 @@ function placeOrder(mysqli $conn, array $input): array {
     }
 
     // 5) Trigger stock functions after the order has been fully stored.
-    // This runs 3.2.2.5 (stock management) and internally 3.2.2.6 (stock threshold).
     deductStockAfterOrderCompletion($orderID, $conn);
 
     // 6) Notify admin about the new order.
@@ -557,10 +557,7 @@ function sendOrderConfirmationEmail(array $payload): array {
         $shippingLine = 'Not specified';
     }
 
-    require_once __DIR__ . '/../PHPMailer-master/src/Exception.php';
-    require_once __DIR__ . '/../PHPMailer-master/src/PHPMailer.php';
-    require_once __DIR__ . '/../PHPMailer-master/src/SMTP.php';
-
+    // Composer autoload already loaded at top, so PHPMailer is available.
     $itemLines = [];
     foreach ($items as $item) {
         $name = trim((string)($item['name'] ?? $item['product']['name'] ?? 'Item'));
@@ -588,7 +585,6 @@ function sendOrderConfirmationEmail(array $payload): array {
         "Best regards,\n" .
         "Athina E-Shop";
 
-    // Transport fallback: STARTTLS on 587, then SMTPS on 465.
     $transports = [
         ['port' => 587, 'secure' => \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS, 'label' => '587/STARTTLS'],
         ['port' => 465, 'secure' => \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS, 'label' => '465/SMTPS'],
@@ -685,10 +681,7 @@ function sendAdminOrderNotificationEmail(mysqli $conn, array $payload): array {
         return ['sent' => 0, 'failed' => 0];
     }
 
-    require_once __DIR__ . '/../PHPMailer-master/src/Exception.php';
-    require_once __DIR__ . '/../PHPMailer-master/src/PHPMailer.php';
-    require_once __DIR__ . '/../PHPMailer-master/src/SMTP.php';
-
+    // Composer autoload already loaded.
     $body =
         "New order received.\n\n" .
         "Order Number: " . ($orderNumber !== '' ? $orderNumber : ('#' . $orderId)) . "\n" .
@@ -751,4 +744,3 @@ function sendAdminOrderNotificationEmail(mysqli $conn, array $payload): array {
 
     return ['sent' => $sent, 'failed' => $failed];
 }
-?>

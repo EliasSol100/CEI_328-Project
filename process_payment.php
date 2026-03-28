@@ -3,10 +3,10 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 session_start();
 
-require_once __DIR__ . '/vendor/autoload.php'; // Composer autoloader
-require_once __DIR__ . '/authentication/database.php';
-require_once __DIR__ . '/authentication/get_config.php';
-require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/../vendor/autoload.php'; // Composer autoloader
+require_once __DIR__ . '/../authentication/database.php';
+require_once __DIR__ . '/../authentication/get_config.php';
+require_once __DIR__ . '/../config.php';
 
 \Stripe\Stripe::setApiKey(STRIPE_SECRET_KEY);
 

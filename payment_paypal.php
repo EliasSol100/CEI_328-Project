@@ -2,10 +2,13 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 session_start();
+error_log("PayPal page: GET=" . print_r($_GET, true));
+error_log("PayPal page: SESSION=" . print_r($_SESSION, true));
 
+// Correct paths for root files
 require_once __DIR__ . '/authentication/database.php';
 require_once __DIR__ . '/authentication/get_config.php';
-require_once __DIR__ . '/stripe-php/stripe-php-19.5.0-alpha.3/init.php';
+require_once __DIR__ . '/vendor/autoload.php';
 require_once __DIR__ . '/config.php';
 
 $system_title = getSystemConfig("site_title") ?: "Creations by Athina";
@@ -18,7 +21,15 @@ if ($project === '' || $project === '.') {
 $orderId = isset($_GET['order_id']) ? (int)$_GET['order_id'] : 0;
 $amount = isset($_GET['total']) ? (float)$_GET['total'] : 0;
 
+// If GET parameters are missing, try session
+if (!$orderId && isset($_SESSION['paypal_order_id'])) {
+    $orderId = (int)$_SESSION['paypal_order_id'];
+    $amount = isset($_SESSION['paypal_total']) ? (float)$_SESSION['paypal_total'] : 0;
+    unset($_SESSION['paypal_order_id'], $_SESSION['paypal_total']);
+}
+
 if (!$orderId || $amount <= 0) {
+    error_log("PayPal payment failed: order_id=$orderId, amount=$amount, GET=" . print_r($_GET, true));
     die('Invalid order. Please restart checkout.');
 }
 
@@ -27,18 +38,16 @@ $stmt = $conn->prepare("SELECT orderID FROM orders WHERE orderID = ?");
 $stmt->bind_param("i", $orderId);
 $stmt->execute();
 if ($stmt->get_result()->num_rows === 0) {
+    error_log("Order $orderId not found in database.");
     die('Order not found.');
 }
 $stmt->close();
 
-// ------------------------------------------------------------------
-// Cancel any existing PaymentIntent for this order to avoid stale state
+// Cancel any existing PaymentIntent for this order
 $stmt = $conn->prepare("SELECT transaction_id FROM orders WHERE orderID = ? AND payment_status != 'paid'");
 $stmt->bind_param("i", $orderId);
 $stmt->execute();
 $res = $stmt->get_result();
-
-// FIX 1: Correctly fetch the row
 if ($row = $res->fetch_assoc()) {
     if (!empty($row['transaction_id']) && strpos($row['transaction_id'], 'pi_') === 0) {
         $existingIntentId = $row['transaction_id'];
@@ -50,18 +59,14 @@ if ($row = $res->fetch_assoc()) {
                 error_log("Cancelled existing PaymentIntent $existingIntentId for order $orderId");
             }
         } catch (Exception $e) {
-            // Intent may not exist, ignore
             error_log("Could not cancel PaymentIntent $existingIntentId: " . $e->getMessage());
         }
     }
 }
 $stmt->close();
-// ------------------------------------------------------------------
 
-// Fetch order data (shipping details, items) with product ID
+// Fetch order data (shipping details)
 $orderData = [];
-$items = [];
-
 $stmt = $conn->prepare("
     SELECT
         o.orderID,
@@ -93,10 +98,12 @@ if ($row = $res->fetch_assoc()) {
 }
 $stmt->close();
 
-// Fetch items – include productID for stock check
+// Fetch items – include variationID
+$items = [];
 $stmt = $conn->prepare("
     SELECT oi.quantity, oi.unitPrice, oi.giftWrapping, oi.giftBagFlag, oi.giftMessage,
-           p.nameEN, p.nameGR, p.basePrice, p.productID
+           p.nameEN, p.nameGR, p.basePrice, p.productID,
+           oi.variationID
     FROM order_items oi
     LEFT JOIN products p ON oi.productID = p.productID
     WHERE oi.orderID = ?
@@ -113,32 +120,65 @@ while ($row = $res->fetch_assoc()) {
         'giftWrapping'  => (bool)$row['giftWrapping'],
         'giftBagFlag'   => (bool)$row['giftBagFlag'],
         'giftMessage'   => $row['giftMessage'],
+        'variationID'   => isset($row['variationID']) ? (int)$row['variationID'] : null,
     ];
 }
 $stmt->close();
 
-// ----- STOCK CHECK BEFORE PAYMENT -----
+// ----- STOCK CHECK BEFORE PAYMENT (supports variants) -----
 $stockError = false;
 $outOfStockItems = [];
 
 foreach ($items as $item) {
     $productId = $item['productID'];
     $quantity = $item['quantity'];
-    $stmt = $conn->prepare("SELECT inventory FROM products WHERE productID = ?");
-    $stmt->bind_param("i", $productId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $row = $result->fetch_assoc();
-    $available = (int)($row['inventory'] ?? 0);
-    $stmt->close();
+    $variationId = $item['variationID'] ?? null;
 
-    if ($available < $quantity) {
-        $stockError = true;
-        $outOfStockItems[] = [
-            'name' => $item['name'],
-            'available' => $available,
-            'requested' => $quantity
-        ];
+    $available = 0;
+    $productName = $item['name'];
+
+    if ($variationId && $variationId > 0) {
+        $stmt = $conn->prepare("
+            SELECT stock, p.nameEN
+            FROM product_variations pv
+            LEFT JOIN products p ON p.productID = pv.productID
+            WHERE pv.variationID = ?
+        ");
+        $stmt->bind_param("i", $variationId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $row = $result->fetch_assoc();
+        if ($row) {
+            $available = (int)($row['stock'] ?? 0);
+            $productName = $row['nameEN'] ?? $item['name'];
+        }
+        $stmt->close();
+
+        if ($available < $quantity) {
+            $stockError = true;
+            $outOfStockItems[] = [
+                'name' => $productName,
+                'available' => $available,
+                'requested' => $quantity
+            ];
+        }
+    } else {
+        $stmt = $conn->prepare("SELECT inventory FROM products WHERE productID = ?");
+        $stmt->bind_param("i", $productId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $row = $result->fetch_assoc();
+        $available = (int)($row['inventory'] ?? 0);
+        $stmt->close();
+
+        if ($available < $quantity) {
+            $stockError = true;
+            $outOfStockItems[] = [
+                'name' => $productName,
+                'available' => $available,
+                'requested' => $quantity
+            ];
+        }
     }
 }
 
@@ -153,7 +193,7 @@ if ($stockError) {
 }
 // ------------------------------------------
 
-$isLoggedIn = isset($_SESSION['user']); // not used, but kept
+$isLoggedIn = isset($_SESSION['user']);
 
 // Stripe Payment Intent for PayPal
 \Stripe\Stripe::setApiKey(STRIPE_SECRET_KEY);
@@ -193,7 +233,7 @@ include __DIR__ . '/include/header.php';
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://js.stripe.com/v3/"></script>
     <style>
-        /* Your existing styles – keep them unchanged */
+        /* Your existing styles – keep unchanged */
         .checkout-container { max-width: 1160px; margin: 36px auto 72px; padding: 0 20px; }
         .checkout-title { margin: 0 0 18px; color: #2d184d; font-size: clamp(1.9rem,2.7vw,2.4rem); line-height: 1.1; letter-spacing: 0.2px; }
         .checkout-grid { display: grid; grid-template-columns: minmax(0,1fr) 360px; gap: 28px; align-items: start; }
@@ -353,49 +393,40 @@ include __DIR__ . '/include/header.php';
     </div>
 </div>
 
-<?php if (!empty($clientSecret)): ?>
+    <?php if (!empty($clientSecret)): ?>
 <script src="https://js.stripe.com/v3/"></script>
 <script>
-    // FIX 2: Use json_encode to safely embed the client secret
     const stripe = Stripe('<?= STRIPE_PUBLISHABLE_KEY ?>');
     const clientSecret = <?= json_encode($clientSecret) ?>;
     const button = document.getElementById('paypal-button');
     const errorDiv = document.getElementById('paypal-error');
 
-    if (button) {
-        button.addEventListener('click', async () => {
-            button.disabled = true;
-            errorDiv.textContent = '';
+    button.addEventListener('click', async () => {
+        button.disabled = true;
+        errorDiv.textContent = '';
 
-            console.log('Confirming PayPal with clientSecret:', clientSecret);
+        let baseUrl = window.location.origin;
+        let projectPath = '<?= addslashes($project) ?>';
+        let returnUrl = baseUrl + projectPath + '/process_payment.php?order_id=<?= (int)$orderId ?>';
 
-            try {
-                const { error, paymentIntent } = await stripe.confirmPayment({
-                    clientSecret: clientSecret,
-                    payment_method: { paypal: {} },   // Correct syntax for PayPal
-                    confirmParams: {
-                        return_url: window.location.origin + '<?= $project ?>/process_payment.php',
-                    },
-                });
+        try {
+            const { error } = await stripe.confirmPayment({
+                clientSecret: clientSecret,
+                payment_method: { paypal: {} },
+                confirmParams: { return_url: returnUrl },
+            });
 
-                if (error) {
-                    console.error('Stripe confirm error:', error);
-                    errorDiv.textContent = 'Stripe error: ' + error.message;
-                    button.disabled = false;
-                } else {
-                    console.log('PaymentIntent confirmed:', paymentIntent);
-                    // Stripe will redirect automatically
-                }
-            } catch (err) {
-                console.error('Unexpected error:', err);
-                errorDiv.textContent = 'An unexpected error occurred. Please try again.';
+            if (error) {
+                errorDiv.textContent = 'Stripe error: ' + error.message;
                 button.disabled = false;
             }
-        });
-    }
+        } catch (err) {
+            errorDiv.textContent = 'Unexpected error. Please try again.';
+            button.disabled = false;
+        }
+    });
 </script>
 <?php endif; ?>
-
 <?php include __DIR__ . '/include/footer.php'; ?>
 </body>
 </html>
