@@ -85,6 +85,28 @@ INSERT INTO `categories` (`categoryID`, `categoryName`, `slug`) VALUES
 -- Table structure for table `category_colors`
 --
 
+--
+-- Table structure for table `bot_fingerprints`
+--
+
+CREATE TABLE `bot_fingerprints` (
+  `id`            int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `visitor_id`    varchar(64) NOT NULL,
+  `attempt_count` int(10) UNSIGNED NOT NULL DEFAULT 1,
+  `is_blocked`    tinyint(1) NOT NULL DEFAULT 0,
+  `first_seen`    datetime NOT NULL DEFAULT current_timestamp(),
+  `last_attempt`  datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_visitor_id`   (`visitor_id`),
+  KEY `idx_last_attempt` (`last_attempt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `category_colors`
+--
+
 CREATE TABLE `category_colors` (
   `categoryID` int(11) NOT NULL,
   `colorID` int(11) NOT NULL,

@@ -15,6 +15,90 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     app_require_csrf(false, "Invalid request token. Please refresh and try again.");
 }
 
+// ── Anti-bot: FingerprintJS validation ──────────────────────────────────────
+if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
+
+    define('FP_MAX_ATTEMPTS',  5);
+    define('FP_WINDOW_HOURS', 24);
+
+    $raw_fp     = trim((string)($_POST['fp_visitor_id'] ?? ''));
+    $visitor_id = preg_replace('/[^a-zA-Z0-9\-]/', '', $raw_fp);
+
+    // No fingerprint = JS disabled or headless bot
+    if ($visitor_id === '') {
+        $_SESSION["registration_error"] = "Registration could not be completed. Please enable JavaScript and try again.";
+        header("Location: registration.php");
+        exit();
+    }
+
+    $is_headless = (int)($_POST['fp_headless']    ?? 0);
+    $mouse_moved = (int)($_POST['fp_mouse_moved'] ?? 0);
+    $timing_ms   = (int)($_POST['fp_timing_ms']   ?? 0);
+
+    // Headless browser detected
+    if ($is_headless === 1) {
+        $_SESSION["registration_error"] = "Automated registration is not allowed.";
+        header("Location: registration.php");
+        exit();
+    }
+
+    // Submitted too fast with no mouse movement = bot
+    if ($timing_ms < 800 && $mouse_moved === 0) {
+        $_SESSION["registration_error"] = "Please interact with the page before submitting.";
+        header("Location: registration.php");
+        exit();
+    }
+
+    $fp_stmt = $conn->prepare("
+        SELECT id, attempt_count, is_blocked, first_seen
+        FROM   bot_fingerprints
+        WHERE  visitor_id = ?
+        LIMIT  1
+    ");
+    $fp_stmt->bind_param("s", $visitor_id);
+    $fp_stmt->execute();
+    $fp_row = $fp_stmt->get_result()->fetch_assoc();
+    $fp_stmt->close();
+
+    if ($fp_row) {
+        if ((int)$fp_row['is_blocked'] === 1) {
+            $_SESSION["registration_error"] = "This device has been blocked due to suspicious activity.";
+            header("Location: registration.php");
+            exit();
+        }
+
+        $window_start = (new DateTime())->modify('-' . FP_WINDOW_HOURS . ' hours');
+        $first_seen   = new DateTime($fp_row['first_seen']);
+
+        if ($first_seen >= $window_start) {
+            if ((int)$fp_row['attempt_count'] >= FP_MAX_ATTEMPTS) {
+                $blk = $conn->prepare("UPDATE bot_fingerprints SET is_blocked=1, last_attempt=NOW() WHERE visitor_id=?");
+                $blk->bind_param("s", $visitor_id);
+                $blk->execute();
+                $blk->close();
+                $_SESSION["registration_error"] = "Too many registration attempts. This device has been blocked.";
+                header("Location: registration.php");
+                exit();
+            }
+            $inc = $conn->prepare("UPDATE bot_fingerprints SET attempt_count=attempt_count+1, last_attempt=NOW() WHERE visitor_id=?");
+            $inc->bind_param("s", $visitor_id);
+            $inc->execute();
+            $inc->close();
+        } else {
+            $rst = $conn->prepare("UPDATE bot_fingerprints SET attempt_count=1, is_blocked=0, first_seen=NOW(), last_attempt=NOW() WHERE visitor_id=?");
+            $rst->bind_param("s", $visitor_id);
+            $rst->execute();
+            $rst->close();
+        }
+    } else {
+        $ins = $conn->prepare("INSERT INTO bot_fingerprints (visitor_id, attempt_count, is_blocked) VALUES (?, 1, 0)");
+        $ins->bind_param("s", $visitor_id);
+        $ins->execute();
+        $ins->close();
+    }
+}
+// ── End Anti-bot ─────────────────────────────────────────────────────────────
+
 // Αν ο χρήστης είναι ήδη συνδεδεμένος, τον στέλνουμε πίσω στην αρχική σελίδα
 if (isset($_SESSION["user"])) {
     header("Location: ../index.php");
@@ -122,6 +206,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
         <!-- Φόρμα εισαγωγής email (στέλνει POST στην ίδια σελίδα) -->
         <form method="POST" action="registration.php" class="mt-2 auth-email-form">
             <?= app_csrf_input() ?>
+            <!-- Anti-bot hidden fields — populated by FingerprintJS on page load -->
+            <input type="hidden" name="fp_visitor_id"  id="fp_visitor_id"  value="">
+            <input type="hidden" name="fp_headless"    id="fp_headless"    value="0">
+            <input type="hidden" name="fp_mouse_moved" id="fp_mouse_moved" value="0">
+            <input type="hidden" name="fp_timing_ms"   id="fp_timing_ms"   value="0">
             <div class="form-group mb-3 text-start">
                 <label for="manual_email" class="visually-hidden">Email</label>
                 <input
@@ -217,5 +306,49 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
     }, true);
     </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Anti-bot: record page load time and mouse movement before FingerprintJS loads -->
+    <script>
+        const _fpPageLoadTime = Date.now();
+        let   _fpMouseMoved   = false;
+
+        document.addEventListener('mousemove', function () {
+            _fpMouseMoved = true;
+        }, { once: true });
+
+        // Mobile: treat touchstart as "mouse moved"
+        document.addEventListener('touchstart', function () {
+            _fpMouseMoved = true;
+        }, { once: true });
+    </script>
+
+    <!-- FingerprintJS free CDN — generates a stable visitorId per browser -->
+    <script>
+        import('https://openfpcdn.io/fingerprintjs/v4')
+            .then(FingerprintJS => FingerprintJS.load())
+            .then(fp => fp.get())
+            .then(result => {
+                document.getElementById('fp_visitor_id').value = result.visitorId;
+
+                // Detect headless browsers (Puppeteer, Selenium, etc.)
+                const isHeadless = (
+                    navigator.webdriver === true ||
+                    /HeadlessChrome/.test(navigator.userAgent) ||
+                    (!window.chrome && /Chrome/.test(navigator.userAgent) && navigator.plugins.length === 0)
+                ) ? 1 : 0;
+
+                document.getElementById('fp_headless').value = isHeadless;
+            })
+            .catch(function () {
+                // FingerprintJS blocked (adblocker/network) — leave fp_visitor_id empty
+                // Backend will reject the empty fingerprint
+            });
+
+        // On submit: record elapsed time and whether the user moved the mouse
+        document.querySelector('.auth-email-form').addEventListener('submit', function () {
+            document.getElementById('fp_timing_ms').value   = Date.now() - _fpPageLoadTime;
+            document.getElementById('fp_mouse_moved').value = _fpMouseMoved ? 1 : 0;
+        });
+    </script>
 </body>
 </html>
