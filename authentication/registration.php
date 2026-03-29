@@ -21,6 +21,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
     define('FP_MAX_ATTEMPTS',  5);
     define('FP_WINDOW_HOURS', 24);
 
+    // Honeypot check — κανονικός χρήστης δεν βλέπει το field, bot το γεμίζει
+    if (trim((string)($_POST['website'] ?? '')) !== '') {
+        $_SESSION["registration_error"] = "Automated registration is not allowed.";
+        header("Location: registration.php");
+        exit();
+    }
+
     $raw_fp     = trim((string)($_POST['fp_visitor_id'] ?? ''));
     $visitor_id = preg_replace('/[^a-zA-Z0-9\-]/', '', $raw_fp);
 
@@ -206,6 +213,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
         <!-- Φόρμα εισαγωγής email (στέλνει POST στην ίδια σελίδα) -->
         <form method="POST" action="registration.php" class="mt-2 auth-email-form">
             <?= app_csrf_input() ?>
+            <!-- Honeypot: αόρατο στον άνθρωπο, ορατό στο bot -->
+            <div aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;">
+                <label for="website">Website</label>
+                <input type="text" name="website" id="website" value="" tabindex="-1" autocomplete="off">
+            </div>
             <!-- Anti-bot hidden fields — populated by FingerprintJS on page load -->
             <input type="hidden" name="fp_visitor_id"  id="fp_visitor_id"  value="">
             <input type="hidden" name="fp_headless"    id="fp_headless"    value="0">
