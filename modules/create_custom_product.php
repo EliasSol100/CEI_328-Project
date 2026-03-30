@@ -2,278 +2,358 @@
 /**
  * Create Custom Product from Request Module
  *
- * Implements function 3.2.6.17: Create Custom Product from Request
- *
- * @package CreationsByAthina
+ * This module converts one custom-order record into a private made-to-order
+ * product that can be opened only through the customer's personal checkout link.
  */
 
-// Prevent direct access
 if (!defined('INCLUDE_CHECK') && !defined('CREATE_CUSTOM_PRODUCT_DIRECT')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/../include/made_to_order_access.php';
+
+if (!function_exists('ensureCustomOrdersTable')) {
+    require_once __DIR__ . '/custom_orders.php';
+}
+
 /**
- * Create a hidden custom product from an approved custom order request.
+ * Create or refresh the private checkout product for one custom order.
  *
- * @param mysqli $conn          Database connection
- * @param int    $customOrderId  ID of the custom order request
- * @param float  $price          Admin-defined price for the product
- * @param string $description    Product description (optional, defaults to request description)
- * @param array  $imageFiles     Array of file paths to uploaded images (optional)
- * @param string $accessMethod   'token' or 'password' (default 'token')
- * @return array                 Result with product_id, access_token/password, and customer email
- * @throws InvalidArgumentException On validation failure
- * @throws Exception                On database error
+ * The function keeps the existing product when possible, so the admin can
+ * update the agreed price/details later without creating duplicate products.
+ *
+ * @param mysqli      $conn
+ * @param int         $customOrderId
+ * @param float|null  $price
+ * @param string|null $description
+ * @param array       $imageFiles Absolute file paths to attach as product photos.
+ * @param string      $accessMethod Only token links are supported in the current flow.
+ * @return array<string, mixed>
+ * @throws InvalidArgumentException
+ * @throws Exception
  */
-function createCustomProductFromRequest($conn, $customOrderId, $price, $description = null, $imageFiles = [], $accessMethod = 'token') {
-    // Validate access method
-    if (!in_array($accessMethod, ['token', 'password'])) {
-        throw new InvalidArgumentException("Access method must be 'token' or 'password'.");
+function createCustomProductFromRequest($conn, $customOrderId, $price = null, $description = null, $imageFiles = [], $accessMethod = 'token')
+{
+    ensureCustomOrdersTable($conn);
+    ensureMadeToOrderProductSchema($conn);
+
+    if ($accessMethod !== 'token') {
+        throw new InvalidArgumentException("Custom order checkout currently supports token links only.");
     }
 
-    // Fetch custom order request
+    $customOrderId = (int)$customOrderId;
+    if ($customOrderId <= 0) {
+        throw new InvalidArgumentException('A valid custom order ID is required.');
+    }
+
     $stmt = $conn->prepare("
-        SELECT co.customOrderID, co.userID, co.email, co.requestDescription, co.status
-        FROM custom_orders co
-        WHERE co.customOrderID = ?
+        SELECT
+            customOrderID,
+            userID,
+            email,
+            customerName,
+            requestDescription,
+            status,
+            agreedPrice,
+            photoReferencePath,
+            sourceProductID
+        FROM custom_orders
+        WHERE customOrderID = ?
+        LIMIT 1
     ");
     if (!$stmt) {
-        throw new Exception("Failed to prepare custom order fetch: " . $conn->error);
+        throw new Exception('Failed to prepare custom order lookup: ' . $conn->error);
     }
-    $stmt->bind_param("i", $customOrderId);
+    $stmt->bind_param('i', $customOrderId);
     $stmt->execute();
     $result = $stmt->get_result();
-    if ($result->num_rows === 0) {
-        throw new InvalidArgumentException("Custom order #$customOrderId not found.");
-    }
-    $customOrder = $result->fetch_assoc();
+    $customOrder = $result ? $result->fetch_assoc() : null;
     $stmt->close();
 
-    // Verify the request is in an appropriate status (e.g., 'accepted' or 'in_discussion')
-    $allowedStatuses = ['accepted', 'in_discussion']; // adjust as needed
-    if (!in_array($customOrder['status'], $allowedStatuses)) {
-        throw new InvalidArgumentException("Custom order status '{$customOrder['status']}' not eligible for product creation.");
+    if (!$customOrder) {
+        throw new InvalidArgumentException("Custom order #{$customOrderId} was not found.");
     }
 
-    // Validate price
-    if (!is_numeric($price) || $price <= 0) {
-        throw new InvalidArgumentException("Price must be a positive number.");
+    $status = strtolower(trim((string)($customOrder['status'] ?? 'pending')));
+    if (in_array($status, ['declined', 'cancelled', 'completed'], true)) {
+        throw new InvalidArgumentException("Custom order #{$customOrderId} is not eligible for checkout link creation in its current status.");
     }
-    $price = (float)$price;
 
-    // Prepare product data
-    $productDescription = $description ?? $customOrder['requestDescription'];
-    
-    // Generate a unique SKU for the custom product
-    $sku = 'CUSTOM-' . strtoupper(uniqid());
+    $customerEmail = normalizeCustomerEmail((string)($customOrder['email'] ?? ''));
+    if ($customerEmail === '' || !filter_var($customerEmail, FILTER_VALIDATE_EMAIL)) {
+        throw new InvalidArgumentException('The custom order must have a valid customer email before a checkout link can be created.');
+    }
 
-    // Begin transaction
+    $price = $price !== null ? (float)$price : (float)($customOrder['agreedPrice'] ?? 0);
+    if ($price <= 0) {
+        throw new InvalidArgumentException('Set a valid agreed price before creating the checkout link.');
+    }
+    $price = round($price, 2);
+
+    $productDescription = trim((string)($description ?? $customOrder['requestDescription'] ?? ''));
+    if ($productDescription === '') {
+        throw new InvalidArgumentException('Add a description to the custom order before creating the checkout link.');
+    }
+
+    $customerName = trim((string)($customOrder['customerName'] ?? ''));
+    $productName = $customerName !== ''
+        ? "Custom Order for {$customerName}"
+        : "Custom Order #{$customOrderId}";
+
+    $existingProductId = (int)($customOrder['sourceProductID'] ?? 0);
+    $existingProduct = loadExistingCustomProductRow($conn, $existingProductId);
+
     $conn->begin_transaction();
 
     try {
-        // 1. Insert into products table as a hidden product
-        $stmt = $conn->prepare("
-            INSERT INTO products (
-                sku, nameGR, nameEN, descriptionGR, descriptionEN,
-                basePrice, costPrice, cartStatus, hasVariants
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'private', 0)
-        ");
-        if (!$stmt) {
-            throw new Exception("Failed to prepare product insert: " . $conn->error);
-        }
-        $productName = "Custom Order #$customOrderId";
-        $stmt->bind_param(
-            "sssssdd",
-            $sku,
-            $productName,
-            $productName,
-            $productDescription,
-            $productDescription,
-            $price,
-            $price
-        );
-        if (!$stmt->execute()) {
-            throw new Exception("Failed to create product: " . $stmt->error);
-        }
-        $productId = $stmt->insert_id;
-        $stmt->close();
+        $privateAccessToken = '';
+        $productId = 0;
+        $emailChanged = false;
 
-        // 2. Handle images (if provided) – store binary data in photos table
-        if (!empty($imageFiles)) {
-            $photoStmt = $conn->prepare("INSERT INTO photos (productID, photo) VALUES (?, ?)");
-            if (!$photoStmt) {
-                throw new Exception("Failed to prepare image insert: " . $conn->error);
-            }
-            foreach ($imageFiles as $filePath) {
-                if (!file_exists($filePath)) {
-                    throw new Exception("Image file not found: $filePath");
-                }
-                $imageData = file_get_contents($filePath);
-                if ($imageData === false) {
-                    throw new Exception("Failed to read image file: $filePath");
-                }
-                // Bind as blob
-                $photoStmt->bind_param("is", $productId, $imageData);
-                $photoStmt->send_long_data(1, $imageData); // for blob
-                if (!$photoStmt->execute()) {
-                    throw new Exception("Failed to insert image: " . $photoStmt->error);
-                }
-            }
-            $photoStmt->close();
+        if ($existingProduct) {
+            $productId = (int)$existingProduct['productID'];
+            $previousEmail = normalizeCustomerEmail((string)($existingProduct['privateCustomerEmail'] ?? ''));
+            $privateAccessToken = trim((string)($existingProduct['privateAccessToken'] ?? ''));
+            $emailChanged = ($previousEmail !== $customerEmail);
         }
 
-        // 3. Create access credentials in custom_product_access table
-        ensureCustomProductAccessTable($conn);
-        
-        if ($accessMethod === 'token') {
-            $accessToken = bin2hex(random_bytes(32));
-            $accessPassword = null;
+        if ($privateAccessToken === '' || $emailChanged) {
+            $privateAccessToken = generateMadeToOrderAccessToken();
+        }
+
+        if ($existingProduct) {
+            $updateStmt = $conn->prepare("
+                UPDATE products
+                SET
+                    nameEN = ?,
+                    nameGR = ?,
+                    descriptionEN = ?,
+                    descriptionGR = ?,
+                    basePrice = ?,
+                    costPrice = ?,
+                    inventory = 1,
+                    cartStatus = 'made_to_order',
+                    category = 'Custom Orders',
+                    hasVariants = 0,
+                    privateCustomerEmail = ?,
+                    privateAccessToken = ?,
+                    privateLinkSentAt = NOW()
+                WHERE productID = ?
+            ");
+            if (!$updateStmt) {
+                throw new Exception('Failed to prepare custom product update: ' . $conn->error);
+            }
+            $updateStmt->bind_param(
+                'ssssddssi',
+                $productName,
+                $productName,
+                $productDescription,
+                $productDescription,
+                $price,
+                $price,
+                $customerEmail,
+                $privateAccessToken,
+                $productId
+            );
+            if (!$updateStmt->execute()) {
+                throw new Exception('Failed to update custom product: ' . $updateStmt->error);
+            }
+            $updateStmt->close();
         } else {
-            // Generate a random password (12 chars)
-            $accessToken = null;
-            $accessPassword = bin2hex(random_bytes(6)); // 12 hex chars
+            $sku = 'CUSTOM-' . strtoupper(substr(bin2hex(random_bytes(6)), 0, 12));
+            $insertStmt = $conn->prepare("
+                INSERT INTO products (
+                    sku,
+                    nameGR,
+                    nameEN,
+                    descriptionGR,
+                    descriptionEN,
+                    basePrice,
+                    costPrice,
+                    inventory,
+                    cartStatus,
+                    category,
+                    hasVariants,
+                    privateCustomerEmail,
+                    privateAccessToken,
+                    privateLinkSentAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'made_to_order', 'Custom Orders', 0, ?, ?, NOW())
+            ");
+            if (!$insertStmt) {
+                throw new Exception('Failed to prepare custom product insert: ' . $conn->error);
+            }
+            $insertStmt->bind_param(
+                'sssssddss',
+                $sku,
+                $productName,
+                $productName,
+                $productDescription,
+                $productDescription,
+                $price,
+                $price,
+                $customerEmail,
+                $privateAccessToken
+            );
+            if (!$insertStmt->execute()) {
+                throw new Exception('Failed to create custom product: ' . $insertStmt->error);
+            }
+            $productId = (int)$insertStmt->insert_id;
+            $insertStmt->close();
         }
 
-        $expiresAt = date('Y-m-d H:i:s', strtotime('+30 days')); // 30 days validity
-
-        $accessStmt = $conn->prepare("
-            INSERT INTO custom_product_access (productID, userID, access_token, access_password, expires_at)
-            VALUES (?, ?, ?, ?, ?)
+        $orderUpdate = $conn->prepare("
+            UPDATE custom_orders
+            SET
+                agreedPrice = ?,
+                status = 'ready_for_checkout',
+                sourceProductID = ?,
+                linkedProductName = ?
+            WHERE customOrderID = ?
         ");
-        if (!$accessStmt) {
-            throw new Exception("Failed to prepare access insert: " . $conn->error);
+        if (!$orderUpdate) {
+            throw new Exception('Failed to prepare custom order link update: ' . $conn->error);
         }
-        $accessStmt->bind_param("iisss", $productId, $customOrder['userID'], $accessToken, $accessPassword, $expiresAt);
-        if (!$accessStmt->execute()) {
-            throw new Exception("Failed to store access credentials: " . $accessStmt->error);
+        $orderUpdate->bind_param('disi', $price, $productId, $productName, $customOrderId);
+        if (!$orderUpdate->execute()) {
+            throw new Exception('Failed to update custom order link fields: ' . $orderUpdate->error);
         }
-        $accessStmt->close();
+        $orderUpdate->close();
 
-        // 4. Update custom order status to 'ready_for_checkout'
-        $updateStmt = $conn->prepare("UPDATE custom_orders SET status = 'ready_for_checkout' WHERE customOrderID = ?");
-        if (!$updateStmt) {
-            throw new Exception("Failed to prepare custom order update: " . $conn->error);
-        }
-        $updateStmt->bind_param("i", $customOrderId);
-        $updateStmt->execute();
-        $updateStmt->close();
+        $actionType = $existingProduct ? 'custom_product_updated' : 'custom_product_created';
+        logCustomOrderAction($conn, $customOrderId, $actionType, 'Private checkout product prepared for the customer.');
+        logCustomProductCreation($conn, $customOrderId, $productId, 'token');
 
-        // Commit transaction
         $conn->commit();
 
-        // 5. Send email to customer with access details
-        $accessLink = generateAccessLink($productId, $accessMethod, $accessToken, $accessPassword);
-        sendCustomProductAccessEmail($customOrder['email'], $productId, $accessLink, $accessMethod);
-
-        // 6. Log action
-        logCustomProductCreation($conn, $customOrderId, $productId, $accessMethod);
-
         return [
-            'product_id'       => $productId,
-            'access_token'     => $accessToken,
-            'access_password'  => $accessPassword,
-            'customer_email'   => $customOrder['email']
+            'product_id' => $productId,
+            'access_token' => $privateAccessToken,
+            'customer_email' => $customerEmail,
+            'private_link' => generateAccessLink($productId, 'token', $privateAccessToken, null),
+            'product_name' => $productName,
+            'was_updated' => $existingProduct ? 1 : 0,
         ];
-
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
         $conn->rollback();
         throw $e;
     }
 }
 
 /**
- * Ensure the custom_product_access table exists.
+ * Load the linked product row if it still exists.
  *
  * @param mysqli $conn
- */
-function ensureCustomProductAccessTable($conn) {
-    static $checked = false;
-    if ($checked) return;
-
-    $conn->query("
-        CREATE TABLE IF NOT EXISTS custom_product_access (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            productID INT NOT NULL,
-            userID INT NOT NULL,
-            access_token VARCHAR(255) NULL,
-            access_password VARCHAR(255) NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            expires_at DATETIME NULL,
-            INDEX idx_product (productID),
-            INDEX idx_user (userID),
-            INDEX idx_token (access_token)
-        )
-    ");
-    $checked = true;
-}
-
-/**
- * Generate a secure access link for the custom product.
- *
  * @param int    $productId
- * @param string $method        'token' or 'password'
- * @param string $token
- * @param string $password
- * @return string               Full URL
+ * @return array<string, mixed>|null
  */
-function generateAccessLink($productId, $method, $token, $password) {
-    // Determine base URL (adjust as needed for your project structure)
-    $baseUrl = (isset($_SERVER['HTTPS']) ? 'https://' : 'http://') . $_SERVER['HTTP_HOST'];
-    $baseUrl = rtrim($baseUrl, '/') . '/CEI_328-Project/';
-
-    if ($method === 'token') {
-        return $baseUrl . "custom-product.php?token=" . urlencode($token);
-    } else {
-        return $baseUrl . "custom-product.php?product_id=$productId&auth=password";
+function loadExistingCustomProductRow($conn, $productId)
+{
+    $productId = (int)$productId;
+    if ($productId <= 0) {
+        return null;
     }
+
+    $stmt = $conn->prepare("
+        SELECT productID, privateCustomerEmail, privateAccessToken
+        FROM products
+        WHERE productID = ?
+        LIMIT 1
+    ");
+    if (!$stmt) {
+        return null;
+    }
+    $stmt->bind_param('i', $productId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result ? $result->fetch_assoc() : null;
+    $stmt->close();
+
+    return $row ?: null;
 }
 
 /**
- * Send email with custom product access details.
+ * Build the storefront link that unlocks the private made-to-order product.
+ *
+ * @param int         $productId
+ * @param string      $method
+ * @param string|null $token
+ * @param string|null $password
+ * @return string
+ * @throws InvalidArgumentException
+ */
+function generateAccessLink($productId, $method, $token, $password)
+{
+    $productId = (int)$productId;
+    $method = strtolower(trim((string)$method));
+    $token = trim((string)$token);
+
+    if ($method !== 'token' || $productId <= 0 || $token === '') {
+        throw new InvalidArgumentException('A valid product/token pair is required to build the checkout link.');
+    }
+
+    $scheme = (!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off') ? 'https' : 'http';
+    $host = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
+    $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
+    if (strpos($script, '/modules/admin/') !== false) {
+        $projectBase = rtrim(str_replace('\\', '/', dirname(dirname(dirname($script)))), '/');
+    } elseif (strpos($script, '/modules/') !== false) {
+        $projectBase = rtrim(str_replace('\\', '/', dirname(dirname($script))), '/');
+    } else {
+        $projectBase = rtrim(str_replace('\\', '/', dirname($script)), '/');
+    }
+    $projectBase = ($projectBase === '.' || $projectBase === '/') ? '' : $projectBase;
+
+    $path = $projectBase . '/product.php?' . http_build_query([
+        'id' => $productId,
+        'mto_token' => $token,
+    ]);
+
+    if ($host !== '') {
+        return $scheme . '://' . $host . $path;
+    }
+
+    return $path;
+}
+
+/**
+ * Keep a mail helper available for future use, but the current admin flow
+ * shares the link manually after the Instagram conversation is complete.
  *
  * @param string $toEmail
  * @param int    $productId
  * @param string $accessLink
  * @param string $method
+ * @return bool
  */
-function sendCustomProductAccessEmail($toEmail, $productId, $accessLink, $method) {
-    $subject = "Your Custom Product is Ready – Creations by Athina";
-    $message = "Dear customer,\n\n";
-    $message .= "Your custom product has been created and is ready for viewing and checkout.\n\n";
-    $message .= "Access your private product using the link below:\n";
-    $message .= $accessLink . "\n\n";
-    if ($method === 'password') {
-        $message .= "You will need to enter the password that was included in the link or provided separately.\n";
-    }
-    $message .= "This access link will expire in 30 days.\n\n";
-    $message .= "Thank you for choosing Creations by Athina!\n";
-
-    $headers = "From: no-reply@creationsbyathina.com\r\n";
-    // In production, use a proper mail library (e.g., PHPMailer, SMTP)
-    mail($toEmail, $subject, $message, $headers);
+function sendCustomProductAccessEmail($toEmail, $productId, $accessLink, $method)
+{
+    return false;
 }
 
 /**
- * Log custom product creation to audit_logs.
+ * Log private custom-product preparation in audit_logs.
  *
  * @param mysqli $conn
  * @param int    $customOrderId
  * @param int    $productId
  * @param string $accessMethod
+ * @return void
  */
-function logCustomProductCreation($conn, $customOrderId, $productId, $accessMethod) {
+function logCustomProductCreation($conn, $customOrderId, $productId, $accessMethod)
+{
     $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
     $details = json_encode([
-        'custom_order_id' => $customOrderId,
-        'product_id'      => $productId,
-        'access_method'   => $accessMethod
+        'custom_order_id' => (int)$customOrderId,
+        'product_id' => (int)$productId,
+        'access_method' => (string)$accessMethod,
     ]);
+
     $stmt = $conn->prepare("
         INSERT INTO audit_logs (userID, role, actionType, entityType, entityID, ipAddress, detailsJSON)
         VALUES (NULL, 'system', 'custom_product_created', 'product', ?, ?, ?)
     ");
     if ($stmt) {
-        $stmt->bind_param("iss", $productId, $ip, $details);
+        $stmt->bind_param('iss', $productId, $ip, $details);
         $stmt->execute();
         $stmt->close();
     }

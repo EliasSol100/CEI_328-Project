@@ -260,12 +260,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     "is_verified"      => $userRow["is_verified"],
                 ];
 
-                // -----------------------------
-                // 4. Go to verification step
-                // -----------------------------
-                header("Location: select_verification_method.php");
-                // JS fallback in case headers are already sent
-                echo '<script>window.location.href="select_verification_method.php";</script>';
+                $nextStep = ((int)($userRow["is_verified"] ?? 0) === 1)
+                    ? consumeAuthRedirectTarget("../index.php")
+                    : "select_verification_method.php";
+                header("Location: " . $nextStep);
+                echo '<script>window.location.href=' . json_encode($nextStep) . ';</script>';
                 exit();
             }
 

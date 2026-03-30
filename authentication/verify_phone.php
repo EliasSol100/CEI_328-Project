@@ -33,7 +33,7 @@ if (!$userRow) {
 
 // If already verified, no need to be here
 if (!empty($userRow["is_verified"]) && (int)$userRow["is_verified"] === 1) {
-    header("Location: ../index.php");
+    header("Location: " . consumeAuthRedirectTarget("../index.php"));
     exit();
 }
 
@@ -159,7 +159,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     }
 
                     // Done → go home
-                    header("Location: ../index.php");
+                    header("Location: " . consumeAuthRedirectTarget("../index.php"));
                     exit();
                 }
             }

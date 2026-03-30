@@ -1,14 +1,26 @@
 <?php
 session_start();
 require_once __DIR__ . "/../include/security.php";
+require_once "database.php";
+
+if (isset($_GET['redirect'])) {
+    rememberAuthRedirectTarget((string)$_GET['redirect']);
+}
 
 // Αν ο χρήστης είναι ήδη logged in, δεν χρειάζεται να ξαναμπεί — πήγαινε στο index
 if (isset($_SESSION["user"])) {
-    header("Location: ../index.php");
+    $currentUser = $_SESSION["user"];
+    $profileComplete = !empty($currentUser["profile_complete"]);
+    $isVerified = !empty($currentUser["is_verified"]);
+    if (!$profileComplete) {
+        header("Location: complete_profile.php");
+    } elseif (!$isVerified) {
+        header("Location: select_verification_method.php");
+    } else {
+        header("Location: " . consumeAuthRedirectTarget("../index.php"));
+    }
     exit();
 }
-
-require_once "database.php";
 
 $googleState = app_oauth_state('google');
 $facebookState = app_oauth_state('facebook');
@@ -160,7 +172,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                             }
 
                             // Όλα εντάξει — πήγαινε στην αρχική
-                            header("Location: ../index.php");
+                            header("Location: " . consumeAuthRedirectTarget("../index.php"));
                             exit();
                         } else {
                             echo "<div class='alert alert-danger'>Incorrect password.</div>";

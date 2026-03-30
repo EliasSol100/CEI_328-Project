@@ -153,6 +153,81 @@ function createCustomOrdersForMadeToOrderCheckout(
             continue;
         }
 
+        // Reuse the admin-created custom order row for this private product.
+        // Checkout should enrich that row with the real order reference instead
+        // of creating a second entry for the same custom product.
+        $linkedStmt = $conn->prepare("
+            SELECT customOrderID, sourceOrderID
+            FROM custom_orders
+            WHERE sourceProductID = ?
+            ORDER BY customOrderID DESC
+            LIMIT 1
+        ");
+        if ($linkedStmt) {
+            $linkedStmt->bind_param('i', $productID);
+            $linkedStmt->execute();
+            $linkedRes = $linkedStmt->get_result();
+            $linkedRow = $linkedRes ? $linkedRes->fetch_assoc() : null;
+            $linkedStmt->close();
+
+            if ($linkedRow) {
+                $linkedCustomOrderId = (int)($linkedRow['customOrderID'] ?? 0);
+                $linkedSourceOrderId = (int)($linkedRow['sourceOrderID'] ?? 0);
+
+                if ($linkedCustomOrderId > 0) {
+                    if ($linkedSourceOrderId === $orderID) {
+                        continue;
+                    }
+
+                    $productName = trim((string)($item['product_name'] ?? 'Made to Order Item'));
+                    $hasUserId = ($userID && $userID > 0);
+                    $syncSql = "
+                        UPDATE custom_orders
+                        SET
+                            email = CASE WHEN TRIM(COALESCE(email, '')) = '' THEN ? ELSE email END,
+                            customerName = CASE WHEN TRIM(COALESCE(customerName, '')) = '' THEN ? ELSE customerName END,
+                            sourceOrderID = ?,
+                            sourceOrderNumber = ?,
+                            linkedProductName = CASE WHEN TRIM(COALESCE(linkedProductName, '')) = '' THEN ? ELSE linkedProductName END";
+                    if ($hasUserId) {
+                        $syncSql .= ",
+                            userID = CASE WHEN userID IS NULL OR userID = 0 THEN ? ELSE userID END";
+                    }
+                    $syncSql .= "
+                        WHERE customOrderID = ?
+                    ";
+                    $syncStmt = $conn->prepare($syncSql);
+                    if ($syncStmt) {
+                        if ($hasUserId) {
+                            $syncStmt->bind_param(
+                                'ssissii',
+                                $email,
+                                $customerName,
+                                $orderID,
+                                $orderNumber,
+                                $productName,
+                                $userID,
+                                $linkedCustomOrderId
+                            );
+                        } else {
+                            $syncStmt->bind_param(
+                                'ssissi',
+                                $email,
+                                $customerName,
+                                $orderID,
+                                $orderNumber,
+                                $productName,
+                                $linkedCustomOrderId
+                            );
+                        }
+                        $syncStmt->execute();
+                        $syncStmt->close();
+                    }
+                    continue;
+                }
+            }
+        }
+
         $checkStmt = $conn->prepare("SELECT customOrderID FROM custom_orders WHERE sourceOrderID = ? AND sourceProductID = ? LIMIT 1");
         if ($checkStmt) {
             $checkStmt->bind_param('ii', $orderID, $productID);

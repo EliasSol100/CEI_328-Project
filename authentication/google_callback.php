@@ -129,6 +129,10 @@ $_SESSION['user'] = [
     'profile_complete' => $profileComplete,
     'last_login'       => $prevLogin
 ];
+$_SESSION['user_id'] = $user['id'];
+$_SESSION['role'] = $user['role'] ?? 'user';
+$_SESSION['email'] = $user['email'];
+$_SESSION['full_name'] = $user['full_name'];
 
 /* === 7. Redirect:
  * - If profile is complete, go to dashboard
@@ -136,7 +140,7 @@ $_SESSION['user'] = [
  *   where the Email Address field will be prefilled & read-only.
  */
 if ($profileComplete) {
-    header("Location: ../index.php");
+    header("Location: " . consumeAuthRedirectTarget("../index.php"));
 } else {
     header("Location: complete_profile.php");
 }

@@ -42,7 +42,7 @@ if ((int)($userRow["profile_complete"] ?? 0) !== 1) {
 }
 
 if ((int)($userRow["is_verified"] ?? 0) === 1) {
-    header("Location: ../index.php");
+    header("Location: " . consumeAuthRedirectTarget("../index.php"));
     exit();
 }
 

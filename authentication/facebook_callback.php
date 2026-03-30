@@ -140,13 +140,17 @@ $_SESSION['user'] = [
     'profile_complete' => $profileComplete,
     'last_login'       => $prevLogin
 ];
+$_SESSION['user_id'] = $user['id'];
+$_SESSION['role'] = $user['role'] ?? 'user';
+$_SESSION['email'] = $user['email'];
+$_SESSION['full_name'] = $user['full_name'];
 
 /* === 7. Redirect like Google:
  * - If profile is complete, go to dashboard (index.php)
  * - If not complete (new user or missing data), go to complete_profile.php
  */
 if ($profileComplete) {
-    header("Location: ../index.php");
+    header("Location: " . consumeAuthRedirectTarget("../index.php"));
 } else {
     header("Location: complete_profile.php");
 }

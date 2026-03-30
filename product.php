@@ -168,7 +168,9 @@ if (isset($_GET['mto_token']) && (string)$_GET['mto_token'] !== '') {
 
     $reason = (string)($grant['reason'] ?? 'invalid_link');
     if ($reason === 'login_required') {
-        $_SESSION['shop_mto_flash'] = 'err:Sign in with the assigned customer email to access this private product.';
+        rememberAuthRedirectTarget((string)($_SERVER['REQUEST_URI'] ?? ''));
+        header("Location: authentication/login.php");
+        exit;
     } elseif ($reason === 'email_mismatch') {
         $_SESSION['shop_mto_flash'] = 'err:This private product belongs to a different customer email.';
     } else {
@@ -481,6 +483,38 @@ if ($photoStmt) {
     }
     $photoStmt->close();
 }
+
+// Custom-order checkout products can reuse the uploaded reference image directly
+// from the custom order record, so the private product still has a visible image
+// even when we do not duplicate the file into the normal photos table.
+if (empty($photos)) {
+    $customPhotoStmt = $conn->prepare("
+        SELECT photoReferencePath
+        FROM custom_orders
+        WHERE sourceProductID = ?
+          AND photoReferencePath IS NOT NULL
+          AND TRIM(photoReferencePath) <> ''
+        ORDER BY customOrderID DESC
+        LIMIT 1
+    ");
+    if ($customPhotoStmt) {
+        $customPhotoStmt->bind_param("i", $productId);
+        $customPhotoStmt->execute();
+        $customPhotoRes = $customPhotoStmt->get_result();
+        $customPhotoRow = $customPhotoRes ? $customPhotoRes->fetch_assoc() : null;
+        $customPhotoStmt->close();
+
+        $customPhotoPath = trim((string)($customPhotoRow["photoReferencePath"] ?? ""));
+        if ($customPhotoPath !== "") {
+            $relativePhotoPath = ltrim(str_replace("\\", "/", $customPhotoPath), "/");
+            $absolutePhotoPath = __DIR__ . "/" . $relativePhotoPath;
+            if (is_file($absolutePhotoPath)) {
+                $photos[] = $relativePhotoPath;
+            }
+        }
+    }
+}
+
 if (empty($photos)) {
     $photos[] = "assets/images/athina-eshop-logo.png";
 }

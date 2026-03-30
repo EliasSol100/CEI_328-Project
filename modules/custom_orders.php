@@ -14,6 +14,8 @@ if (!defined('INCLUDE_CHECK') && !defined('CUSTOM_ORDERS_DIRECT')) {
 
 /**
  * Allowed custom order statuses.
+ *
+ * A couple of legacy values are kept so older rows still render safely in admin.
  */
 const CUSTOM_ORDER_STATUSES = [
     'pending',
@@ -22,134 +24,184 @@ const CUSTOM_ORDER_STATUSES = [
     'in_production',
     'ready_for_checkout',
     'completed',
-    'declined'
+    'declined',
+    'cancelled',
+    'in_progress',
 ];
 
 /**
- * Create a new custom order request.
+ * Human-readable labels for status badges and selects.
  *
- * @param mysqli $conn            Database connection
- * @param int    $userId           User ID (must be a valid registered user)
- * @param string $email            Customer email
- * @param string $requestDescription Detailed description of the custom order
- * @param array  $options          Optional parameters:
- *                                 - special_instructions: additional notes (stored in expertNotes)
- * @return array                   Result with customOrderID and access_token
- * @throws InvalidArgumentException On validation failure
- * @throws Exception                On database error
+ * @return array<string, string>
  */
-function createCustomOrderRequest($conn, $userId, $email, $requestDescription, $options = []) {
-    // Validate required fields
-    if (!$userId || $userId <= 0) {
-        throw new InvalidArgumentException("Valid user ID is required to create a custom order.");
-    }
-    if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        throw new InvalidArgumentException("Valid email is required.");
-    }
-    if (empty($requestDescription)) {
-        throw new InvalidArgumentException("Request description cannot be empty.");
-    }
-
-    // Ensure table structure is up to date (adds access_token, token_expires_at, created_at if missing)
-    ensureCustomOrdersTable($conn);
-
-    // Generate a secure access token for the customer to view this order later
-    $accessToken = bin2hex(random_bytes(32));
-    $tokenExpiry = date('Y-m-d H:i:s', strtotime('+30 days')); // Token valid for 30 days
-
-    // Insert custom order
-    $stmt = $conn->prepare("
-        INSERT INTO custom_orders (
-            userID, email, requestDescription, status, expertNotes, aiWritingAcknowledgeFlag,
-            access_token, token_expires_at, created_at
-        ) VALUES (?, ?, ?, 'pending', ?, 0, ?, ?, NOW())
-    ");
-    if (!$stmt) {
-        throw new Exception("Failed to prepare insert: " . $conn->error);
-    }
-
-    $expertNotes = $options['special_instructions'] ?? null;
-    // userID is integer, all others strings
-    $stmt->bind_param("issssss", $userId, $email, $requestDescription, $expertNotes, $accessToken, $tokenExpiry);
-    if (!$stmt->execute()) {
-        throw new Exception("Failed to insert custom order: " . $stmt->error);
-    }
-    $customOrderId = $stmt->insert_id;
-    $stmt->close();
-
-    // Log to audit
-    logCustomOrderAction($conn, $customOrderId, 'created', "Custom order created by user ID: $userId");
-
-    // Notify admin
-    notifyAdminNewCustomOrder($conn, $customOrderId, $email, $requestDescription);
-
+function getCustomOrderStatusLabels(): array
+{
     return [
-        'custom_order_id' => $customOrderId,
-        'access_token'    => $accessToken
+        'pending'            => 'Pending',
+        'in_discussion'      => 'In Discussion',
+        'accepted'           => 'Accepted',
+        'in_production'      => 'In Production',
+        'ready_for_checkout' => 'Ready for Checkout',
+        'completed'          => 'Completed',
+        'declined'           => 'Declined',
+        'cancelled'          => 'Cancelled',
+        'in_progress'        => 'In Progress',
     ];
 }
 
 /**
- * Update an existing custom order.
+ * Create a new custom order request.
  *
- * @param mysqli $conn            Database connection
- * @param int    $customOrderId    Custom order ID
- * @param array  $updates          Fields to update:
- *                                 - status (must be in CUSTOM_ORDER_STATUSES)
- *                                 - expertNotes
- * @return bool                    True on success
- * @throws InvalidArgumentException If status is invalid or order not found
- * @throws Exception                On database error
+ * @param mysqli $conn
+ * @param int    $userId
+ * @param string $email
+ * @param string $requestDescription
+ * @param array  $options
+ * @return array
+ * @throws InvalidArgumentException
+ * @throws Exception
  */
-function updateCustomOrder($conn, $customOrderId, $updates) {
-    // Verify order exists
-    $stmt = $conn->prepare("SELECT customOrderID, status FROM custom_orders WHERE customOrderID = ?");
-    $stmt->bind_param("i", $customOrderId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    if ($result->num_rows === 0) {
-        throw new InvalidArgumentException("Custom order #$customOrderId not found.");
+function createCustomOrderRequest($conn, $userId, $email, $requestDescription, $options = [])
+{
+    if (!$userId || $userId <= 0) {
+        throw new InvalidArgumentException('Valid user ID is required to create a custom order.');
     }
-    $current = $result->fetch_assoc();
+    if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new InvalidArgumentException('Valid email is required.');
+    }
+    if (empty($requestDescription)) {
+        throw new InvalidArgumentException('Request description cannot be empty.');
+    }
+
+    ensureCustomOrdersTable($conn);
+
+    $accessToken = bin2hex(random_bytes(32));
+    $tokenExpiry = date('Y-m-d H:i:s', strtotime('+30 days'));
+
+    $stmt = $conn->prepare("
+        INSERT INTO custom_orders (
+            userID, email, requestDescription, status, expertNotes, aiWritingAcknowledgeFlag,
+            customerName, photoReferencePath, access_token, token_expires_at, created_at
+        ) VALUES (?, ?, ?, 'pending', ?, 0, ?, ?, ?, ?, NOW())
+    ");
+    if (!$stmt) {
+        throw new Exception('Failed to prepare insert: ' . $conn->error);
+    }
+
+    $expertNotes = $options['special_instructions'] ?? null;
+    $customerName = trim((string)($options['customer_name'] ?? ''));
+    $customerName = $customerName !== '' ? $customerName : null;
+    $photoReferencePath = trim((string)($options['photo_reference_path'] ?? ''));
+    $photoReferencePath = $photoReferencePath !== '' ? $photoReferencePath : null;
+
+    $stmt->bind_param(
+        'isssssss',
+        $userId,
+        $email,
+        $requestDescription,
+        $expertNotes,
+        $customerName,
+        $photoReferencePath,
+        $accessToken,
+        $tokenExpiry
+    );
+
+    if (!$stmt->execute()) {
+        throw new Exception('Failed to insert custom order: ' . $stmt->error);
+    }
+
+    $customOrderId = (int)$stmt->insert_id;
     $stmt->close();
 
-    // Build update query dynamically
-    $allowedFields = ['status', 'expertNotes'];
+    // Seed the discussion thread so both sides have a clear starting point.
+    addCustomOrderMessage(
+        $conn,
+        $customOrderId,
+        'system',
+        null,
+        'Custom order request received. The shop owner will review it and reply with details.'
+    );
+
+    logCustomOrderAction($conn, $customOrderId, 'created', "Custom order created by user ID: $userId");
+    notifyAdminNewCustomOrder($conn, $customOrderId, $email, $requestDescription);
+
+    return [
+        'custom_order_id' => $customOrderId,
+        'access_token' => $accessToken,
+    ];
+}
+
+/**
+ * Update selected custom order fields.
+ *
+ * @param mysqli $conn
+ * @param int    $customOrderId
+ * @param array  $updates
+ * @return bool
+ * @throws InvalidArgumentException
+ * @throws Exception
+ */
+function updateCustomOrder($conn, $customOrderId, $updates)
+{
+    ensureCustomOrdersTable($conn);
+
+    $stmt = $conn->prepare('SELECT customOrderID FROM custom_orders WHERE customOrderID = ?');
+    if (!$stmt) {
+        throw new Exception('Failed to prepare existence check: ' . $conn->error);
+    }
+    $stmt->bind_param('i', $customOrderId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if (!$result || $result->num_rows === 0) {
+        $stmt->close();
+        throw new InvalidArgumentException("Custom order #$customOrderId not found.");
+    }
+    $stmt->close();
+
+    $allowedFields = ['status', 'expertNotes', 'agreedPrice', 'deadline', 'customerName', 'email', 'requestDescription', 'accessCode'];
     $setParts = [];
     $params = [];
-    $types = "";
+    $types = '';
 
     foreach ($updates as $field => $value) {
-        if (!in_array($field, $allowedFields)) continue;
-        if ($field === 'status') {
-            if (!in_array($value, CUSTOM_ORDER_STATUSES)) {
-                throw new InvalidArgumentException("Invalid status: $value");
-            }
+        if (!in_array($field, $allowedFields, true)) {
+            continue;
         }
-        $setParts[] = "$field = ?";
+        if ($field === 'status' && !in_array((string)$value, CUSTOM_ORDER_STATUSES, true)) {
+            throw new InvalidArgumentException("Invalid status: $value");
+        }
+
+        $setParts[] = $field . ' = ?';
+
+        if ($field === 'agreedPrice') {
+            $params[] = (float)$value;
+            $types .= 'd';
+            continue;
+        }
+
         $params[] = $value;
-        $types .= "s";
+        $types .= 's';
     }
 
     if (empty($setParts)) {
-        return true; // nothing to update
+        return true;
     }
 
     $params[] = $customOrderId;
-    $types .= "i";
-    $sql = "UPDATE custom_orders SET " . implode(', ', $setParts) . " WHERE customOrderID = ?";
+    $types .= 'i';
+
+    $sql = 'UPDATE custom_orders SET ' . implode(', ', $setParts) . ' WHERE customOrderID = ?';
     $stmt = $conn->prepare($sql);
     if (!$stmt) {
-        throw new Exception("Failed to prepare update: " . $conn->error);
+        throw new Exception('Failed to prepare update: ' . $conn->error);
     }
     $stmt->bind_param($types, ...$params);
     if (!$stmt->execute()) {
-        throw new Exception("Failed to update custom order: " . $stmt->error);
+        throw new Exception('Failed to update custom order: ' . $stmt->error);
     }
     $stmt->close();
 
-    // Log
-    logCustomOrderAction($conn, $customOrderId, 'updated', "Updated fields: " . implode(', ', array_keys($updates)));
+    logCustomOrderAction($conn, $customOrderId, 'updated', 'Updated fields: ' . implode(', ', array_keys($updates)));
 
     return true;
 }
@@ -157,92 +209,719 @@ function updateCustomOrder($conn, $customOrderId, $updates) {
 /**
  * Get custom order details by ID or access token.
  *
- * @param mysqli $conn          Database connection
- * @param int    $customOrderId  Custom order ID (optional if token provided)
- * @param string $accessToken     Access token (optional if ID provided)
- * @return array                 Custom order details (sensitive token removed unless requested by token)
- * @throws InvalidArgumentException If not found or token invalid/expired
- * @throws Exception               On database error
+ * @param mysqli   $conn
+ * @param int|null $customOrderId
+ * @param string|null $accessToken
+ * @return array
+ * @throws InvalidArgumentException
+ * @throws Exception
  */
-function trackCustomOrder($conn, $customOrderId = null, $accessToken = null) {
+function trackCustomOrder($conn, $customOrderId = null, $accessToken = null)
+{
+    ensureCustomOrdersTable($conn);
+
     if (!$customOrderId && !$accessToken) {
-        throw new InvalidArgumentException("Either customOrderId or accessToken must be provided.");
+        throw new InvalidArgumentException('Either customOrderId or accessToken must be provided.');
     }
 
-    $sql = "SELECT 
-                co.customOrderID,
-                co.userID,
-                co.email,
-                co.requestDescription,
-                co.status,
-                co.expertNotes,
-                co.aiWritingAcknowledgeFlag,
-                co.access_token,
-                co.token_expires_at,
-                co.created_at,
-                u.full_name as customer_name,
-                u.phone as customer_phone
-            FROM custom_orders co
-            LEFT JOIN users u ON co.userID = u.id
-            WHERE ";
+    $sql = "
+        SELECT
+            co.*,
+            COALESCE(
+                NULLIF(co.customerName, ''),
+                NULLIF(u.full_name, ''),
+                NULLIF(CONCAT_WS(' ', u.first_name, u.last_name), '')
+            ) AS customer_name,
+            u.phone AS customer_phone
+        FROM custom_orders co
+        LEFT JOIN users u ON co.userID = u.userID
+        WHERE
+    ";
     $params = [];
-    $types = "";
+    $types = '';
 
     if ($customOrderId) {
-        $sql .= "co.customOrderID = ?";
-        $params[] = $customOrderId;
-        $types .= "i";
+        $sql .= ' co.customOrderID = ?';
+        $params[] = (int)$customOrderId;
+        $types .= 'i';
     } else {
-        $sql .= "co.access_token = ? AND co.token_expires_at > NOW()";
-        $params[] = $accessToken;
-        $types .= "s";
+        $sql .= ' co.access_token = ? AND co.token_expires_at > NOW()';
+        $params[] = (string)$accessToken;
+        $types .= 's';
     }
 
     $stmt = $conn->prepare($sql);
     if (!$stmt) {
-        throw new Exception("Failed to prepare select: " . $conn->error);
+        throw new Exception('Failed to prepare select: ' . $conn->error);
     }
     $stmt->bind_param($types, ...$params);
     $stmt->execute();
     $result = $stmt->get_result();
-    if ($result->num_rows === 0) {
-        throw new InvalidArgumentException("Custom order not found or token expired.");
+    if (!$result || $result->num_rows === 0) {
+        $stmt->close();
+        throw new InvalidArgumentException('Custom order not found or token expired.');
     }
+
     $order = $result->fetch_assoc();
     $stmt->close();
 
-    // If retrieving by ID, hide the token fields (admin view)
     if ($customOrderId) {
-        unset($order['access_token']);
-        unset($order['token_expires_at']);
+        unset($order['access_token'], $order['token_expires_at']);
     }
 
     return $order;
 }
 
 /**
- * Ensure custom_orders table has necessary columns for access tokens.
- * Adds columns if missing.
+ * Get one custom order, optionally enforcing customer ownership.
+ *
+ * @param mysqli   $conn
+ * @param int      $customOrderId
+ * @param int|null $userId
+ * @return array
+ * @throws InvalidArgumentException
+ * @throws Exception
+ */
+function getCustomOrderById($conn, $customOrderId, $userId = null)
+{
+    ensureCustomOrdersTable($conn);
+
+    $sql = "
+        SELECT
+            co.*,
+            COALESCE(
+                NULLIF(co.customerName, ''),
+                NULLIF(u.full_name, ''),
+                NULLIF(CONCAT_WS(' ', u.first_name, u.last_name), '')
+            ) AS displayName
+        FROM custom_orders co
+        LEFT JOIN users u ON u.userID = co.userID
+        WHERE co.customOrderID = ?
+    ";
+    $types = 'i';
+    $params = [(int)$customOrderId];
+
+    if ($userId !== null) {
+        $sql .= ' AND co.userID = ?';
+        $types .= 'i';
+        $params[] = (int)$userId;
+    }
+
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        throw new Exception('Failed to prepare custom order fetch: ' . $conn->error);
+    }
+    $stmt->bind_param($types, ...$params);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $order = $result ? $result->fetch_assoc() : null;
+    $stmt->close();
+
+    if (!$order) {
+        throw new InvalidArgumentException('Custom order not found.');
+    }
+
+    return $order;
+}
+
+/**
+ * List custom orders for a customer account.
  *
  * @param mysqli $conn
+ * @param int    $userId
+ * @return array<int, array<string, mixed>>
  */
-function ensureCustomOrdersTable($conn) {
-    static $checked = false;
-    if ($checked) return;
+function getCustomOrdersForUser($conn, $userId)
+{
+    ensureCustomOrdersTable($conn);
 
-    $result = $conn->query("SHOW COLUMNS FROM custom_orders LIKE 'access_token'");
-    if ($result->num_rows == 0) {
-        $conn->query("ALTER TABLE custom_orders ADD COLUMN access_token VARCHAR(255) NULL AFTER aiWritingAcknowledgeFlag");
+    $sql = "
+        SELECT
+            co.*,
+            (
+                SELECT COUNT(*)
+                FROM custom_order_offers ofr
+                WHERE ofr.customOrderID = co.customOrderID
+                  AND ofr.offerStatus = 'pending'
+            ) AS pendingOfferCount,
+            (
+                SELECT ofr.offeredPrice
+                FROM custom_order_offers ofr
+                WHERE ofr.customOrderID = co.customOrderID
+                ORDER BY ofr.createdAt DESC, ofr.offerID DESC
+                LIMIT 1
+            ) AS latestOfferedPrice,
+            (
+                SELECT ofr.proposedDeadline
+                FROM custom_order_offers ofr
+                WHERE ofr.customOrderID = co.customOrderID
+                ORDER BY ofr.createdAt DESC, ofr.offerID DESC
+                LIMIT 1
+            ) AS latestOfferDeadline,
+            (
+                SELECT ofr.offerStatus
+                FROM custom_order_offers ofr
+                WHERE ofr.customOrderID = co.customOrderID
+                ORDER BY ofr.createdAt DESC, ofr.offerID DESC
+                LIMIT 1
+            ) AS latestOfferStatus,
+            (
+                SELECT msg.createdAt
+                FROM custom_order_messages msg
+                WHERE msg.customOrderID = co.customOrderID
+                ORDER BY msg.createdAt DESC, msg.messageID DESC
+                LIMIT 1
+            ) AS lastMessageAt
+        FROM custom_orders co
+        WHERE co.userID = ?
+        ORDER BY co.customOrderID DESC
+    ";
+
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        return [];
     }
-    $result = $conn->query("SHOW COLUMNS FROM custom_orders LIKE 'token_expires_at'");
-    if ($result->num_rows == 0) {
-        $conn->query("ALTER TABLE custom_orders ADD COLUMN token_expires_at DATETIME NULL AFTER access_token");
+    $stmt->bind_param('i', $userId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    $orders = [];
+    if ($result) {
+        while ($row = $result->fetch_assoc()) {
+            $orders[] = $row;
+        }
     }
-    $result = $conn->query("SHOW COLUMNS FROM custom_orders LIKE 'created_at'");
-    if ($result->num_rows == 0) {
-        $conn->query("ALTER TABLE custom_orders ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+
+    $stmt->close();
+    return $orders;
+}
+
+/**
+ * Fetch message thread for one custom order.
+ *
+ * @param mysqli $conn
+ * @param int    $customOrderId
+ * @return array<int, array<string, mixed>>
+ */
+function getCustomOrderMessages($conn, $customOrderId)
+{
+    ensureCustomOrdersTable($conn);
+
+    $stmt = $conn->prepare("
+        SELECT messageID, customOrderID, senderRole, senderUserID, messageBody, createdAt
+        FROM custom_order_messages
+        WHERE customOrderID = ?
+        ORDER BY createdAt ASC, messageID ASC
+    ");
+    if (!$stmt) {
+        return [];
     }
+    $stmt->bind_param('i', $customOrderId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    $messages = [];
+    if ($result) {
+        while ($row = $result->fetch_assoc()) {
+            $messages[] = $row;
+        }
+    }
+
+    $stmt->close();
+    return $messages;
+}
+
+/**
+ * Fetch the current pending offer for a custom order, if one exists.
+ *
+ * @param mysqli $conn
+ * @param int    $customOrderId
+ * @return array|null
+ */
+function getActiveCustomOrderOffer($conn, $customOrderId)
+{
+    ensureCustomOrdersTable($conn);
+
+    $stmt = $conn->prepare("
+        SELECT offerID, customOrderID, offeredByUserID, offeredPrice, proposedDeadline, offerNote, offerStatus, createdAt, respondedAt
+        FROM custom_order_offers
+        WHERE customOrderID = ? AND offerStatus = 'pending'
+        ORDER BY createdAt DESC, offerID DESC
+        LIMIT 1
+    ");
+    if (!$stmt) {
+        return null;
+    }
+    $stmt->bind_param('i', $customOrderId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $offer = $result ? $result->fetch_assoc() : null;
+    $stmt->close();
+
+    return $offer ?: null;
+}
+
+/**
+ * Fetch the most recent offer for display/history.
+ *
+ * @param mysqli $conn
+ * @param int    $customOrderId
+ * @return array|null
+ */
+function getLatestCustomOrderOffer($conn, $customOrderId)
+{
+    ensureCustomOrdersTable($conn);
+
+    $stmt = $conn->prepare("
+        SELECT offerID, customOrderID, offeredByUserID, offeredPrice, proposedDeadline, offerNote, offerStatus, createdAt, respondedAt
+        FROM custom_order_offers
+        WHERE customOrderID = ?
+        ORDER BY createdAt DESC, offerID DESC
+        LIMIT 1
+    ");
+    if (!$stmt) {
+        return null;
+    }
+    $stmt->bind_param('i', $customOrderId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $offer = $result ? $result->fetch_assoc() : null;
+    $stmt->close();
+
+    return $offer ?: null;
+}
+
+/**
+ * Add one thread message to a custom order.
+ *
+ * @param mysqli    $conn
+ * @param int       $customOrderId
+ * @param string    $senderRole
+ * @param int|null  $senderUserId
+ * @param string    $messageBody
+ * @return int
+ * @throws InvalidArgumentException
+ * @throws Exception
+ */
+function addCustomOrderMessage($conn, $customOrderId, $senderRole, $senderUserId, $messageBody)
+{
+    ensureCustomOrdersTable($conn);
+
+    $senderRole = strtolower(trim((string)$senderRole));
+    $allowedRoles = ['admin', 'customer', 'system'];
+    if (!in_array($senderRole, $allowedRoles, true)) {
+        throw new InvalidArgumentException('Invalid sender role for custom order message.');
+    }
+
+    $messageBody = trim((string)$messageBody);
+    if ($messageBody === '') {
+        throw new InvalidArgumentException('Message cannot be empty.');
+    }
+
+    getCustomOrderById($conn, $customOrderId);
+
+    $senderUserId = $senderUserId ? (int)$senderUserId : null;
+    $stmt = $conn->prepare("
+        INSERT INTO custom_order_messages (customOrderID, senderRole, senderUserID, messageBody)
+        VALUES (?, ?, ?, ?)
+    ");
+    if (!$stmt) {
+        throw new Exception('Failed to prepare message insert: ' . $conn->error);
+    }
+
+    $stmt->bind_param('isis', $customOrderId, $senderRole, $senderUserId, $messageBody);
+    if (!$stmt->execute()) {
+        throw new Exception('Failed to save custom order message: ' . $stmt->error);
+    }
+
+    $messageId = (int)$stmt->insert_id;
+    $stmt->close();
+
+    logCustomOrderAction($conn, $customOrderId, 'message_posted', ucfirst($senderRole) . ' posted a discussion message.');
+
+    if ($senderRole === 'customer') {
+        createAdminNotification($conn, "Customer replied on custom order #{$customOrderId}.");
+    }
+
+    return $messageId;
+}
+
+/**
+ * Create a price offer for a custom order.
+ *
+ * @param mysqli      $conn
+ * @param int         $customOrderId
+ * @param int|null    $adminUserId
+ * @param float       $price
+ * @param string|null $deadline
+ * @param string|null $offerNote
+ * @return int
+ * @throws InvalidArgumentException
+ * @throws Exception
+ */
+function createCustomOrderOffer($conn, $customOrderId, $adminUserId, $price, $deadline = null, $offerNote = null)
+{
+    ensureCustomOrdersTable($conn);
+
+    getCustomOrderById($conn, $customOrderId);
+
+    if (!is_numeric($price) || (float)$price <= 0) {
+        throw new InvalidArgumentException('Offer price must be a positive amount.');
+    }
+    $price = round((float)$price, 2);
+
+    $deadline = trim((string)$deadline);
+    if ($deadline !== '') {
+        $dt = DateTime::createFromFormat('Y-m-d', $deadline);
+        if (!$dt || $dt->format('Y-m-d') !== $deadline) {
+            throw new InvalidArgumentException('Offer deadline must be a valid date.');
+        }
+    } else {
+        $deadline = null;
+    }
+
+    $offerNote = trim((string)$offerNote);
+    $offerNote = $offerNote !== '' ? $offerNote : null;
+    $adminUserId = $adminUserId ? (int)$adminUserId : null;
+
+    $conn->begin_transaction();
+
+    try {
+        // Keep only one live decision point for the customer at a time.
+        $supersedeStmt = $conn->prepare("
+            UPDATE custom_order_offers
+            SET offerStatus = 'superseded', respondedAt = NOW()
+            WHERE customOrderID = ? AND offerStatus = 'pending'
+        ");
+        if ($supersedeStmt) {
+            $supersedeStmt->bind_param('i', $customOrderId);
+            $supersedeStmt->execute();
+            $supersedeStmt->close();
+        }
+
+        $stmt = $conn->prepare("
+            INSERT INTO custom_order_offers (
+                customOrderID, offeredByUserID, offeredPrice, proposedDeadline, offerNote, offerStatus
+            ) VALUES (?, ?, ?, ?, ?, 'pending')
+        ");
+        if (!$stmt) {
+            throw new Exception('Failed to prepare custom order offer insert: ' . $conn->error);
+        }
+        $stmt->bind_param('iidss', $customOrderId, $adminUserId, $price, $deadline, $offerNote);
+        if (!$stmt->execute()) {
+            throw new Exception('Failed to save custom order offer: ' . $stmt->error);
+        }
+        $offerId = (int)$stmt->insert_id;
+        $stmt->close();
+
+        $updateStmt = $conn->prepare("
+            UPDATE custom_orders
+            SET agreedPrice = ?, deadline = ?, status = 'in_discussion'
+            WHERE customOrderID = ?
+        ");
+        if (!$updateStmt) {
+            throw new Exception('Failed to prepare custom order offer update: ' . $conn->error);
+        }
+        $updateStmt->bind_param('dsi', $price, $deadline, $customOrderId);
+        $updateStmt->execute();
+        $updateStmt->close();
+
+        $systemMessage = 'A new price offer was sent: EUR ' . number_format($price, 2);
+        if ($deadline !== null) {
+            $systemMessage .= ' with target date ' . $deadline;
+        }
+        $systemMessage .= '.';
+        addCustomOrderMessage($conn, $customOrderId, 'system', null, $systemMessage);
+
+        if ($offerNote !== null) {
+            addCustomOrderMessage($conn, $customOrderId, 'admin', $adminUserId, $offerNote);
+        }
+
+        logCustomOrderAction($conn, $customOrderId, 'offer_created', 'Admin created a price offer.');
+        $conn->commit();
+
+        return $offerId;
+    } catch (Throwable $e) {
+        $conn->rollback();
+        throw $e;
+    }
+}
+
+/**
+ * Accept or decline the active offer for a custom order.
+ *
+ * @param mysqli $conn
+ * @param int    $customOrderId
+ * @param int    $offerId
+ * @param int    $customerUserId
+ * @param string $decision
+ * @return bool
+ * @throws InvalidArgumentException
+ * @throws Exception
+ */
+function respondToCustomOrderOffer($conn, $customOrderId, $offerId, $customerUserId, $decision)
+{
+    ensureCustomOrdersTable($conn);
+
+    $order = getCustomOrderById($conn, $customOrderId, $customerUserId);
+    if ((int)($order['userID'] ?? 0) !== (int)$customerUserId) {
+        throw new InvalidArgumentException('You do not have access to this custom order.');
+    }
+
+    $decision = strtolower(trim((string)$decision));
+    if (!in_array($decision, ['accept', 'decline'], true)) {
+        throw new InvalidArgumentException('Invalid custom order offer response.');
+    }
+
+    $stmt = $conn->prepare("
+        SELECT offerID, offeredPrice, proposedDeadline, offerStatus
+        FROM custom_order_offers
+        WHERE offerID = ? AND customOrderID = ?
+        LIMIT 1
+    ");
+    if (!$stmt) {
+        throw new Exception('Failed to prepare custom order offer lookup: ' . $conn->error);
+    }
+    $stmt->bind_param('ii', $offerId, $customOrderId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $offer = $result ? $result->fetch_assoc() : null;
+    $stmt->close();
+
+    if (!$offer) {
+        throw new InvalidArgumentException('Offer not found.');
+    }
+    if ((string)$offer['offerStatus'] !== 'pending') {
+        throw new InvalidArgumentException('That offer is no longer awaiting a response.');
+    }
+
+    $newOfferStatus = $decision === 'accept' ? 'accepted' : 'declined';
+    $newOrderStatus = $decision === 'accept' ? 'accepted' : 'in_discussion';
+    $systemMessage = $decision === 'accept'
+        ? 'Customer accepted the latest price offer.'
+        : 'Customer declined the latest price offer.';
+
+    $conn->begin_transaction();
+
+    try {
+        $offerUpdate = $conn->prepare("
+            UPDATE custom_order_offers
+            SET offerStatus = ?, respondedAt = NOW()
+            WHERE offerID = ?
+        ");
+        if (!$offerUpdate) {
+            throw new Exception('Failed to prepare offer response update: ' . $conn->error);
+        }
+        $offerUpdate->bind_param('si', $newOfferStatus, $offerId);
+        $offerUpdate->execute();
+        $offerUpdate->close();
+
+        if ($decision === 'accept') {
+            $orderUpdate = $conn->prepare("
+                UPDATE custom_orders
+                SET status = ?, agreedPrice = ?, deadline = ?
+                WHERE customOrderID = ?
+            ");
+            if (!$orderUpdate) {
+                throw new Exception('Failed to prepare accepted order update: ' . $conn->error);
+            }
+            $acceptedPrice = (float)$offer['offeredPrice'];
+            $acceptedDeadline = $offer['proposedDeadline'];
+            $orderUpdate->bind_param('sdsi', $newOrderStatus, $acceptedPrice, $acceptedDeadline, $customOrderId);
+            $orderUpdate->execute();
+            $orderUpdate->close();
+        } else {
+            $orderUpdate = $conn->prepare('UPDATE custom_orders SET status = ? WHERE customOrderID = ?');
+            if (!$orderUpdate) {
+                throw new Exception('Failed to prepare declined order update: ' . $conn->error);
+            }
+            $orderUpdate->bind_param('si', $newOrderStatus, $customOrderId);
+            $orderUpdate->execute();
+            $orderUpdate->close();
+        }
+
+        addCustomOrderMessage($conn, $customOrderId, 'system', null, $systemMessage);
+        logCustomOrderAction($conn, $customOrderId, 'offer_' . $newOfferStatus, 'Customer responded to the latest price offer.');
+        createAdminNotification($conn, "Customer {$newOfferStatus} offer on custom order #{$customOrderId}.");
+
+        $conn->commit();
+        return true;
+    } catch (Throwable $e) {
+        $conn->rollback();
+        throw $e;
+    }
+}
+
+/**
+ * Remove conversation rows when a custom order is deleted.
+ *
+ * @param mysqli $conn
+ * @param int    $customOrderId
+ * @return void
+ */
+function deleteCustomOrderConversation($conn, $customOrderId)
+{
+    ensureCustomOrdersTable($conn);
+
+    $deleteOffers = $conn->prepare('DELETE FROM custom_order_offers WHERE customOrderID = ?');
+    if ($deleteOffers) {
+        $deleteOffers->bind_param('i', $customOrderId);
+        $deleteOffers->execute();
+        $deleteOffers->close();
+    }
+
+    $deleteMessages = $conn->prepare('DELETE FROM custom_order_messages WHERE customOrderID = ?');
+    if ($deleteMessages) {
+        $deleteMessages->bind_param('i', $customOrderId);
+        $deleteMessages->execute();
+        $deleteMessages->close();
+    }
+}
+
+/**
+ * Ensure custom order tables are present and compatible with the storefront pages.
+ *
+ * @param mysqli $conn
+ * @return void
+ */
+function ensureCustomOrdersTable($conn)
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+
+    $tableCheck = $conn->query("SHOW TABLES LIKE 'custom_orders'");
+    if (!$tableCheck || $tableCheck->num_rows === 0) {
+        $checked = true;
+        return;
+    }
+
+    $columnChecks = [
+        'photoReferencePath' => "ALTER TABLE custom_orders ADD COLUMN photoReferencePath VARCHAR(255) NULL AFTER accessCode",
+        'access_token' => "ALTER TABLE custom_orders ADD COLUMN access_token VARCHAR(255) NULL AFTER aiWritingAcknowledgeFlag",
+        'token_expires_at' => "ALTER TABLE custom_orders ADD COLUMN token_expires_at DATETIME NULL AFTER access_token",
+        'created_at' => "ALTER TABLE custom_orders ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        'customerName' => "ALTER TABLE custom_orders ADD COLUMN customerName VARCHAR(255) NULL AFTER aiWritingAcknowledgeFlag",
+        'sourceOrderID' => "ALTER TABLE custom_orders ADD COLUMN sourceOrderID INT NULL AFTER accessCode",
+        'sourceOrderNumber' => "ALTER TABLE custom_orders ADD COLUMN sourceOrderNumber VARCHAR(64) NULL AFTER sourceOrderID",
+        'sourceProductID' => "ALTER TABLE custom_orders ADD COLUMN sourceProductID INT NULL AFTER sourceOrderNumber",
+        'linkedProductName' => "ALTER TABLE custom_orders ADD COLUMN linkedProductName VARCHAR(255) NULL AFTER sourceProductID",
+    ];
+
+    foreach ($columnChecks as $column => $sql) {
+        $safeColumn = $conn->real_escape_string($column);
+        $result = $conn->query("SHOW COLUMNS FROM custom_orders LIKE '{$safeColumn}'");
+        if ($result && $result->num_rows === 0) {
+            $conn->query($sql);
+        }
+    }
+
+    $conn->query("
+        CREATE TABLE IF NOT EXISTS custom_order_messages (
+            messageID INT AUTO_INCREMENT PRIMARY KEY,
+            customOrderID INT NOT NULL,
+            senderRole VARCHAR(20) NOT NULL,
+            senderUserID INT NULL,
+            messageBody TEXT NOT NULL,
+            createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_custom_order_messages_order (customOrderID),
+            INDEX idx_custom_order_messages_created (createdAt)
+        )
+    ");
+
+    $conn->query("
+        CREATE TABLE IF NOT EXISTS custom_order_offers (
+            offerID INT AUTO_INCREMENT PRIMARY KEY,
+            customOrderID INT NOT NULL,
+            offeredByUserID INT NULL,
+            offeredPrice DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+            proposedDeadline DATE NULL,
+            offerNote TEXT NULL,
+            offerStatus VARCHAR(20) NOT NULL DEFAULT 'pending',
+            createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            respondedAt DATETIME NULL,
+            INDEX idx_custom_order_offers_order (customOrderID),
+            INDEX idx_custom_order_offers_status (offerStatus)
+        )
+    ");
+
     $checked = true;
+}
+
+/**
+ * Store a customer-provided reference image for a custom order request.
+ *
+ * @param array $file
+ * @return string
+ * @throws InvalidArgumentException
+ * @throws RuntimeException
+ */
+function storeCustomOrderReferencePhoto(array $file): string
+{
+    if (empty($file) || !isset($file['error']) || (int)$file['error'] !== UPLOAD_ERR_OK) {
+        throw new InvalidArgumentException('Please upload a valid reference photo.');
+    }
+
+    $tmpPath = (string)($file['tmp_name'] ?? '');
+    if ($tmpPath === '' || !is_uploaded_file($tmpPath)) {
+        throw new InvalidArgumentException('Uploaded photo could not be verified.');
+    }
+
+    $mimeType = (string)(mime_content_type($tmpPath) ?: '');
+    $allowed = [
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/webp' => 'webp',
+    ];
+    if (!isset($allowed[$mimeType])) {
+        throw new InvalidArgumentException('Photo must be a JPG, PNG, or WEBP image.');
+    }
+
+    $maxBytes = 4 * 1024 * 1024;
+    if ((int)($file['size'] ?? 0) > $maxBytes) {
+        throw new InvalidArgumentException('Photo must be 4MB or smaller.');
+    }
+
+    $projectRoot = dirname(__DIR__);
+    $relativeDir = 'uploads/assets/images/custom_orders/';
+    $targetDir = $projectRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativeDir);
+    if (!is_dir($targetDir) && !mkdir($targetDir, 0755, true) && !is_dir($targetDir)) {
+        throw new RuntimeException('Could not create the custom order upload folder.');
+    }
+
+    // Use generated names so customer uploads do not collide or expose original filenames.
+    $filename = 'custom_order_' . date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.' . $allowed[$mimeType];
+    $targetPath = $targetDir . DIRECTORY_SEPARATOR . $filename;
+    if (!move_uploaded_file($tmpPath, $targetPath)) {
+        throw new RuntimeException('Could not save the uploaded photo.');
+    }
+
+    return $relativeDir . $filename;
+}
+
+/**
+ * Delete a stored custom-order photo when a request is cleaned up.
+ *
+ * @param string $relativePath
+ * @return void
+ */
+function deleteCustomOrderReferencePhoto(string $relativePath): void
+{
+    $relativePath = trim(str_replace('\\', '/', $relativePath));
+    if ($relativePath === '') {
+        return;
+    }
+
+    $projectRoot = str_replace('\\', '/', dirname(__DIR__));
+    $fullPath = str_replace('\\', '/', $projectRoot . '/' . ltrim($relativePath, '/'));
+    if (strpos($fullPath, $projectRoot . '/') !== 0) {
+        return;
+    }
+
+    if (is_file($fullPath)) {
+        @unlink($fullPath);
+    }
 }
 
 /**
@@ -252,8 +931,10 @@ function ensureCustomOrdersTable($conn) {
  * @param int    $customOrderId
  * @param string $actionType
  * @param string $message
+ * @return void
  */
-function logCustomOrderAction($conn, $customOrderId, $actionType, $message) {
+function logCustomOrderAction($conn, $customOrderId, $actionType, $message)
+{
     $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
     $detailsJSON = json_encode(['message' => $message]);
     $stmt = $conn->prepare("
@@ -261,7 +942,7 @@ function logCustomOrderAction($conn, $customOrderId, $actionType, $message) {
         VALUES (NULL, 'system', ?, 'custom_order', ?, ?, ?)
     ");
     if ($stmt) {
-        $stmt->bind_param("siss", $actionType, $customOrderId, $ip, $detailsJSON);
+        $stmt->bind_param('siss', $actionType, $customOrderId, $ip, $detailsJSON);
         $stmt->execute();
         $stmt->close();
     }
@@ -269,25 +950,28 @@ function logCustomOrderAction($conn, $customOrderId, $actionType, $message) {
 
 /**
  * Notify admin about new custom order.
- * Creates an entry in admin_notifications.
  *
  * @param mysqli $conn
  * @param int    $customOrderId
  * @param string $customerEmail
  * @param string $description
+ * @return void
  */
-function notifyAdminNewCustomOrder($conn, $customOrderId, $customerEmail, $description) {
-    $message = "New custom order request #$customOrderId from $customerEmail: " . substr($description, 0, 100) . "...";
+function notifyAdminNewCustomOrder($conn, $customOrderId, $customerEmail, $description)
+{
+    $message = "New custom order request #$customOrderId from $customerEmail: " . substr($description, 0, 100) . '...';
     createAdminNotification($conn, $message);
 }
 
 /**
- * Create admin notification (reused from stock_alerts module).
+ * Create admin notification.
  *
  * @param mysqli $conn
  * @param string $message
+ * @return void
  */
-function createAdminNotification($conn, $message) {
+function createAdminNotification($conn, $message)
+{
     static $tableChecked = false;
     if (!$tableChecked) {
         $conn->query("
@@ -300,13 +984,14 @@ function createAdminNotification($conn, $message) {
         ");
         $tableChecked = true;
     }
-    $stmt = $conn->prepare("INSERT INTO admin_notifications (message) VALUES (?)");
+
+    $stmt = $conn->prepare('INSERT INTO admin_notifications (message) VALUES (?)');
     if ($stmt) {
-        $stmt->bind_param("s", $message);
+        $stmt->bind_param('s', $message);
         $stmt->execute();
         $stmt->close();
     } else {
-        error_log("Failed to create admin notification: " . $conn->error);
+        error_log('Failed to create admin notification: ' . $conn->error);
     }
 }
 ?>

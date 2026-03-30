@@ -75,7 +75,9 @@ if (isset($_GET['mto_pid']) && isset($_GET['mto_token'])) {
     } else {
         $reason = (string)($grant['reason'] ?? 'invalid_link');
         if ($reason === 'login_required') {
-            $_SESSION['shop_mto_flash'] = 'err:Sign in with the assigned customer email to access this private product.';
+            rememberAuthRedirectTarget((string)($_SERVER['REQUEST_URI'] ?? ''));
+            header('Location: authentication/login.php');
+            exit();
         } elseif ($reason === 'email_mismatch') {
             $_SESSION['shop_mto_flash'] = 'err:This private product belongs to a different customer email.';
         } else {
