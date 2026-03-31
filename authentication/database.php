@@ -2,11 +2,12 @@
 // Enable detailed error reporting
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
-$hostName = "127.0.0.1";   // Use IP instead of localhost
-$dbUser = "root";
-$dbPassword = "";          // No password
-$dbName = "athina_eshop";
-$port = 3306;              // XAMPP MySQL port
+// Localhost (XAMPP) fallback — σε Docker διαβάζει από environment variables
+$hostName = getenv('DB_HOST')     ?: "127.0.0.1";
+$dbUser   = getenv('DB_USER')     ?: "root";
+$dbPassword = getenv('DB_PASSWORD') !== false ? getenv('DB_PASSWORD') : "";
+$dbName   = getenv('DB_NAME')     ?: "athina_eshop";
+$port     = (int)(getenv('DB_PORT') ?: 3306);
 
 $conn = mysqli_connect($hostName, $dbUser, $dbPassword, $dbName, $port);
 
