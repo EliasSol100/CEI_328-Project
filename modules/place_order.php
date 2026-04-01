@@ -312,45 +312,58 @@ function placeOrder(mysqli $conn, array $input): array {
         $fulfillmentMode = 'delivery';
     }
 
-    // 1) Order header
-    $sql = "INSERT INTO `orders` (
+    // --- Order header insert (FIX: handle guest userID = NULL) ---
+
+$hasUserID = ($userID !== null && $userID > 0);
+
+if ($hasUserID) {
+    // --- Order header insert (single query, MySQLi sends NULL for null variables) ---
+$sql = "INSERT INTO `orders` (
     `orderNumber`, `userID`, `isGuestFlag`, `email`, `status`,
     `subtotal`, `discountTotal`, `shippingCost`, `totalAmount`,
     `shippingAddress`, `shippingCity`, `shippingPostalCode`, `shippingCountry`,
     `shippingLabel`, `courierCode`, `shippingPriority`, `fulfillmentMode`
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-    $stmt = $conn->prepare($sql);
-    if (!$stmt) {
-        throw new Exception('Failed to prepare order insert: ' . $conn->error);
-    }
-    $stmt->bind_param(
-        "siissddddssssssss",
-        $orderNumber,
-        $userID,
-        $isGuestFlag,
-        $email,
-        $status,
-        $subtotal,
-        $discountTotal,
-        $shippingCost,
-        $totalAmount,
-        $shippingAddress,
-        $shippingCity,
-        $shippingPostalCode,
-        $shippingCountry,
-        $shippingLabel,
-        $courier,
-        $shippingPriority,
-        $fulfillmentMode
-    );
-    if (!$stmt->execute()) {
-        $error = 'Failed to insert order header: ' . $stmt->error;
-        error_log($error);
-        throw new Exception($error);
-    }
-    $orderID = (int)$stmt->insert_id;
-    $stmt->close();
 
+$stmt = $conn->prepare($sql);
+if (!$stmt) {
+    throw new Exception('Failed to prepare order insert: ' . $conn->error);
+}
+
+// Safety: ensure $userID is either positive integer or NULL
+if (isset($userID) && $userID !== null && $userID === 0) {
+    $userID = null;
+}
+
+$stmt->bind_param(
+    "siissddddssssssss",
+    $orderNumber,
+    $userID,          // can be null – MySQLi will send SQL NULL
+    $isGuestFlag,
+    $email,
+    $status,
+    $subtotal,
+    $discountTotal,
+    $shippingCost,
+    $totalAmount,
+    $shippingAddress,
+    $shippingCity,
+    $shippingPostalCode,
+    $shippingCountry,
+    $shippingLabel,
+    $courier,
+    $shippingPriority,
+    $fulfillmentMode
+);
+
+if (!$stmt->execute()) {
+    $error = 'Failed to insert order header: ' . $stmt->error;
+    error_log($error);
+    throw new Exception($error);
+}
+$orderID = (int)$stmt->insert_id;
+$stmt->close();
+}
     // 2) Order lines (products + variations + gift add-ons)
     $lineStmt = $conn->prepare(
         "INSERT INTO order_items (

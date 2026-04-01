@@ -1,8 +1,8 @@
 <?php
 session_start();
-require_once "authentication/database.php";
-require_once "authentication/get_config.php";
-require_once "include/security.php";
+require_once __DIR__ . '/authentication/database.php';
+require_once __DIR__ . '/authentication/get_config.php';
+require_once __DIR__ . '/include/security.php';
 require_once __DIR__ . '/include/made_to_order_access.php';
 
 $system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
@@ -435,12 +435,15 @@ if ($revRes) {
     }
 }
 
-// Load product_color_photos per product (for carousel)
+// Load product_color_photos per product (with existence check)
 $colorPhotosByProduct = [];
-$cpRes = $conn->query("SELECT productID, photoPath FROM product_color_photos ORDER BY productID, sortOrder ASC");
-if ($cpRes) {
-    while ($row = $cpRes->fetch_assoc()) {
-        $colorPhotosByProduct[(int)$row['productID']][] = $row['photoPath'];
+$tableCheck = $conn->query("SHOW TABLES LIKE 'product_color_photos'");
+if ($tableCheck && $tableCheck->num_rows > 0) {
+    $cpRes = $conn->query("SELECT productID, photoPath FROM product_color_photos ORDER BY productID, sortOrder ASC");
+    if ($cpRes) {
+        while ($row = $cpRes->fetch_assoc()) {
+            $colorPhotosByProduct[(int)$row['productID']][] = $row['photoPath'];
+        }
     }
 }
 ?>

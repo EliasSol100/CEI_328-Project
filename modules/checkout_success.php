@@ -152,7 +152,7 @@ function formatCourier($courier) {
 
 // Check if order is eligible for reviews (using shared function)
 $reviewEligible = isOrderReviewEligible($conn, $orderId);
-$reviewUrl = $reviewEligible ? $project . '/submit_product_review.php?order_id=' . $orderId : '';
+
 
 // Determine courier display (try both courier and courierCode)
 $courierDisplay = '';
@@ -311,15 +311,14 @@ if (!empty($order['courier'])) {
             </div>
 
             <div class="button-group">
-                <a href="<?= $project ?>/shop.php" class="btn btn-primary"><i class="fas fa-shopping-bag"></i> Continue Shopping</a>
-                <a href="<?= $project ?>/modules/receipt.php?order_id=<?= $orderId ?>" class="btn btn-success" target="_blank"><i class="fas fa-file-invoice"></i> Download Receipt</a>
-                <?php if (!empty($order['userID'])): ?>
-                <a href="<?= $project ?>/profile/account.php?tab=orders" class="btn btn-secondary"><i class="fas fa-box"></i> View Orders</a>
-                <?php endif; ?>
-                <?php if ($reviewUrl): ?>
-                <a href="<?= htmlspecialchars($reviewUrl) ?>" class="btn btn-success"><i class="fas fa-star"></i> Write a Review</a>
-                <?php else: ?>
-                <span class="btn btn-secondary" style="opacity:.65;cursor:not-allowed;" title="Reviews become available after delivery"><i class="fas fa-star"></i> Review (Locked)</span>
+    <a href="<?= $project ?>/shop.php" class="btn btn-primary"><i class="fas fa-shopping-bag"></i> Continue Shopping</a>
+    <a href="<?= $project ?>/modules/receipt.php?order_id=<?= $orderId ?>" class="btn btn-success" target="_blank"><i class="fas fa-file-invoice"></i> Download Receipt</a>
+    <?php if (!empty($order['userID'])): ?>
+    <a href="<?= $project ?>/profile/account.php?tab=orders" class="btn btn-secondary"><i class="fas fa-box"></i> View Orders</a>
+    <?php endif; ?>
+    <a href="<?= $project ?>/index.php" class="btn btn-outline"><i class="fas fa-home"></i> Home</a>
+</div>
+                
                 <?php endif; ?>
                 <a href="<?= $project ?>/index.php" class="btn btn-outline"><i class="fas fa-home"></i> Home</a>
             </div>

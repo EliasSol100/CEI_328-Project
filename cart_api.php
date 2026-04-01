@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 session_start();
 require_once "authentication/database.php";
+require_once "include/security.php";
+require_once __DIR__ . '/include/made_to_order_access.php';
 header('Content-Type: application/json; charset=utf-8');
 
 /* =========================
@@ -50,9 +52,12 @@ try {
         exit;
     }
 
+    app_require_csrf(true, 'Invalid CSRF token.');
+
     if (!isset($conn) || !($conn instanceof mysqli)) {
         throw new RuntimeException('Database connection ($conn) not found. Check authentication/database.php');
     }
+    ensureMadeToOrderProductSchema($conn);
 
     $payload = readRequestPayload();
 
@@ -113,6 +118,9 @@ try {
 
     if ($cartStatus !== 'active' && $cartStatus !== 'made_to_order' && $cartStatus !== 'low_stock') {
         badRequest('Product is not available for cart.');
+    }
+    if ($cartStatus === 'made_to_order' && !isMadeToOrderProductAccessible($conn, $productId)) {
+        badRequest('This made-to-order product is private to another customer.');
     }
 
     $variation = null;

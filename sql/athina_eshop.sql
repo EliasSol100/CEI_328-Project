@@ -85,6 +85,28 @@ INSERT INTO `categories` (`categoryID`, `categoryName`, `slug`) VALUES
 -- Table structure for table `category_colors`
 --
 
+--
+-- Table structure for table `bot_fingerprints`
+--
+
+CREATE TABLE `bot_fingerprints` (
+  `id`            int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `visitor_id`    varchar(64) NOT NULL,
+  `attempt_count` int(10) UNSIGNED NOT NULL DEFAULT 1,
+  `is_blocked`    tinyint(1) NOT NULL DEFAULT 0,
+  `first_seen`    datetime NOT NULL DEFAULT current_timestamp(),
+  `last_attempt`  datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_visitor_id`   (`visitor_id`),
+  KEY `idx_last_attempt` (`last_attempt`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `category_colors`
+--
+
 CREATE TABLE `category_colors` (
   `categoryID` int(11) NOT NULL,
   `colorID` int(11) NOT NULL,
@@ -94,28 +116,7 @@ CREATE TABLE `category_colors` (
 --
 -- Dumping data for table `category_colors`
 --
-
-INSERT INTO `category_colors` (`categoryID`, `colorID`, `isEnabled`) VALUES
-(1, 1, 1),
-(1, 2, 1),
-(1, 5, 1),
-(1, 6, 1),
-(2, 1, 1),
-(2, 2, 1),
-(2, 5, 1),
-(2, 6, 1),
-(3, 1, 1),
-(3, 2, 1),
-(3, 5, 1),
-(3, 6, 1),
-(4, 1, 1),
-(4, 2, 1),
-(4, 5, 1),
-(4, 6, 1),
-(5, 1, 1),
-(5, 2, 1),
-(5, 5, 1),
-(5, 6, 1);
+-- (populated via admin panel)
 
 -- --------------------------------------------------------
 
@@ -128,73 +129,15 @@ CREATE TABLE `colors` (
   `colorName` varchar(100) NOT NULL,
   `globalInventoryAvailable` int(11) NOT NULL DEFAULT 0,
   `isActive` tinyint(1) NOT NULL DEFAULT 1,
-  `updatedAt` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
+  `updatedAt` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`colorID`),
+  UNIQUE KEY `uq_colors_colorName` (`colorName`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Dumping data for table `colors`
 --
-
-INSERT INTO `colors` (`colorID`, `colorName`, `globalInventoryAvailable`, `isActive`) VALUES
--- Whites / Creams / Beiges
-(55,  'White',           50, 1),
-(450, 'Off White',       50, 1),
-(62,  'Cream',           50, 1),
-(1,   'Vanilla',         50, 1),
-(310, 'Warm Beige',      50, 1),
--- Peach / Nude / Tan
-(382, 'Peach Blush',     50, 1),
-(599, 'Camel',           50, 1),
-(256, 'Sand',            50, 1),
-(368, 'Tawny Brown',     50, 1),
-(354, 'Copper Rose',     50, 1),
--- Pinks / Mauves
-(161, 'Salmon',          50, 1),
-(142, 'Dusty Mauve',     50, 1),
-(184, 'Baby Pink',       50, 1),
-(185, 'Light Rose',      50, 1),
-(191, 'Candy Pink',      50, 1),
-(157, 'Hot Pink',        50, 1),
--- Browns
-(534, 'Chocolate Brown', 50, 1),
-(572, 'Dark Chocolate',  50, 1),
--- Purples / Lilacs
-(851, 'Purple',          50, 1),
-(27,  'Soft Orchid',     50, 1),
-(682, 'Soft Lilac',      50, 1),
--- Blues
-(224, 'Ice Blue',        50, 1),
-(40,  'Baby Blue',       50, 1),
-(183, 'Powder Blue',     50, 1),
-(418, 'Slate Blue',      50, 1),
-(141, 'Royal Blue',      50, 1),
-(58,  'Navy',            50, 1),
-(237, 'Cornflower Blue', 50, 1),
--- Greys
-(344, 'Silver Grey',     50, 1),
-(119, 'Medium Grey',     50, 1),
--- Greens / Teals / Mints
-(19,  'Mint',            50, 1),
-(463, 'Sage Green',      50, 1),
-(287, 'Teal',            50, 1),
-(138, 'Olive Green',     50, 1),
-(485, 'Apple Green',     50, 1),
-(847, 'Deep Teal',       50, 1),
-(954, 'Kelly Green',     50, 1),
--- Yellows
-(250, 'Lemon Yellow',    50, 1),
-(216, 'Golden Yellow',   50, 1),
-(281, 'Mustard',         50, 1),
--- Oranges
-(336, 'Orange',          50, 1),
-(408, 'Burnt Orange',    50, 1),
-(506, 'Warm Tan',        50, 1),
--- Reds
-(56,  'Bright Red',      50, 1),
-(106, 'Crimson',         50, 1),
-(390, 'Burgundy',        50, 1),
--- Black
-(60,  'Black',           50, 1);
+-- (populated via admin panel)
 
 -- --------------------------------------------------------
 
@@ -211,9 +154,7 @@ CREATE TABLE `yarn_types` (
 --
 -- Dumping data for table `yarn_types`
 --
-
-INSERT INTO `yarn_types` (`typeName`) VALUES
-  ('Baby Best');
+-- (populated via admin panel)
 
 -- --------------------------------------------------------
 
@@ -222,9 +163,9 @@ INSERT INTO `yarn_types` (`typeName`) VALUES
 --
 
 CREATE TABLE `color_yarn_types` (
-  `colorID` int(11)  NOT NULL,
-  `typeID`  int(11)  NOT NULL,
-  `photo`   longblob DEFAULT NULL,
+  `colorID`   int(11)      NOT NULL,
+  `typeID`    int(11)      NOT NULL,
+  `photoPath` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`colorID`, `typeID`),
   FOREIGN KEY (`colorID`) REFERENCES `colors` (`colorID`) ON DELETE CASCADE,
   FOREIGN KEY (`typeID`)  REFERENCES `yarn_types` (`typeID`) ON DELETE CASCADE
@@ -233,19 +174,7 @@ CREATE TABLE `color_yarn_types` (
 --
 -- Dumping data for table `color_yarn_types`
 --
-
--- typeID 1 = Baby Best
-INSERT INTO `color_yarn_types` (`colorID`, `typeID`) VALUES
-(55,  1), (450, 1), (62,  1), (1,   1), (310, 1),
-(382, 1), (599, 1), (256, 1), (368, 1), (354, 1),
-(161, 1), (142, 1), (184, 1), (185, 1), (191, 1),
-(157, 1), (534, 1), (572, 1), (851, 1), (27,  1),
-(682, 1), (224, 1), (40,  1), (183, 1), (418, 1),
-(141, 1), (58,  1), (237, 1), (344, 1), (119, 1),
-(19,  1), (463, 1), (287, 1), (138, 1), (485, 1),
-(847, 1), (954, 1), (250, 1), (216, 1), (281, 1),
-(336, 1), (408, 1), (506, 1), (56,  1), (106, 1),
-(390, 1), (60,  1);
+-- (populated via admin panel)
 
 -- --------------------------------------------------------
 
@@ -489,7 +418,8 @@ CREATE TABLE `products` (
   `isSellingFast` tinyint(1) NOT NULL DEFAULT 0,
   `hasVariants` tinyint(1) NOT NULL DEFAULT 0,
   `metaDescription` varchar(255) DEFAULT NULL,
-  `category` varchar(100) DEFAULT NULL
+  `category` varchar(100) DEFAULT NULL,
+  PRIMARY KEY (`productID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -502,6 +432,30 @@ INSERT INTO `products` (`productID`, `sku`, `nameGR`, `nameEN`, `descriptionGR`,
 (3, 'SKU-003', 'Τσάντα Tote', 'Tote Bag', NULL, NULL, 3, 25, 10, 'active', 1, NULL, 'Bags'),
 (4, 'SKU-004', 'Μπουκέτο Λουλουδιών', 'Flower Bouquet', NULL, NULL, 12, 42, 15, 'active', 1, NULL, 'Decor'),
 (5, 'SKU-005', 'Κούκλα Κατά Παραγγελία', 'Custom Doll', NULL, NULL, 0, 55, 18, 'made_to_order', 1, NULL, 'Dolls');
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `product_color_photos`
+--
+
+CREATE TABLE `product_color_photos` (
+  `id`        int(11)      NOT NULL AUTO_INCREMENT,
+  `productID` int(11)      NOT NULL,
+  `colorID`   int(11)      NOT NULL,
+  `photoPath` varchar(255) NOT NULL,
+  `sortOrder` int(11)      NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  KEY `idx_pcp_product` (`productID`),
+  KEY `idx_pcp_color`   (`colorID`),
+  FOREIGN KEY (`productID`) REFERENCES `products` (`productID`) ON DELETE CASCADE,
+  FOREIGN KEY (`colorID`)   REFERENCES `colors`   (`colorID`)   ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `product_color_photos`
+--
+-- (populated via admin panel)
 
 -- --------------------------------------------------------
 
@@ -737,13 +691,6 @@ ALTER TABLE `category_colors`
   ADD KEY `fk_cc_color` (`colorID`);
 
 --
--- Indexes for table `colors`
---
-ALTER TABLE `colors`
-  ADD PRIMARY KEY (`colorID`),
-  ADD UNIQUE KEY `uq_colors_colorName` (`colorName`);
-
---
 -- Indexes for table `content_pages`
 --
 ALTER TABLE `content_pages`
@@ -812,7 +759,6 @@ ALTER TABLE `photos`
 -- Indexes for table `products`
 --
 ALTER TABLE `products`
-  ADD PRIMARY KEY (`productID`),
   ADD UNIQUE KEY `uq_products_sku` (`sku`),
   ADD KEY `idx_products_cartStatus` (`cartStatus`);
 
@@ -904,12 +850,6 @@ ALTER TABLE `audit_logs`
 --
 ALTER TABLE `categories`
   MODIFY `categoryID` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
-
---
--- AUTO_INCREMENT for table `colors`
---
-ALTER TABLE `colors`
-  MODIFY `colorID` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=7;
 
 --
 -- AUTO_INCREMENT for table `content_pages`

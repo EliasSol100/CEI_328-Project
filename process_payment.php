@@ -131,7 +131,7 @@ function generateReceiptPDF($conn, $orderId, $siteUrl) {
     global $dompdfAvailable;
     if (!$dompdfAvailable) return null;
 
-    // Fetch order details (including user data for billing)
+    // Fetch order details (including user data for billing – we'll only use shipping)
     $order = $conn->query("
         SELECT 
             o.orderNumber, o.createdAt,
@@ -140,18 +140,14 @@ function generateReceiptPDF($conn, $orderId, $siteUrl) {
             o.shipping_address, o.shipping_city, o.shipping_postal_code, o.shipping_country,
             o.email, o.userID, o.status, o.transaction_id,
             u.full_name AS customerName,
-            u.phone AS customerPhone,
-            u.address AS billing_address,
-            u.city AS billing_city,
-            u.postcode AS billing_postal_code,
-            u.country AS billing_country
+            u.phone AS customerPhone
         FROM orders o
         LEFT JOIN users u ON u.userID = o.userID
         WHERE o.orderID = $orderId
     ")->fetch_assoc();
     if (!$order) return null;
 
-    // Fetch order items
+    // Fetch order items (same as before)
     $items = $conn->query("
         SELECT 
             oi.quantity, oi.unitPrice,
@@ -162,7 +158,7 @@ function generateReceiptPDF($conn, $orderId, $siteUrl) {
         WHERE oi.orderID = $orderId
     ");
 
-    // Build display data
+    // Build display data (same as before)
     $orderNumber = $order['orderNumber'] ?? 'ORD-' . $orderId;
     $orderDate = date('F j, Y', strtotime($order['createdAt']));
     $orderTime = date('g:i a', strtotime($order['createdAt']));
@@ -180,10 +176,9 @@ function generateReceiptPDF($conn, $orderId, $siteUrl) {
     $orderStatus = ucfirst($order['status']);
 
     // Clean country names
-    $billingCountry = cleanCountryName($order['billing_country'] ?? '');
     $shippingCountry = cleanCountryName($order['shipping_country'] ?? '');
 
-    // Addresses
+    // Shipping address only
     $shippingParts = array_filter([
         $order['shipping_address'],
         $order['shipping_city'],
@@ -192,15 +187,7 @@ function generateReceiptPDF($conn, $orderId, $siteUrl) {
     ]);
     $shippingAddress = $shippingParts ? implode(', ', $shippingParts) : 'Not provided';
 
-    $billingParts = array_filter([
-        $order['billing_address'] ?: $order['shipping_address'],
-        $order['billing_city'] ?: $order['shipping_city'],
-        $order['billing_postal_code'] ?: $order['shipping_postal_code'],
-        $billingCountry
-    ]);
-    $billingAddress = $billingParts ? implode(', ', $billingParts) : 'Not provided';
-
-    // Items HTML – no escaped closing tags
+    // Items HTML (unchanged)
     $itemsHtml = '';
     while ($item = $items->fetch_assoc()) {
         $name = htmlspecialchars($item['nameEN'] ?: $item['nameGR'] ?: 'Product');
@@ -221,10 +208,10 @@ function generateReceiptPDF($conn, $orderId, $siteUrl) {
             <td style="padding:8px; border-bottom:1px solid #ddd; text-align:center;">' . $qty . '</td>
             <td style="padding:8px; border-bottom:1px solid #ddd; text-align:right;">€' . $price . '</td>
             <td style="padding:8px; border-bottom:1px solid #ddd; text-align:right;">€' . $lineTotal . '</td>
-          </tr>';
+        </tr>';
     }
 
-    // Build HTML – clean monochrome layout
+    // Build HTML – only shipping address, with logo
     $html = '<!DOCTYPE html>
 <html>
 <head>
@@ -252,6 +239,10 @@ function generateReceiptPDF($conn, $orderId, $siteUrl) {
             margin-bottom: 20px;
             padding-bottom: 10px;
         }
+        .header img {
+            max-height: 60px;
+            margin-bottom: 10px;
+        }
         .header h1 {
             margin: 0;
             font-size: 24px;
@@ -264,13 +255,9 @@ function generateReceiptPDF($conn, $orderId, $siteUrl) {
             border-left: 4px solid #ccc;
         }
         .address-grid {
-            display: flex;
-            gap: 20px;
             margin-bottom: 20px;
-            flex-wrap: wrap;
         }
         .address-box {
-            flex: 1;
             background: #fafafa;
             padding: 12px;
             border: 1px solid #eee;
@@ -323,6 +310,7 @@ function generateReceiptPDF($conn, $orderId, $siteUrl) {
 <body>
 <div class="container">
     <div class="header">
+        <img src="' . $siteUrl . '/assets/images/logo.png" alt="Creations by Athina">
         <h1>Creations by Athina</h1>
         <p>Order Receipt</p>
     </div>
@@ -338,14 +326,10 @@ function generateReceiptPDF($conn, $orderId, $siteUrl) {
 
     <div class="address-grid">
         <div class="address-box">
-            <h4>Billing Address</h4>
-            <p>' . nl2br(htmlspecialchars($billingAddress)) . '<br>
+            <h4>Shipping Address</h4>
+            <p>' . nl2br(htmlspecialchars($shippingAddress)) . '<br>
             Phone: ' . htmlspecialchars($customerPhone) . '<br>
             Email: ' . htmlspecialchars($customerEmail) . '</p>
-        </div>
-        <div class="address-box">
-            <h4>Shipping Address</h4>
-            <p>' . nl2br(htmlspecialchars($shippingAddress)) . '</p>
         </div>
     </div>
 
@@ -377,7 +361,7 @@ function generateReceiptPDF($conn, $orderId, $siteUrl) {
 </body>
 </html>';
 
-    // Fix asset paths if needed
+    // Fix asset paths (if needed)
     $html = str_replace('href="../assets/', 'href="' . $siteUrl . '/assets/', $html);
     $html = str_replace('src="../assets/', 'src="' . $siteUrl . '/assets/', $html);
 
@@ -391,7 +375,6 @@ function generateReceiptPDF($conn, $orderId, $siteUrl) {
     $dompdf->render();
     return $dompdf->output();
 }
-
 /**
  * Send customer order confirmation email – original purple/pink style
  */
@@ -543,13 +526,7 @@ function sendCustomerEmail($conn, $orderId, $customerEmail, $customerName, $pdfC
                 <p>' . nl2br(htmlspecialchars($billingAddress)) . '<br>
                 Phone: ' . htmlspecialchars($customerPhone) . '<br>
                 Email: ' . htmlspecialchars($customerEmailAddr) . '</p>
-            </div>
-            <div class="address-box">
-                <h4>Shipping Address</h4>
-                <p>' . nl2br(htmlspecialchars($shippingAddress)) . '</p>
-            </div>
-        </div>
-
+            
         <h3 style="color:#6a1b9a;">Order Items</h3>
         <table class="order-summary">
             <thead>

@@ -5,7 +5,6 @@ session_start();
 error_log("PayPal page: GET=" . print_r($_GET, true));
 error_log("PayPal page: SESSION=" . print_r($_SESSION, true));
 
-// Correct paths for root files
 require_once __DIR__ . '/authentication/database.php';
 require_once __DIR__ . '/authentication/get_config.php';
 require_once __DIR__ . '/vendor/autoload.php';
@@ -37,31 +36,10 @@ if (!$orderId || $amount <= 0) {
 $stmt = $conn->prepare("SELECT orderID FROM orders WHERE orderID = ?");
 $stmt->bind_param("i", $orderId);
 $stmt->execute();
-if ($stmt->get_result()->num_rows === 0) {
+$result = $stmt->get_result();
+if ($result->num_rows === 0) {
     error_log("Order $orderId not found in database.");
     die('Order not found.');
-}
-$stmt->close();
-
-// Cancel any existing PaymentIntent for this order
-$stmt = $conn->prepare("SELECT transaction_id FROM orders WHERE orderID = ? AND payment_status != 'paid'");
-$stmt->bind_param("i", $orderId);
-$stmt->execute();
-$res = $stmt->get_result();
-if ($row = $res->fetch_assoc()) {
-    if (!empty($row['transaction_id']) && strpos($row['transaction_id'], 'pi_') === 0) {
-        $existingIntentId = $row['transaction_id'];
-        try {
-            \Stripe\Stripe::setApiKey(STRIPE_SECRET_KEY);
-            $intent = \Stripe\PaymentIntent::retrieve($existingIntentId);
-            if ($intent->status !== 'succeeded' && $intent->status !== 'canceled') {
-                $intent->cancel();
-                error_log("Cancelled existing PaymentIntent $existingIntentId for order $orderId");
-            }
-        } catch (Exception $e) {
-            error_log("Could not cancel PaymentIntent $existingIntentId: " . $e->getMessage());
-        }
-    }
 }
 $stmt->close();
 
@@ -92,6 +70,7 @@ if ($row = $res->fetch_assoc()) {
         'shipping_country'   => $row['shipping_country'] ?? '',
         'courier'            => $row['courier'] ?? '',
         'shipping_speed'     => $row['shipping_speed'] ?? 'standard',
+        'email'              => $row['email'] ?? ''
     ];
 } else {
     die('Order details could not be loaded.');
@@ -129,57 +108,78 @@ $stmt->close();
 $stockError = false;
 $outOfStockItems = [];
 
-foreach ($items as $item) {
-    $productId = $item['productID'];
-    $quantity = $item['quantity'];
-    $variationId = $item['variationID'] ?? null;
+// Start transaction for stock check
+$conn->begin_transaction();
 
-    $available = 0;
-    $productName = $item['name'];
+try {
+    foreach ($items as $item) {
+        $productId = $item['productID'];
+        $quantity = $item['quantity'];
+        $variationId = $item['variationID'] ?? null;
 
-    if ($variationId && $variationId > 0) {
-        $stmt = $conn->prepare("
-            SELECT stock, p.nameEN
-            FROM product_variations pv
-            LEFT JOIN products p ON p.productID = pv.productID
-            WHERE pv.variationID = ?
-        ");
-        $stmt->bind_param("i", $variationId);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $row = $result->fetch_assoc();
-        if ($row) {
-            $available = (int)($row['stock'] ?? 0);
+        $available = 0;
+        $productName = $item['name'];
+
+        if ($variationId && $variationId > 0) {
+            // Check variant stock with row lock
+            $stmt = $conn->prepare("
+                SELECT stock, p.nameEN, pv.productID
+                FROM product_variations pv
+                LEFT JOIN products p ON p.productID = pv.productID
+                WHERE pv.variationID = ? FOR UPDATE
+            ");
+            $stmt->bind_param("i", $variationId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $row = $result->fetch_assoc();
+            if ($row) {
+                $available = (int)($row['stock'] ?? 0);
+                $productName = $row['nameEN'] ?? $item['name'];
+            }
+            $stmt->close();
+
+            if ($available < $quantity) {
+                $stockError = true;
+                $outOfStockItems[] = [
+                    'name' => $productName,
+                    'available' => $available,
+                    'requested' => $quantity
+                ];
+            }
+        } else {
+            // Check product inventory with row lock
+            $stmt = $conn->prepare("SELECT inventory, nameEN FROM products WHERE productID = ? FOR UPDATE");
+            $stmt->bind_param("i", $productId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $row = $result->fetch_assoc();
+            $available = (int)($row['inventory'] ?? 0);
             $productName = $row['nameEN'] ?? $item['name'];
-        }
-        $stmt->close();
+            $stmt->close();
 
-        if ($available < $quantity) {
-            $stockError = true;
-            $outOfStockItems[] = [
-                'name' => $productName,
-                'available' => $available,
-                'requested' => $quantity
-            ];
-        }
-    } else {
-        $stmt = $conn->prepare("SELECT inventory FROM products WHERE productID = ?");
-        $stmt->bind_param("i", $productId);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $row = $result->fetch_assoc();
-        $available = (int)($row['inventory'] ?? 0);
-        $stmt->close();
-
-        if ($available < $quantity) {
-            $stockError = true;
-            $outOfStockItems[] = [
-                'name' => $productName,
-                'available' => $available,
-                'requested' => $quantity
-            ];
+            if ($available < $quantity) {
+                $stockError = true;
+                $outOfStockItems[] = [
+                    'name' => $productName,
+                    'available' => $available,
+                    'requested' => $quantity
+                ];
+            }
         }
     }
+
+    // If no stock errors, commit transaction
+    if (!$stockError) {
+        $conn->commit();
+    } else {
+        $conn->rollback();
+    }
+} catch (Exception $e) {
+    $conn->rollback();
+    error_log("Stock check error: " . $e->getMessage());
+    $_SESSION['checkout_error'] = "System error checking stock. Please try again.";
+    header('Location: ' . $project . '/checkout.php');
+    exit;
 }
 
 if ($stockError) {
@@ -191,11 +191,31 @@ if ($stockError) {
     header('Location: ' . $project . '/checkout.php');
     exit;
 }
-// ------------------------------------------
 
 $isLoggedIn = isset($_SESSION['user']);
 
-// Stripe Payment Intent for PayPal
+// Cancel any existing PaymentIntent for this order (if any)
+$stmt = $conn->prepare("SELECT transaction_id FROM orders WHERE orderID = ?");
+$stmt->bind_param("i", $orderId);
+$stmt->execute();
+$res = $stmt->get_result();
+if ($row = $res->fetch_assoc()) {
+    if (!empty($row['transaction_id']) && strpos($row['transaction_id'], 'pi_') === 0) {
+        try {
+            \Stripe\Stripe::setApiKey(STRIPE_SECRET_KEY);
+            $intent = \Stripe\PaymentIntent::retrieve($row['transaction_id']);
+            if ($intent->status !== 'succeeded' && $intent->status !== 'canceled') {
+                $intent->cancel();
+                error_log("Cancelled existing PaymentIntent {$row['transaction_id']} for order $orderId");
+            }
+        } catch (Exception $e) {
+            error_log("Could not cancel PaymentIntent {$row['transaction_id']}: " . $e->getMessage());
+        }
+    }
+}
+$stmt->close();
+
+// Create Stripe Payment Intent for PayPal
 \Stripe\Stripe::setApiKey(STRIPE_SECRET_KEY);
 $stripeError = null;
 $clientSecret = null;
@@ -205,7 +225,11 @@ try {
         'amount'               => round($amount * 100),
         'currency'             => 'eur',
         'payment_method_types' => ['paypal'],
-        'metadata'             => ['order_id' => $orderId],
+        'metadata'             => [
+            'order_id' => $orderId,
+            'order_number' => $orderData['orderNumber'] ?? ''
+        ],
+        'receipt_email'        => $orderData['email'] ?? null,
     ]);
     $clientSecret = $intent->client_secret;
 
@@ -233,13 +257,12 @@ include __DIR__ . '/include/header.php';
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://js.stripe.com/v3/"></script>
     <style>
-        /* Your existing styles – keep unchanged */
+        /* Your existing styles (unchanged) */
         .checkout-container { max-width: 1160px; margin: 36px auto 72px; padding: 0 20px; }
         .checkout-title { margin: 0 0 18px; color: #2d184d; font-size: clamp(1.9rem,2.7vw,2.4rem); line-height: 1.1; letter-spacing: 0.2px; }
         .checkout-grid { display: grid; grid-template-columns: minmax(0,1fr) 360px; gap: 28px; align-items: start; }
         .checkout-form { border: 1px solid #e6dff2; border-radius: 18px; padding: 24px; background: #fff; box-shadow: 0 12px 28px rgba(63,32,102,0.08); }
         .checkout-form fieldset { border: 1px solid #e5dcf2; border-radius: 14px; padding: 20px; margin-bottom: 18px; background: #fff; }
-        .checkout-form fieldset:last-child { margin-bottom: 0; }
         .checkout-form legend { color: #4e2f74; font-weight: 700; font-size: 14px; padding: 0 10px; letter-spacing: 0.2px; }
         .btn-primary {
             width: 100%; border: none; border-radius: 11px; padding: 13px 16px;
@@ -248,6 +271,7 @@ include __DIR__ . '/include/header.php';
             transition: transform 0.15s ease, box-shadow 0.2s ease;
         }
         .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(108,58,176,0.28); }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
         .order-summary {
             position: sticky; top: 90px; border: 1px solid #e5dbf2; border-radius: 16px; padding: 22px;
             background: linear-gradient(180deg, #fbf9ff 0%, #f5f1fb 100%);
@@ -286,6 +310,19 @@ include __DIR__ . '/include/header.php';
             margin-top: 20px;
         }
         .error { display: block; margin-top: 7px; color: #b42318; font-size: 13px; font-weight: 600; }
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 0.6s linear infinite;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body class="site-page">
@@ -320,7 +357,7 @@ include __DIR__ . '/include/header.php';
                     <legend><i class="fab fa-paypal" style="margin-right: 6px;"></i> PayPal Payment</legend>
 
                     <?php if (!empty($stripeError)): ?>
-                        <div class="error">Stripe configuration error: <?= htmlspecialchars($stripeError) ?></div>
+                        <div class="error">Payment configuration error: <?= htmlspecialchars($stripeError) ?></div>
                         <p>Please contact support or try another payment method.</p>
                     <?php elseif (!empty($clientSecret)): ?>
                         <p style="margin-bottom: 20px; color: #6e5e84;">
@@ -393,38 +430,49 @@ include __DIR__ . '/include/header.php';
     </div>
 </div>
 
-    <?php if (!empty($clientSecret)): ?>
+<?php if (!empty($clientSecret)): ?>
 <script src="https://js.stripe.com/v3/"></script>
 <script>
     const stripe = Stripe('<?= STRIPE_PUBLISHABLE_KEY ?>');
     const clientSecret = <?= json_encode($clientSecret) ?>;
     const button = document.getElementById('paypal-button');
     const errorDiv = document.getElementById('paypal-error');
+    let isProcessing = false;
 
-    button.addEventListener('click', async () => {
-        button.disabled = true;
-        errorDiv.textContent = '';
+    if (button) {
+        button.addEventListener('click', async () => {
+            if (isProcessing) return;
+            isProcessing = true;
+            
+            button.disabled = true;
+            const originalText = button.innerHTML;
+            button.innerHTML = '<span class="loading-spinner"></span> Redirecting to PayPal...';
+            errorDiv.textContent = '';
 
-        let baseUrl = window.location.origin;
-        let projectPath = '<?= addslashes($project) ?>';
-        let returnUrl = baseUrl + projectPath + '/process_payment.php?order_id=<?= (int)$orderId ?>';
+            try {
+                const { error } = await stripe.confirmPayment({
+                    clientSecret: clientSecret,
+                    confirmParams: {
+                        return_url: window.location.origin + '<?= addslashes($project) ?>/process_payment.php?order_id=<?= (int)$orderId ?>',
+                    },
+                });
 
-        try {
-            const { error } = await stripe.confirmPayment({
-                clientSecret: clientSecret,
-                payment_method: { paypal: {} },
-                confirmParams: { return_url: returnUrl },
-            });
-
-            if (error) {
-                errorDiv.textContent = 'Stripe error: ' + error.message;
+                if (error) {
+                    errorDiv.textContent = 'Payment error: ' + error.message;
+                    button.disabled = false;
+                    button.innerHTML = originalText;
+                    isProcessing = false;
+                }
+                // If successful, Stripe will redirect to return_url
+            } catch (err) {
+                errorDiv.textContent = 'Unexpected error. Please try again.';
                 button.disabled = false;
+                button.innerHTML = originalText;
+                isProcessing = false;
+                console.error('PayPal payment error:', err);
             }
-        } catch (err) {
-            errorDiv.textContent = 'Unexpected error. Please try again.';
-            button.disabled = false;
-        }
-    });
+        });
+    }
 </script>
 <?php endif; ?>
 <?php include __DIR__ . '/include/footer.php'; ?>

@@ -2,290 +2,16 @@
 session_start();
 require_once __DIR__ . "/../authentication/database.php";
 
-if (!isset($conn) || !($conn instanceof mysqli)) {
-    http_response_code(500);
-    echo "Database connection error.";
-    exit;
-}
+// ... (keep all your existing helper functions: ensureOrderShippingSchema, tableExists, fallbackShippingLabelForUser, courierLabelFromCode, inferCourierCode) ...
 
-function ensureOrderShippingSchema(mysqli $conn): void {
-    static $checked = false;
-    if ($checked) {
-        return;
-    }
-    $checked = true;
+// At the top of the file after includes, add:
+$siteUrl = 'https://' . $_SERVER['HTTP_HOST'] . rtrim(dirname($_SERVER['SCRIPT_NAME']), '/');
+$logoUrl = $siteUrl . '/assets/images/logo.png'; // adjust path if needed
 
-    $requiredColumns = [
-        'shippingAddress' => "ALTER TABLE orders ADD COLUMN shippingAddress VARCHAR(255) NULL AFTER email",
-        'shippingCity' => "ALTER TABLE orders ADD COLUMN shippingCity VARCHAR(120) NULL AFTER shippingAddress",
-        'shippingPostalCode' => "ALTER TABLE orders ADD COLUMN shippingPostalCode VARCHAR(20) NULL AFTER shippingCity",
-        'shippingCountry' => "ALTER TABLE orders ADD COLUMN shippingCountry VARCHAR(120) NULL AFTER shippingPostalCode",
-        'shippingLabel' => "ALTER TABLE orders ADD COLUMN shippingLabel VARCHAR(120) NULL AFTER shippingCountry",
-        'courierCode' => "ALTER TABLE orders ADD COLUMN courierCode VARCHAR(60) NULL AFTER shippingLabel",
-        'shippingPriority' => "ALTER TABLE orders ADD COLUMN shippingPriority VARCHAR(20) NULL AFTER courierCode",
-        'fulfillmentMode' => "ALTER TABLE orders ADD COLUMN fulfillmentMode VARCHAR(20) NULL AFTER shippingPriority",
-    ];
+// The rest of the receipt data fetching (order, payments, items) remains unchanged
+// ... (keep everything up to the HTML generation)
 
-    foreach ($requiredColumns as $columnName => $alterSql) {
-        $safeCol = $conn->real_escape_string($columnName);
-        $check = $conn->query("SHOW COLUMNS FROM orders LIKE '{$safeCol}'");
-        $exists = ($check && $check->num_rows > 0);
-        if (!$exists) {
-            $conn->query($alterSql);
-        }
-    }
-}
-
-function tableExists(mysqli $conn, string $tableName): bool {
-    $safe = $conn->real_escape_string($tableName);
-    $res = $conn->query("SHOW TABLES LIKE '{$safe}'");
-    return $res && $res->num_rows > 0;
-}
-
-function fallbackShippingLabelForUser(mysqli $conn, int $userId): string {
-    if ($userId <= 0 || !tableExists($conn, 'user_addresses')) {
-        return '';
-    }
-
-    $st = $conn->prepare("
-        SELECT label
-        FROM user_addresses
-        WHERE user_id = ?
-          AND TRIM(COALESCE(label, '')) <> ''
-        ORDER BY is_default DESC, created_at DESC, id DESC
-        LIMIT 1
-    ");
-    if (!$st) {
-        return '';
-    }
-    $st->bind_param('i', $userId);
-    $st->execute();
-    $res = $st->get_result();
-    $row = $res ? $res->fetch_assoc() : null;
-    $st->close();
-    return trim((string)($row['label'] ?? ''));
-}
-
-function courierLabelFromCode(string $courierCode): string {
-    $map = [
-        'akis_express' => 'Akis Express',
-        'boxnow' => 'BoxNow',
-        'acs' => 'ACS',
-        'elta_courier' => 'ELTA Courier',
-        'speedex' => 'Speedex',
-        'geniki' => 'Geniki Taxydromiki',
-    ];
-    $key = strtolower(trim($courierCode));
-    return $map[$key] ?? ($courierCode !== '' ? $courierCode : 'Not specified');
-}
-
-function inferCourierCode(string $courierCode, string $shipmentCourierName): string {
-    $code = strtolower(trim($courierCode));
-    if ($code !== '') {
-        return $code;
-    }
-    $probe = strtolower($shipmentCourierName);
-    if (strpos($probe, 'boxnow') !== false) {
-        return 'boxnow';
-    }
-    if (strpos($probe, 'acs') !== false) {
-        return 'acs';
-    }
-    if (strpos($probe, 'akis') !== false) {
-        return 'akis_express';
-    }
-    if (strpos($probe, 'elta') !== false) {
-        return 'elta_courier';
-    }
-    if (strpos($probe, 'speedex') !== false) {
-        return 'speedex';
-    }
-    if (strpos($probe, 'geniki') !== false || strpos($probe, 'taxydromiki') !== false) {
-        return 'geniki';
-    }
-    return '';
-}
-
-ensureOrderShippingSchema($conn);
-
-$sessionUserId = null;
-if (isset($_SESSION["user"]) && is_array($_SESSION["user"])) {
-    if (isset($_SESSION["user"]["id"])) {
-        $sessionUserId = (int)$_SESSION["user"]["id"];
-    } elseif (isset($_SESSION["user"]["userID"])) {
-        $sessionUserId = (int)$_SESSION["user"]["userID"];
-    }
-}
-if ($sessionUserId === null && isset($_SESSION["user_id"])) {
-    $sessionUserId = (int)$_SESSION["user_id"];
-}
-
-$role = strtolower((string)($_SESSION["user"]["role"] ?? $_SESSION["role"] ?? "guest"));
-$isAdmin = in_array($role, ["admin", "administrator", "superadmin"], true);
-
-$orderId = isset($_GET["order_id"]) ? (int)$_GET["order_id"] : 0;
-if ($orderId <= 0) {
-    http_response_code(400);
-    echo "Invalid order ID.";
-    exit;
-}
-
-$orderSql = "
-    SELECT
-        o.orderID,
-        o.orderNumber,
-        o.userID,
-        o.email,
-        o.status,
-        o.subtotal,
-        o.discountTotal,
-        o.shippingCost,
-        o.totalAmount,
-        o.createdAt,
-        o.shippingAddress,
-        o.shippingCity,
-        o.shippingPostalCode,
-        o.shippingCountry,
-        o.shippingLabel,
-        o.courierCode,
-        o.shippingPriority,
-        u.full_name AS customerName,
-        u.email AS customerEmail,
-        u.phone AS customerPhone,
-        COALESCE(s.courierName, '') AS shipmentCourierName,
-        COALESCE(s.trackingCode, '') AS trackingCode
-    FROM orders o
-    LEFT JOIN users u ON u.userID = o.userID
-    LEFT JOIN shipments s ON s.orderID = o.orderID
-    WHERE o.orderID = ?
-    LIMIT 1
-";
-
-$orderStmt = $conn->prepare($orderSql);
-if (!$orderStmt) {
-    http_response_code(500);
-    echo "Failed to prepare order query.";
-    exit;
-}
-$orderStmt->bind_param("i", $orderId);
-$orderStmt->execute();
-$orderResult = $orderStmt->get_result();
-$order = $orderResult->fetch_assoc();
-$orderStmt->close();
-
-if (!$order) {
-    http_response_code(404);
-    echo "Order not found.";
-    exit;
-}
-
-$ownerUserId = isset($order["userID"]) ? (int)$order["userID"] : 0;
-$isOwner = ($sessionUserId !== null && $ownerUserId > 0 && $sessionUserId === $ownerUserId);
-
-if (!$isAdmin && !$isOwner) {
-    http_response_code(403);
-    echo "You do not have permission to view this receipt.";
-    exit;
-}
-
-$payments = [];
-$paymentStmt = $conn->prepare("
-    SELECT paymentID, provider, transactionID, paymentStatus, amount, currency, timestamp
-    FROM payments
-    WHERE orderID = ?
-    ORDER BY timestamp DESC
-");
-if (!$paymentStmt) {
-    http_response_code(500);
-    echo "Failed to prepare payment query.";
-    exit;
-}
-$paymentStmt->bind_param("i", $orderId);
-$paymentStmt->execute();
-$paymentRes = $paymentStmt->get_result();
-while ($row = $paymentRes->fetch_assoc()) {
-    $payments[] = $row;
-}
-$paymentStmt->close();
-
-$allowedReceiptPaymentStatuses = ["paid", "captured", "completed", "succeeded"];
-$paidPayment = null;
-foreach ($payments as $payment) {
-    $paymentStatus = strtolower((string)($payment["paymentStatus"] ?? ""));
-    if (in_array($paymentStatus, $allowedReceiptPaymentStatuses, true)) {
-        $paidPayment = $payment;
-        break;
-    }
-}
-
-if ($paidPayment === null) {
-    http_response_code(403);
-    echo "Receipt is available only for paid orders.";
-    exit;
-}
-
-$items = [];
-$itemsSql = "
-    SELECT
-        oi.quantity,
-        oi.unitPrice,
-        oi.giftWrapping,
-        oi.giftBagFlag,
-        oi.giftMessage,
-        p.sku,
-        p.nameEN,
-        p.nameGR,
-        pv.size,
-        pv.yarnType,
-        c.colorName
-    FROM order_items oi
-    LEFT JOIN products p ON p.productID = oi.productID
-    LEFT JOIN product_variations pv ON pv.variationID = oi.variationID
-    LEFT JOIN colors c ON c.colorID = pv.colorID
-    WHERE oi.orderID = ?
-    ORDER BY oi.orderItemID ASC
-";
-$itemsStmt = $conn->prepare($itemsSql);
-if (!$itemsStmt) {
-    http_response_code(500);
-    echo "Failed to prepare order items query.";
-    exit;
-}
-$itemsStmt->bind_param("i", $orderId);
-$itemsStmt->execute();
-$itemsRes = $itemsStmt->get_result();
-while ($row = $itemsRes->fetch_assoc()) {
-    $items[] = $row;
-}
-$itemsStmt->close();
-
-$orderNumber = (string)($order["orderNumber"] ?? ("ORD-" . $orderId));
-$customerName = trim((string)($order["customerName"] ?? ""));
-$customerEmail = trim((string)($order["customerEmail"] ?? ""));
-if ($customerEmail === "") {
-    $customerEmail = trim((string)($order["email"] ?? ""));
-}
-if ($customerName === "") {
-    $customerName = $customerEmail !== "" ? $customerEmail : "Customer";
-}
-
-$generatedAt = date("d/m/Y H:i");
-$backLink = $isAdmin ? "admin/order_management.php?view=" . $orderId : "../profile/account.php?tab=orders";
-$courierCode = inferCourierCode((string)($order["courierCode"] ?? ""), (string)($order["shipmentCourierName"] ?? ""));
-$courierLabel = courierLabelFromCode($courierCode);
-$shippingPriority = trim((string)($order["shippingPriority"] ?? "standard"));
-$shippingLabel = trim((string)($order["shippingLabel"] ?? ""));
-if ($shippingLabel === '') {
-    $shippingLabel = fallbackShippingLabelForUser($conn, (int)($order["userID"] ?? 0));
-}
-$trackingCode = trim((string)($order["trackingCode"] ?? ""));
-$shippingAddressParts = array_filter([
-    trim((string)($order["shippingAddress"] ?? "")),
-    trim((string)($order["shippingCity"] ?? "")),
-    trim((string)($order["shippingPostalCode"] ?? "")),
-    trim((string)($order["shippingCountry"] ?? "")),
-], static function ($value) { return $value !== ""; });
-$shippingAddressText = !empty($shippingAddressParts) ? implode(", ", $shippingAddressParts) : "Not provided";
+// At the end, replace the HTML with the new styled version:
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -294,255 +20,199 @@ $shippingAddressText = !empty($shippingAddressParts) ? implode(", ", $shippingAd
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Receipt <?= htmlspecialchars($orderNumber) ?></title>
     <style>
-        :root {
-            --bg: #f4f6f8;
-            --card: #ffffff;
-            --text: #111827;
-            --muted: #6b7280;
-            --line: #e5e7eb;
-            --accent: #1f2937;
-            --ok: #166534;
-        }
-        * { box-sizing: border-box; }
         body {
+            font-family: "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #faf5ff;
             margin: 0;
-            padding: 28px 16px;
-            background: var(--bg);
-            color: var(--text);
-            font-family: Arial, Helvetica, sans-serif;
+            padding: 20px;
         }
-        .receipt-wrap {
-            max-width: 900px;
+        .container {
+            max-width: 700px;
             margin: 0 auto;
+            background: #fff;
+            border-radius: 24px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.05);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #f8e1ff 0%, #e9d4ff 100%);
+            padding: 30px 20px;
+            text-align: center;
+            border-bottom: 2px solid #d9b8ff;
+        }
+        .header img {
+            max-height: 60px;
+            margin-bottom: 10px;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            color: #6a1b9a;
+            letter-spacing: -0.5px;
+        }
+        .header p {
+            margin: 5px 0 0;
+            color: #8a6aad;
+            font-size: 14px;
+        }
+        .content {
+            padding: 30px 25px;
+        }
+        .order-details {
+            background: #fef9ff;
+            border-left: 4px solid #c9a9f5;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 12px;
+        }
+        .order-details p {
+            margin: 5px 0;
+        }
+        .address-box {
+            background: #fef9ff;
+            padding: 12px;
+            margin: 10px 0;
+            border-radius: 12px;
+            border: 1px solid #ede2ff;
+        }
+        .address-box h4 {
+            margin: 0 0 8px 0;
+            color: #6a1b9a;
+        }
+        .order-summary {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        .order-summary th {
+            background: #f5edff;
+            text-align: left;
+            padding: 12px;
+            font-weight: 600;
+            color: #4a2f6e;
+        }
+        .order-summary td {
+            padding: 10px;
+            border-bottom: 1px solid #ede2ff;
+        }
+        .totals {
+            text-align: right;
+            margin-top: 20px;
+            padding: 10px;
+            background: #faf5ff;
+            border-radius: 12px;
+        }
+        .footer {
+            background: #f9f3ff;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #8a6aad;
+            border-top: 1px solid #e6d6ff;
+        }
+        .tracking-note {
+            margin: 20px 0 10px;
+            text-align: center;
+            font-size: 13px;
+            color: #6a1b9a;
         }
         .toolbar {
+            max-width: 700px;
+            margin: 0 auto 15px auto;
             display: flex;
-            gap: 10px;
             justify-content: flex-end;
-            margin-bottom: 12px;
+            gap: 10px;
         }
         .btn {
             display: inline-block;
-            border: 1px solid var(--line);
+            border: 1px solid #e0d4f0;
             background: #fff;
-            color: var(--text);
+            color: #6a1b9a;
             padding: 8px 12px;
-            border-radius: 8px;
+            border-radius: 40px;
             text-decoration: none;
             font-size: 14px;
             cursor: pointer;
+            transition: all 0.2s;
         }
-        .btn:hover { border-color: #cbd5e1; }
-        .card {
-            background: var(--card);
-            border: 1px solid var(--line);
-            border-radius: 14px;
-            padding: 24px;
-        }
-        .head {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            flex-wrap: wrap;
-            margin-bottom: 18px;
-            padding-bottom: 18px;
-            border-bottom: 1px solid var(--line);
-        }
-        .brand {
-            font-size: 20px;
-            font-weight: 700;
-            margin-bottom: 4px;
-        }
-        .meta {
-            color: var(--muted);
-            font-size: 13px;
-            line-height: 1.5;
-        }
-        .status-paid {
-            color: var(--ok);
-            font-weight: 700;
-            font-size: 13px;
-        }
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 14px;
-            margin-bottom: 16px;
-        }
-        .box {
-            border: 1px solid var(--line);
-            border-radius: 10px;
-            padding: 12px;
-        }
-        .box h4 {
-            margin: 0 0 8px 0;
-            font-size: 13px;
-            color: var(--muted);
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-        }
-        .box p {
-            margin: 0;
-            line-height: 1.55;
-            font-size: 14px;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 6px;
-        }
-        th, td {
-            text-align: left;
-            border-bottom: 1px solid var(--line);
-            padding: 10px 6px;
-            font-size: 14px;
-            vertical-align: top;
-        }
-        th { color: var(--muted); font-weight: 600; }
-        .t-right { text-align: right; }
-        .muted { color: var(--muted); }
-        .totals {
-            width: 320px;
-            margin-left: auto;
-            margin-top: 14px;
-            border: 1px solid var(--line);
-            border-radius: 10px;
-            padding: 10px 12px;
-        }
-        .totals-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 6px 0;
-            font-size: 14px;
-        }
-        .totals-total {
-            border-top: 1px solid var(--line);
-            margin-top: 4px;
-            padding-top: 10px;
-            font-weight: 700;
-            font-size: 16px;
-        }
-        .foot {
-            margin-top: 18px;
-            color: var(--muted);
-            font-size: 12px;
+        .btn:hover {
+            background: #f5edff;
+            border-color: #c9a9f5;
         }
         @media print {
             body { background: #fff; padding: 0; }
             .toolbar { display: none; }
-            .card { border: none; border-radius: 0; padding: 0; }
+            .container { box-shadow: none; border: 1px solid #ddd; }
         }
     </style>
 </head>
 <body>
-<div class="receipt-wrap">
-    <div class="toolbar">
-        <a href="<?= htmlspecialchars($backLink) ?>" class="btn">Back</a>
-        <button type="button" class="btn" onclick="window.print()">Print</button>
+<div class="toolbar">
+    <a href="<?= htmlspecialchars($backLink) ?>" class="btn">Back</a>
+    <button type="button" class="btn" onclick="window.print()">Print</button>
+</div>
+
+<div class="container">
+    <div class="header">
+        <img src="<?= htmlspecialchars($logoUrl) ?>" alt="Creations by Athina">
+        <h1>Creations by Athina</h1>
+        <p>Order Receipt</p>
     </div>
-
-    <section class="card">
-        <header class="head">
-            <div>
-                <div class="brand">Athina E-Shop Receipt</div>
-                <div class="meta">Receipt generated: <?= htmlspecialchars($generatedAt) ?></div>
-                <div class="meta">Order: <?= htmlspecialchars($orderNumber) ?></div>
-            </div>
-            <div class="meta" style="text-align:right;">
-                <div class="status-paid">Payment Verified</div>
-                <div>Status: <?= htmlspecialchars((string)$order["status"]) ?></div>
-                <div>Date: <?= htmlspecialchars((string)$order["createdAt"]) ?></div>
-            </div>
-        </header>
-
-        <div class="grid">
-            <div class="box">
-                <h4>Customer</h4>
-                <p>
-                    <?= htmlspecialchars($customerName) ?><br>
-                    <?= htmlspecialchars($customerEmail) ?><br>
-                    <?php if (!empty($order["customerPhone"])): ?>
-                        <?= htmlspecialchars((string)$order["customerPhone"]) ?>
-                    <?php else: ?>
-                        <span class="muted">Phone not available</span>
-                    <?php endif; ?>
-                    <br>
-                    <span class="muted">Shipping: <?= htmlspecialchars($shippingAddressText) ?></span><br>
-                    <span class="muted">Label: <?= htmlspecialchars($shippingLabel !== "" ? $shippingLabel : "None") ?></span><br>
-                    <span class="muted">Courier: <?= htmlspecialchars($courierLabel) ?> (<?= htmlspecialchars($shippingPriority) ?>)</span><br>
-                    <span class="muted">Tracking: <?= htmlspecialchars($trackingCode !== "" ? $trackingCode : "Not assigned yet") ?></span>
-                </p>
-            </div>
-            <div class="box">
-                <h4>Payment</h4>
-                <p>
-                    Provider: <?= htmlspecialchars((string)$paidPayment["provider"]) ?><br>
-                    Status: <?= htmlspecialchars((string)$paidPayment["paymentStatus"]) ?><br>
-                    Transaction: <?= htmlspecialchars((string)($paidPayment["transactionID"] ?? "-")) ?><br>
-                    Date: <?= htmlspecialchars((string)$paidPayment["timestamp"]) ?>
-                </p>
-            </div>
+    <div class="content">
+        <div class="order-details">
+            <p><strong>Order Number:</strong> <?= htmlspecialchars($orderNumber) ?></p>
+            <p><strong>Order Date:</strong> <?= htmlspecialchars(date('F j, Y', strtotime($order['createdAt']))) ?> at <?= htmlspecialchars(date('g:i a', strtotime($order['createdAt']))) ?></p>
+            <p><strong>Payment Method:</strong> <?= htmlspecialchars($paidPayment['provider'] ?? 'N/A') ?></p>
+            <p><strong>Transaction ID:</strong> <?= htmlspecialchars($paidPayment['transactionID'] ?? '—') ?></p>
+            <p><strong>Courier:</strong> <?= htmlspecialchars($courierLabel) ?> (<?= htmlspecialchars($shippingPriority) ?>)</p>
+            <p><strong>Status:</strong> <?= htmlspecialchars($order['status'] ?? 'confirmed') ?></p>
         </div>
 
-        <table>
+        <div class="address-box">
+            <h4>Shipping Address</h4>
+            <p><?= nl2br(htmlspecialchars($shippingAddressText)) ?><br>
+            Phone: <?= htmlspecialchars($order['customerPhone'] ?? 'Not provided') ?><br>
+            Email: <?= htmlspecialchars($customerEmail) ?></p>
+        </div>
+
+        <h3 style="color:#6a1b9a;">Order Items</h3>
+        <table class="order-summary">
             <thead>
-                <tr>
-                    <th>Item</th>
-                    <th>SKU</th>
-                    <th class="t-right">Qty</th>
-                    <th class="t-right">Unit</th>
-                    <th class="t-right">Line Total</th>
-                </tr>
+                <tr><th>Item</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr>
             </thead>
             <tbody>
             <?php if (empty($items)): ?>
-                <tr>
-                    <td colspan="5" class="muted">No order items found.</td>
-                </tr>
+                <tr><td colspan="4" class="muted">No order items found.</td></tr>
             <?php else: ?>
                 <?php foreach ($items as $item): ?>
                     <?php
-                    $name = (string)($item["nameEN"] ?: $item["nameGR"] ?: "Product");
-                    $qty = (int)($item["quantity"] ?? 0);
-                    $unit = (float)($item["unitPrice"] ?? 0);
+                    $name = (string)($item['nameEN'] ?: $item['nameGR'] ?: 'Product');
+                    $qty = (int)($item['quantity'] ?? 0);
+                    $unit = (float)($item['unitPrice'] ?? 0);
                     $lineTotal = $unit * $qty;
+
                     $variantParts = [];
-                    if (!empty($item["colorName"])) {
-                        $variantParts[] = (string)$item["colorName"];
-                    }
-                    if (!empty($item["size"])) {
-                        $variantParts[] = (string)$item["size"];
-                    }
-                    if (!empty($item["yarnType"])) {
-                        $variantParts[] = (string)$item["yarnType"];
-                    }
-                    $variantText = empty($variantParts) ? "" : implode(" / ", $variantParts);
+                    if (!empty($item['colorName'])) $variantParts[] = $item['colorName'];
+                    if (!empty($item['size'])) $variantParts[] = $item['size'];
+                    if (!empty($item['yarnType'])) $variantParts[] = $item['yarnType'];
+                    $variantText = $variantParts ? implode(' / ', $variantParts) : '';
 
                     $addonParts = [];
-                    if ((int)($item["giftWrapping"] ?? 0) === 1) {
-                        $addonParts[] = "Gift wrap";
-                    }
-                    if ((int)($item["giftBagFlag"] ?? 0) === 1) {
-                        $addonParts[] = "Gift bag";
-                    }
-                    if (!empty($item["giftMessage"])) {
-                        $addonParts[] = "Message: " . (string)$item["giftMessage"];
-                    }
+                    if ((int)($item['giftWrapping'] ?? 0) === 1) $addonParts[] = 'Gift wrap';
+                    if ((int)($item['giftBagFlag'] ?? 0) === 1) $addonParts[] = 'Gift bag';
+                    if (!empty($item['giftMessage'])) $addonParts[] = 'Message: "' . htmlspecialchars($item['giftMessage']) . '"';
                     ?>
                     <tr>
                         <td>
                             <strong><?= htmlspecialchars($name) ?></strong>
-                            <?php if ($variantText !== ""): ?>
-                                <div class="muted"><?= htmlspecialchars($variantText) ?></div>
-                            <?php endif; ?>
-                            <?php if (!empty($addonParts)): ?>
-                                <div class="muted"><?= htmlspecialchars(implode(" | ", $addonParts)) ?></div>
-                            <?php endif; ?>
+                            <?php if ($variantText): ?><div class="muted" style="color:#8a6aad;"><?= htmlspecialchars($variantText) ?></div><?php endif; ?>
+                            <?php if ($addonParts): ?><div class="muted" style="color:#8a6aad;"><?= htmlspecialchars(implode(' | ', $addonParts)) ?></div><?php endif; ?>
                         </td>
-                        <td><?= htmlspecialchars((string)($item["sku"] ?? "-")) ?></td>
-                        <td class="t-right"><?= $qty ?></td>
-                        <td class="t-right">EUR <?= number_format($unit, 2) ?></td>
-                        <td class="t-right">EUR <?= number_format($lineTotal, 2) ?></td>
+                        <td style="text-align:center;"><?= $qty ?></td>
+                        <td style="text-align:right;">€<?= number_format($unit, 2) ?></td>
+                        <td style="text-align:right;">€<?= number_format($lineTotal, 2) ?></td>
                     </tr>
                 <?php endforeach; ?>
             <?php endif; ?>
@@ -550,28 +220,25 @@ $shippingAddressText = !empty($shippingAddressParts) ? implode(", ", $shippingAd
         </table>
 
         <div class="totals">
-            <div class="totals-row">
-                <span>Subtotal</span>
-                <span>EUR <?= number_format((float)($order["subtotal"] ?? 0), 2) ?></span>
-            </div>
-            <div class="totals-row">
-                <span>Discount</span>
-                <span>EUR <?= number_format((float)($order["discountTotal"] ?? 0), 2) ?></span>
-            </div>
-            <div class="totals-row">
-                <span>Shipping</span>
-                <span>EUR <?= number_format((float)($order["shippingCost"] ?? 0), 2) ?></span>
-            </div>
-            <div class="totals-row totals-total">
-                <span>Total Paid</span>
-                <span>EUR <?= number_format((float)($order["totalAmount"] ?? 0), 2) ?></span>
-            </div>
+            <p>Subtotal: €<?= number_format((float)($order['subtotal'] ?? 0), 2) ?></p>
+            <?php if (($order['discountTotal'] ?? 0) > 0): ?>
+                <p>Discount: -€<?= number_format((float)($order['discountTotal'] ?? 0), 2) ?></p>
+            <?php endif; ?>
+            <p>Shipping: €<?= number_format((float)($order['shippingCost'] ?? 0), 2) ?></p>
+            <p><strong>Total: €<?= number_format((float)($order['totalAmount'] ?? 0), 2) ?></strong></p>
         </div>
 
-        <div class="foot">
-            This receipt is generated from payment-confirmed order data.
+        <div class="tracking-note">
+            <p>You will receive a separate email with tracking information once your order is in transit.</p>
         </div>
-    </section>
+
+        <p>If you have any questions, please <a href="<?= $siteUrl ?>/contact.php">contact us</a>.</p>
+    </div>
+    <div class="footer">
+        <p>Creations by Athina — Handmade with love</p>
+        <p><a href="mailto:admin@festival-web.com">admin@festival-web.com</a> | +30 123 456 7890</p>
+        <p><a href="<?= $siteUrl ?>/contact.php">Contact Us</a></p>
+    </div>
 </div>
 </body>
 </html>

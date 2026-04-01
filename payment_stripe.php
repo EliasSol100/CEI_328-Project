@@ -26,7 +26,8 @@ if (!$orderId || $amount <= 0) {
 $stmt = $conn->prepare("SELECT orderID FROM orders WHERE orderID = ?");
 $stmt->bind_param("i", $orderId);
 $stmt->execute();
-if ($stmt->get_result()->num_rows === 0) {
+$result = $stmt->get_result();
+if ($result->num_rows === 0) {
     die('Order not found.');
 }
 $stmt->close();
@@ -58,6 +59,7 @@ if ($row = $res->fetch_assoc()) {
         'shipping_country'   => $row['shipping_country'] ?? '',
         'courier'            => $row['courier'] ?? '',
         'shipping_speed'     => $row['shipping_speed'] ?? 'standard',
+        'email'              => $row['email'] ?? ''
     ];
 } else {
     die('Order details could not be loaded.');
@@ -95,59 +97,78 @@ $stmt->close();
 $stockError = false;
 $outOfStockItems = [];
 
-foreach ($items as $item) {
-    $productId = $item['productID'];
-    $quantity = $item['quantity'];
-    $variationId = $item['variationID'] ?? null;
+// Start transaction for stock check
+$conn->begin_transaction();
 
-    $available = 0;
-    $productName = $item['name'];
+try {
+    foreach ($items as $item) {
+        $productId = $item['productID'];
+        $quantity = $item['quantity'];
+        $variationId = $item['variationID'] ?? null;
 
-    if ($variationId && $variationId > 0) {
-        // Check variant stock from product_variations.stock
-        $stmt = $conn->prepare("
-            SELECT stock, p.nameEN
-            FROM product_variations pv
-            LEFT JOIN products p ON p.productID = pv.productID
-            WHERE pv.variationID = ?
-        ");
-        $stmt->bind_param("i", $variationId);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $row = $result->fetch_assoc();
-        if ($row) {
-            $available = (int)($row['stock'] ?? 0);
+        $available = 0;
+        $productName = $item['name'];
+
+        if ($variationId && $variationId > 0) {
+            // Check variant stock with row lock
+            $stmt = $conn->prepare("
+                SELECT stock, p.nameEN, pv.productID
+                FROM product_variations pv
+                LEFT JOIN products p ON p.productID = pv.productID
+                WHERE pv.variationID = ? FOR UPDATE
+            ");
+            $stmt->bind_param("i", $variationId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $row = $result->fetch_assoc();
+            if ($row) {
+                $available = (int)($row['stock'] ?? 0);
+                $productName = $row['nameEN'] ?? $item['name'];
+            }
+            $stmt->close();
+
+            if ($available < $quantity) {
+                $stockError = true;
+                $outOfStockItems[] = [
+                    'name' => $productName,
+                    'available' => $available,
+                    'requested' => $quantity
+                ];
+            }
+        } else {
+            // Check product inventory with row lock
+            $stmt = $conn->prepare("SELECT inventory, nameEN FROM products WHERE productID = ? FOR UPDATE");
+            $stmt->bind_param("i", $productId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $row = $result->fetch_assoc();
+            $available = (int)($row['inventory'] ?? 0);
             $productName = $row['nameEN'] ?? $item['name'];
-        }
-        $stmt->close();
+            $stmt->close();
 
-        if ($available < $quantity) {
-            $stockError = true;
-            $outOfStockItems[] = [
-                'name' => $productName,
-                'available' => $available,
-                'requested' => $quantity
-            ];
-        }
-    } else {
-        // Check product inventory (no variant)
-        $stmt = $conn->prepare("SELECT inventory FROM products WHERE productID = ?");
-        $stmt->bind_param("i", $productId);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $row = $result->fetch_assoc();
-        $available = (int)($row['inventory'] ?? 0);
-        $stmt->close();
-
-        if ($available < $quantity) {
-            $stockError = true;
-            $outOfStockItems[] = [
-                'name' => $productName,
-                'available' => $available,
-                'requested' => $quantity
-            ];
+            if ($available < $quantity) {
+                $stockError = true;
+                $outOfStockItems[] = [
+                    'name' => $productName,
+                    'available' => $available,
+                    'requested' => $quantity
+                ];
+            }
         }
     }
+
+    // If no stock errors, commit transaction
+    if (!$stockError) {
+        $conn->commit();
+    } else {
+        $conn->rollback();
+    }
+} catch (Exception $e) {
+    $conn->rollback();
+    error_log("Stock check error: " . $e->getMessage());
+    $_SESSION['checkout_error'] = "System error checking stock. Please try again.";
+    header('Location: ' . $project . '/checkout.php');
+    exit;
 }
 
 if ($stockError) {
@@ -159,106 +180,53 @@ if ($stockError) {
     header('Location: ' . $project . '/checkout.php');
     exit;
 }
-// ------------------------------------------
-/**
-                 * Check whether a product has any variation rows.
-                */
-                function productHasVariationRows(mysqli $conn, int                  $productId): bool {
-                static $cache = [];
-                if (array_key_exists($productId, $cache)) {
-                    return $cache[$productId];
-                }
-                $stmt = $conn->prepare("SELECT 1 FROM product_variations WHERE productID = ? LIMIT 1");
-                if (!$stmt) {
-                return false;
-                }
-                $stmt->bind_param("i", $productId);
-                $stmt->execute();
-                $row = $stmt->get_result()->fetch_assoc();
-                $stmt->close();
-                $cache[$productId] = (bool)$row;
-                return $cache[$productId];
-                }
-                $stockErrors = [];
-$productCache = [];
 
-foreach ($cartItems as $item) {
-    $productId = (int)($item['productID'] ?? $item['product_id'] ?? $item['product']['id'] ?? 0);
-    $quantity = (int)($item['quantity'] ?? 1);
-    if ($productId <= 0) continue;
-
-    // Fetch product data with row lock
-    if (!isset($productCache[$productId])) {
-        $stmt = $conn->prepare("SELECT inventory, nameEN, hasVariants FROM products WHERE productID = ? FOR UPDATE");
-        $stmt->bind_param("i", $productId);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $productCache[$productId] = $result->fetch_assoc();
-        $stmt->close();
-    }
-    $productData = $productCache[$productId];
-    if (!$productData) {
-        $stockErrors[] = "Product #{$productId} not found.";
-        continue;
-    }
-
-    $hasVariants = (int)$productData['hasVariants'];
-    $hasVariationRows = productHasVariationRows($conn, $productId);
-    $productName = $productData['nameEN'] ?? "Product #{$productId}";
-    $available = (int)$productData['inventory']; // fallback
-
-    // Extract variation ID if any
-    $variationId = null;
-    if (isset($item['variation']['variationID'])) {
-        $variationId = (int)$item['variation']['variationID'];
-    } elseif (isset($item['variation_id'])) {
-        $variationId = (int)$item['variation_id'];
-    }
-
-    // Only treat as variant if hasVariants=1 AND there are actual variation rows
-    if ($hasVariants === 1 && $hasVariationRows) {
-        if ($variationId && $variationId > 0) {
-            $stmt = $conn->prepare("SELECT stock FROM product_variations WHERE variationID = ? FOR UPDATE");
-            $stmt->bind_param("i", $variationId);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $row = $result->fetch_assoc();
-            if ($row) {
-                $available = (int)($row['stock'] ?? 0);
-            } else {
-                // Variation ID exists but no row – fall back to product inventory
-                $available = (int)$productData['inventory'];
-            }
-            $stmt->close();
-        } else {
-            // Product has variation rows but cart has no variation ID – treat as out of stock
-            $available = 0;
-        }
-    }
-    // else: product has no variations (or hasVariants=1 but no rows) – use $available = product inventory
-
-    if ($available < $quantity) {
-        $stockErrors[] = "Insufficient stock for {$productName}: ordered {$quantity}, available {$available}.";
-    }
-}
-
-if (!empty($stockErrors)) {
-    throw new RuntimeException(implode(', ', $stockErrors));
-}     
 $isLoggedIn = isset($_SESSION['user']);
 
-// Stripe Payment Intent (card only)
+// Cancel any existing PaymentIntent for this order (if any)
+$stmt = $conn->prepare("SELECT transaction_id FROM orders WHERE orderID = ?");
+$stmt->bind_param("i", $orderId);
+$stmt->execute();
+$res = $stmt->get_result();
+if ($row = $res->fetch_assoc()) {
+    if (!empty($row['transaction_id']) && strpos($row['transaction_id'], 'pi_') === 0) {
+        try {
+            \Stripe\Stripe::setApiKey(STRIPE_SECRET_KEY);
+            $intent = \Stripe\PaymentIntent::retrieve($row['transaction_id']);
+            if ($intent->status !== 'succeeded' && $intent->status !== 'canceled') {
+                $intent->cancel();
+                error_log("Cancelled existing PaymentIntent {$row['transaction_id']} for order $orderId");
+            }
+        } catch (Exception $e) {
+            error_log("Could not cancel PaymentIntent: " . $e->getMessage());
+        }
+    }
+}
+$stmt->close();
+
+// Create Stripe Payment Intent (card only)
 \Stripe\Stripe::setApiKey(STRIPE_SECRET_KEY);
 try {
     $intent = \Stripe\PaymentIntent::create([
         'amount'               => round($amount * 100),
         'currency'             => 'eur',
         'payment_method_types' => ['card'],
-        'metadata'             => ['order_id' => $orderId],
+        'metadata'             => [
+            'order_id' => $orderId,
+            'order_number' => $orderData['orderNumber'] ?? ''
+        ],
+        'receipt_email'        => $orderData['email'] ?? null,
     ]);
     $clientSecret = $intent->client_secret;
+
+    // Store the PaymentIntent ID in the order
+    $stmt = $conn->prepare("UPDATE orders SET transaction_id = ? WHERE orderID = ?");
+    $stmt->bind_param("si", $intent->id, $orderId);
+    $stmt->execute();
+    $stmt->close();
 } catch (\Stripe\Exception\ApiErrorException $e) {
-    die('Stripe error: ' . $e->getMessage());
+    error_log("Stripe error: " . $e->getMessage());
+    die('Unable to process payment. Please try again later.');
 }
 
 $activePage = 'payment';
@@ -275,12 +243,12 @@ include __DIR__ . '/include/header.php';
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://js.stripe.com/v3/"></script>
     <style>
+        /* Your existing styles (unchanged) */
         .checkout-container { max-width: 1160px; margin: 36px auto 72px; padding: 0 20px; }
         .checkout-title { margin: 0 0 18px; color: #2d184d; font-size: clamp(1.9rem,2.7vw,2.4rem); line-height: 1.1; letter-spacing: 0.2px; }
         .checkout-grid { display: grid; grid-template-columns: minmax(0,1fr) 360px; gap: 28px; align-items: start; }
         .checkout-form { border: 1px solid #e6dff2; border-radius: 18px; padding: 24px; background: #fff; box-shadow: 0 12px 28px rgba(63,32,102,0.08); }
         .checkout-form fieldset { border: 1px solid #e5dcf2; border-radius: 14px; padding: 20px; margin-bottom: 18px; background: #fff; }
-        .checkout-form fieldset:last-child { margin-bottom: 0; }
         .checkout-form legend { color: #4e2f74; font-weight: 700; font-size: 14px; padding: 0 10px; letter-spacing: 0.2px; }
         .btn-primary {
             width: 100%; border: none; border-radius: 11px; padding: 13px 16px;
@@ -289,6 +257,7 @@ include __DIR__ . '/include/header.php';
             transition: transform 0.15s ease, box-shadow 0.2s ease;
         }
         .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(108,58,176,0.28); }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
         .order-summary {
             position: sticky; top: 90px; border: 1px solid #e5dbf2; border-radius: 16px; padding: 22px;
             background: linear-gradient(180deg, #fbf9ff 0%, #f5f1fb 100%);
@@ -332,6 +301,19 @@ include __DIR__ . '/include/header.php';
         .button-group {
             text-align: center;
             margin-top: 20px;
+        }
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 0.6s linear infinite;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
     </style>
 </head>
@@ -460,38 +442,64 @@ include __DIR__ . '/include/header.php';
     <?php if ($isLoggedIn): ?>
     const linkAuthentication = elements.create('linkAuthentication');
     let linkMounted = false;
-    document.getElementById('toggleLinkBtn').addEventListener('click', function() {
-        const wrapper = document.getElementById('link-authentication-wrapper');
-        if (!linkMounted) {
-            linkAuthentication.mount('#link-authentication-element');
-            wrapper.style.display = 'block';
-            linkMounted = true;
-        } else {
-            linkAuthentication.unmount();
-            wrapper.style.display = 'none';
-            linkMounted = false;
-        }
-    });
+    const toggleBtn = document.getElementById('toggleLinkBtn');
+    const wrapper = document.getElementById('link-authentication-wrapper');
+    
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', function() {
+            if (!linkMounted) {
+                linkAuthentication.mount('#link-authentication-element');
+                wrapper.style.display = 'block';
+                linkMounted = true;
+            } else {
+                linkAuthentication.unmount();
+                wrapper.style.display = 'none';
+                linkMounted = false;
+            }
+        });
+    }
     <?php endif; ?>
 
     const form = document.getElementById('payment-form');
     const submitButton = document.getElementById('submit-button');
     const errorMessage = document.getElementById('error-message');
+    let isProcessing = false;
 
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        
+        if (isProcessing) return;
+        isProcessing = true;
+        
+        // Disable button and show loading state
         submitButton.disabled = true;
+        const originalButtonText = submitButton.innerHTML;
+        submitButton.innerHTML = '<span class="loading-spinner"></span> Processing...';
 
-        const { error } = await stripe.confirmPayment({
-            elements,
-            confirmParams: {
-                return_url: window.location.origin + '<?= $project ?>/process_payment.php',
-            },
-        });
+        try {
+            const { error } = await stripe.confirmPayment({
+                elements,
+                confirmParams: {
+                    return_url: window.location.origin + '<?= $project ?>/process_payment.php',
+                },
+                redirect: 'if_required'
+            });
 
-        if (error) {
-            errorMessage.textContent = error.message;
+            if (error) {
+                errorMessage.textContent = error.message;
+                submitButton.disabled = false;
+                submitButton.innerHTML = originalButtonText;
+                isProcessing = false;
+            } else {
+                // Payment successful, will redirect
+                window.location.href = window.location.origin + '<?= $project ?>/process_payment.php?payment_intent=' + clientSecret.split('_secret')[0] + '&redirect_status=succeeded';
+            }
+        } catch (err) {
+            errorMessage.textContent = 'An unexpected error occurred. Please try again.';
             submitButton.disabled = false;
+            submitButton.innerHTML = originalButtonText;
+            isProcessing = false;
+            console.error('Payment error:', err);
         }
     });
 </script>

@@ -1,25 +1,28 @@
 ﻿<?php
 session_start();
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
 require_once __DIR__ . "/authentication/database.php";
 require_once __DIR__ . "/authentication/get_config.php";
+require_once __DIR__ . "/include/security.php";
+if (!function_exists('app_csrf_input')) {
+    die("security.php NOT loaded – check path or file.");
+}
+require_once __DIR__ . "/include/made_to_order_access.php";
 
 $systemTitle = getSystemConfig("site_title") ?: "Creations by Athina";
 
 function ensurePromotionCouponColumn(mysqli $conn): void {
     static $checked = false;
-    if ($checked) {
-        return;
-    }
+    if ($checked) return;
     $checked = true;
 
     $tableCheck = $conn->query("SHOW TABLES LIKE 'promotions'");
-    if (!$tableCheck || $tableCheck->num_rows === 0) {
-        return;
-    }
+    if (!$tableCheck || $tableCheck->num_rows === 0) return;
 
     $check = $conn->query("SHOW COLUMNS FROM promotions LIKE 'couponCode'");
-    $exists = ($check && $check->num_rows > 0);
-    if (!$exists) {
+    if (!$check || $check->num_rows === 0) {
         $conn->query("ALTER TABLE promotions ADD COLUMN couponCode VARCHAR(64) NULL AFTER promotionName");
     }
 }
@@ -27,13 +30,11 @@ function ensurePromotionCouponColumn(mysqli $conn): void {
 function normalizeCouponCode(string $code): string {
     $code = strtoupper(trim($code));
     $code = preg_replace('/[^A-Z0-9_-]/', '', $code);
-    return (string)$code;
+    return $code;
 }
 
 function findActiveCouponPromotion(mysqli $conn, string $couponCode): ?array {
-    if ($couponCode === '') {
-        return null;
-    }
+    if ($couponCode === '') return null;
 
     $sql = "
         SELECT p.promotionID, p.promotionName, p.discountType, p.discountValue, p.scope, p.categoryID, c.categoryName
@@ -47,9 +48,7 @@ function findActiveCouponPromotion(mysqli $conn, string $couponCode): ?array {
         LIMIT 1
     ";
     $st = $conn->prepare($sql);
-    if (!$st) {
-        return null;
-    }
+    if (!$st) return null;
     $st->bind_param("s", $couponCode);
     $st->execute();
     $res = $st->get_result();
@@ -114,9 +113,7 @@ function evaluateProductCoupon(mysqli $conn, float $basePrice, string $productCa
 
 function ensureProductSalesOverridesSchema(mysqli $conn): void {
     static $checked = false;
-    if ($checked) {
-        return;
-    }
+    if ($checked) return;
     $checked = true;
 
     $conn->query("
@@ -135,6 +132,7 @@ function ensureProductSalesOverridesSchema(mysqli $conn): void {
 }
 
 ensureProductSalesOverridesSchema($conn);
+ensureMadeToOrderProductSchema($conn);
 
 $productId = (int)($_GET["id"] ?? 0);
 if ($productId <= 0) {
@@ -150,6 +148,31 @@ $isAdmin = in_array(strtolower((string)$role), ["admin", "administrator", "super
 $GLOBALS["header_user_full_name"] = $fullName;
 $GLOBALS["header_user_role"] = $role;
 
+if (isset($_GET['mto_token']) && (string)$_GET['mto_token'] !== '') {
+    $grant = grantMadeToOrderAccessFromLink($conn, $productId, (string)$_GET['mto_token']);
+    if (!empty($grant['ok'])) {
+        $safeQuery = $_GET;
+        unset($safeQuery['mto_token']);
+        $redirectUrl = 'product.php';
+        if (!empty($safeQuery)) {
+            $redirectUrl .= '?' . http_build_query($safeQuery);
+        }
+        header('Location: ' . $redirectUrl);
+        exit;
+    }
+
+    $reason = (string)($grant['reason'] ?? 'invalid_link');
+    if ($reason === 'login_required') {
+        $_SESSION['shop_mto_flash'] = 'err:Sign in with the assigned customer email to access this private product.';
+    } elseif ($reason === 'email_mismatch') {
+        $_SESSION['shop_mto_flash'] = 'err:This private product belongs to a different customer email.';
+    } else {
+        $_SESSION['shop_mto_flash'] = 'err:Invalid or expired private product link.';
+    }
+    header("Location: shop.php");
+    exit;
+}
+
 $conn->query("
     CREATE TABLE IF NOT EXISTS review_admin_replies (
         replyID INT AUTO_INCREMENT PRIMARY KEY,
@@ -164,30 +187,22 @@ $conn->query("
 ");
 
 function userCanReviewDeliveredProduct(mysqli $conn, int $userId, int $productId): bool {
-    if ($userId <= 0 || $productId <= 0) {
-        return false;
-    }
-
-    $stmt = $conn->prepare(
-        "SELECT 1
-         FROM orders o
-         INNER JOIN order_items oi ON oi.orderID = o.orderID
-         WHERE o.userID = ?
-           AND oi.productID = ?
-           AND LOWER(o.status) IN ('delivered', 'completed')
-           AND EXISTS (
-               SELECT 1
-               FROM payments p
-               WHERE p.orderID = o.orderID
-                 AND LOWER(p.paymentStatus) IN ('paid', 'completed', 'captured', 'succeeded', 'confirmed')
-               LIMIT 1
-           )
-         LIMIT 1"
-    );
-    if (!$stmt) {
-        return false;
-    }
-
+    if ($userId <= 0 || $productId <= 0) return false;
+    $stmt = $conn->prepare("
+        SELECT 1
+        FROM orders o
+        INNER JOIN order_items oi ON oi.orderID = o.orderID
+        WHERE o.userID = ? AND oi.productID = ?
+          AND LOWER(o.status) IN ('delivered', 'completed')
+          AND EXISTS (
+              SELECT 1 FROM payments p
+              WHERE p.orderID = o.orderID
+                AND LOWER(p.paymentStatus) IN ('paid','completed','captured','succeeded','confirmed')
+              LIMIT 1
+          )
+        LIMIT 1
+    ");
+    if (!$stmt) return false;
     $stmt->bind_param("ii", $userId, $productId);
     $stmt->execute();
     $res = $stmt->get_result();
@@ -199,12 +214,10 @@ function userCanReviewDeliveredProduct(mysqli $conn, int $userId, int $productId
 $canWriteReview = userCanReviewDeliveredProduct($conn, $userId, $productId);
 
 $reviewErrors = [];
-$reviewInput = [
-    "rating" => "5",
-    "review_text" => "",
-];
+$reviewInput = ["rating" => "5", "review_text" => ""];
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    app_require_csrf(isset($_GET['coupon_preview']) && (string)$_GET['coupon_preview'] === '1', "Invalid request token. Please refresh and try again.");
     $action = (string)($_POST["action"] ?? "");
 
     if ($action === "submit_review") {
@@ -212,15 +225,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $reviewInput["review_text"] = trim((string)($_POST["review_text"] ?? ""));
         $rating = (int)$reviewInput["rating"];
 
-        if ($userId <= 0) {
-            $reviewErrors[] = "Please sign in to write a review.";
-        }
-        if (!$canWriteReview) {
-            $reviewErrors[] = "Review is available only after the product is delivered and payment is confirmed.";
-        }
-        if ($rating < 1 || $rating > 5) {
-            $reviewErrors[] = "Rating must be between 1 and 5.";
-        }
+        if ($userId <= 0) $reviewErrors[] = "Please sign in to write a review.";
+        if (!$canWriteReview) $reviewErrors[] = "Review is available only after the product is delivered and payment is confirmed.";
+        if ($rating < 1 || $rating > 5) $reviewErrors[] = "Rating must be between 1 and 5.";
 
         if (empty($reviewErrors)) {
             $reviewText = mb_substr($reviewInput["review_text"], 0, 1200);
@@ -237,11 +244,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             }
 
             if ($existingReviewId > 0) {
-                $updateStmt = $conn->prepare(
-                    "UPDATE reviews
-                     SET rating = ?, reviewText = ?, timestamp = NOW(), isVisible = 1
-                     WHERE reviewID = ? AND userID = ? AND productID = ?"
-                );
+                $updateStmt = $conn->prepare("UPDATE reviews SET rating = ?, reviewText = ?, timestamp = NOW(), isVisible = 1 WHERE reviewID = ? AND userID = ? AND productID = ?");
                 if ($updateStmt) {
                     $updateStmt->bind_param("isiii", $rating, $reviewText, $existingReviewId, $userId, $productId);
                     $ok = $updateStmt->execute();
@@ -253,10 +256,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 }
                 $reviewErrors[] = "Could not update your review. Please try again.";
             } else {
-                $insertStmt = $conn->prepare(
-                    "INSERT INTO reviews (userID, productID, rating, reviewText, isVisible)
-                     VALUES (?, ?, ?, ?, 1)"
-                );
+                $insertStmt = $conn->prepare("INSERT INTO reviews (userID, productID, rating, reviewText, isVisible) VALUES (?, ?, ?, ?, 1)");
                 if ($insertStmt) {
                     $insertStmt->bind_param("iiis", $userId, $productId, $rating, $reviewText);
                     $ok = $insertStmt->execute();
@@ -271,9 +271,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
     } elseif ($isAdmin && $action === "admin_delete_review") {
         $reviewId = (int)($_POST["review_id"] ?? 0);
-        if ($reviewId <= 0) {
-            $reviewErrors[] = "Review not found.";
-        } else {
+        if ($reviewId <= 0) $reviewErrors[] = "Review not found.";
+        else {
             $delStmt = $conn->prepare("UPDATE reviews SET isVisible = 0, timestamp = NOW() WHERE reviewID = ? AND productID = ?");
             if ($delStmt) {
                 $delStmt->bind_param("ii", $reviewId, $productId);
@@ -290,11 +289,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     } elseif ($isAdmin && $action === "admin_reply_review") {
         $reviewId = (int)($_POST["review_id"] ?? 0);
         $adminReplyText = trim((string)($_POST["admin_reply_text"] ?? ""));
-        if ($reviewId <= 0) {
-            $reviewErrors[] = "Review not found.";
-        } elseif (mb_strlen($adminReplyText) < 2) {
-            $reviewErrors[] = "Admin reply must be at least 2 characters.";
-        } else {
+        if ($reviewId <= 0) $reviewErrors[] = "Review not found.";
+        elseif (mb_strlen($adminReplyText) < 2) $reviewErrors[] = "Admin reply must be at least 2 characters.";
+        else {
             $checkStmt = $conn->prepare("SELECT reviewID FROM reviews WHERE reviewID = ? AND productID = ? LIMIT 1");
             if ($checkStmt) {
                 $checkStmt->bind_param("ii", $reviewId, $productId);
@@ -302,9 +299,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $exists = $checkStmt->get_result();
                 $okReview = ($exists && $exists->num_rows > 0);
                 $checkStmt->close();
-                if (!$okReview) {
-                    $reviewErrors[] = "Review not found for this product.";
-                }
+                if (!$okReview) $reviewErrors[] = "Review not found for this product.";
             }
 
             if (empty($reviewErrors)) {
@@ -332,9 +327,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
     } elseif ($isAdmin && $action === "admin_delete_reply") {
         $reviewId = (int)($_POST["review_id"] ?? 0);
-        if ($reviewId <= 0) {
-            $reviewErrors[] = "Reply not found.";
-        } else {
+        if ($reviewId <= 0) $reviewErrors[] = "Reply not found.";
+        else {
             $delReplyStmt = $conn->prepare("UPDATE review_admin_replies SET isVisible = 0, updatedAt = NOW() WHERE reviewID = ?");
             if ($delReplyStmt) {
                 $delReplyStmt->bind_param("i", $reviewId);
@@ -357,19 +351,12 @@ $productStmt = $conn->prepare(
             p.basePrice, p.inventory, p.cartStatus, p.hasVariants, p.category,
             CASE
                 WHEN pso.productID IS NULL THEN COALESCE(os.total_qty, 0)
-                ELSE pso.manual_total_sales + GREATEST(
-                    0,
-                    COALESCE(os.total_qty, 0) - COALESCE(pso.auto_sales_baseline, COALESCE(os.total_qty, 0))
-                )
+                ELSE pso.manual_total_sales + GREATEST(0, COALESCE(os.total_qty, 0) - COALESCE(pso.auto_sales_baseline, COALESCE(os.total_qty, 0)))
             END AS totalSales,
             ROUND(COALESCE(AVG(r.rating), 0), 1) AS avgRating,
             COUNT(r.reviewID) AS reviewCount
      FROM products p
-     LEFT JOIN (
-        SELECT productID, SUM(quantity) AS total_qty
-        FROM order_items
-        GROUP BY productID
-     ) os ON os.productID = p.productID
+     LEFT JOIN (SELECT productID, SUM(quantity) AS total_qty FROM order_items GROUP BY productID) os ON os.productID = p.productID
      LEFT JOIN product_sales_overrides pso ON pso.productID = p.productID
      LEFT JOIN reviews r ON r.productID = p.productID AND r.isVisible = 1
      WHERE p.productID = ?
@@ -389,11 +376,20 @@ if (!$product) {
     exit;
 }
 
-// Keep discontinued/internal statuses out of direct-link access for storefront users.
-$publicProductStatuses = ["active", "low_stock", "out_of_stock", "made_to_order"];
-if (!$isAdmin && !in_array((string)($product["cartStatus"] ?? ""), $publicProductStatuses, true)) {
-    header("Location: shop.php");
-    exit;
+// Access control for non‑admins
+$publicProductStatuses = ["active", "low_stock", "out_of_stock"];
+if (!$isAdmin) {
+    $productStatus = (string)($product["cartStatus"] ?? "");
+    if ($productStatus === 'made_to_order') {
+        if (!isMadeToOrderProductAccessible($conn, $productId)) {
+            $_SESSION['shop_mto_flash'] = 'err:You do not have access to this private made-to-order product.';
+            header("Location: shop.php");
+            exit;
+        }
+    } elseif (!in_array($productStatus, $publicProductStatuses, true)) {
+        header("Location: shop.php");
+        exit;
+    }
 }
 
 $baseProductPrice = (float)($product["basePrice"] ?? 0);
@@ -432,6 +428,7 @@ if (isset($_GET['coupon_preview']) && (string)$_GET['coupon_preview'] === '1') {
     exit;
 }
 
+// Product photos (from photos table)
 $photos = [];
 $photoStmt = $conn->prepare("SELECT imageID FROM photos WHERE productID = ? ORDER BY imageID ASC");
 if ($photoStmt) {
@@ -447,6 +444,36 @@ if (empty($photos)) {
     $photos[] = "assets/images/athina-eshop-logo.png";
 }
 
+// Per-colour product photos – dynamic column detection
+$colorPhotos = [];
+$tableCheck = $conn->query("SHOW TABLES LIKE 'product_color_photos'");
+if ($tableCheck && $tableCheck->num_rows > 0) {
+    // Detect column names
+    $colorIdCol = null;
+    $photoPathCol = null;
+    $cols = $conn->query("SHOW COLUMNS FROM product_color_photos");
+    if ($cols) {
+        while ($col = $cols->fetch_assoc()) {
+            $field = $col['Field'];
+            if (in_array($field, ['colorID', 'color_id'])) $colorIdCol = $field;
+            if (in_array($field, ['photoPath', 'photo_path'])) $photoPathCol = $field;
+        }
+    }
+    if ($colorIdCol && $photoPathCol) {
+        $cpStmt = $conn->prepare("SELECT $colorIdCol, $photoPathCol FROM product_color_photos WHERE productID = ? ORDER BY sortOrder ASC");
+        if ($cpStmt) {
+            $cpStmt->bind_param("i", $productId);
+            $cpStmt->execute();
+            $cpRes = $cpStmt->get_result();
+            while ($cpRes && ($row = $cpRes->fetch_assoc())) {
+                $colorPhotos[(int)$row[$colorIdCol]][] = $row[$photoPathCol];
+            }
+            $cpStmt->close();
+        }
+    }
+}
+
+// Variations (without color_yarn_types join)
 $variations = [];
 $variationStmt = $conn->prepare(
     "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID,
@@ -472,22 +499,16 @@ if ($variationStmt) {
             "colorID" => isset($row["colorID"]) ? (int)$row["colorID"] : null,
             "colorName" => trim((string)($row["colorName"] ?? "")),
             "stock" => (int)($row["stock"] ?? 0),
+            "photoPath" => null, // not used
         ];
     }
     $variationStmt->close();
 }
 
 $colorHexMap = [
-    "cream white" => "#efe8db",
-    "soft pink" => "#f3d9dd",
-    "mint green" => "#dbeedd",
-    "coral" => "#f7c9bc",
-    "sky blue" => "#d7e8fb",
-    "lavender" => "#e3daf4",
-    "white" => "#f3f2ef",
-    "yellow" => "#efe3a4",
-    "blue" => "#afc9f2",
-    "pink" => "#f5c7d8",
+    "cream white" => "#efe8db", "soft pink" => "#f3d9dd", "mint green" => "#dbeedd",
+    "coral" => "#f7c9bc", "sky blue" => "#d7e8fb", "lavender" => "#e3daf4",
+    "white" => "#f3f2ef", "yellow" => "#efe3a4", "blue" => "#afc9f2", "pink" => "#f5c7d8",
 ];
 
 $uniqueColors = [];
@@ -500,43 +521,37 @@ foreach ($variations as $variation) {
     }
 
     $colorId = (int)($variation["colorID"] ?? 0);
-    if ($colorId <= 0 || isset($uniqueColors[$colorId])) {
-        continue;
-    }
+    if ($colorId <= 0 || isset($uniqueColors[$colorId])) continue;
     $colorName = trim((string)($variation["colorName"] ?? ""));
     $colorKey = strtolower($colorName);
     $uniqueColors[$colorId] = [
         "id" => $colorId,
         "name" => $colorName !== "" ? $colorName : ("Color " . $colorId),
         "hex" => $colorHexMap[$colorKey] ?? "#ece6f6",
+        "photoPath" => $variation["photoPath"] ?? null,
     ];
 }
-
 $uniqueColors = array_values($uniqueColors);
 
+// Reviews
 $reviews = [];
 $reviewStmt = $conn->prepare(
     "SELECT r.reviewID, r.userID, r.rating, r.reviewText, r.timestamp,
             COALESCE(NULLIF(TRIM(u.full_name), ''), CONCAT('User #', r.userID)) AS reviewerName,
             EXISTS (
-                SELECT 1
-                FROM order_items oi
+                SELECT 1 FROM order_items oi
                 JOIN orders o ON o.orderID = oi.orderID
-                WHERE oi.productID = r.productID
-                  AND o.userID = r.userID
+                WHERE oi.productID = r.productID AND o.userID = r.userID
                   AND LOWER(o.status) IN ('delivered', 'completed')
                   AND EXISTS (
-                    SELECT 1
-                    FROM payments p
-                    WHERE p.orderID = o.orderID
-                      AND LOWER(p.paymentStatus) IN ('paid', 'completed', 'captured', 'succeeded', 'confirmed')
-                    LIMIT 1
+                      SELECT 1 FROM payments p
+                      WHERE p.orderID = o.orderID
+                        AND LOWER(p.paymentStatus) IN ('paid','completed','captured','succeeded','confirmed')
+                      LIMIT 1
                   )
                 LIMIT 1
             ) AS isVerifiedPurchase,
-            rr.replyID,
-            rr.replyText,
-            rr.updatedAt AS replyTimestamp,
+            rr.replyID, rr.replyText, rr.updatedAt AS replyTimestamp,
             COALESCE(NULLIF(TRIM(au.full_name), ''), 'Admin') AS adminReplyAuthor
      FROM reviews r
      LEFT JOIN users u ON u.userID = r.userID
@@ -567,14 +582,13 @@ if ($reviewStmt) {
     $reviewStmt->close();
 }
 
+// Wishlist status
 $isWishlisted = false;
 if ($userId > 0) {
     $wishlistStmt = $conn->prepare(
-        "SELECT 1
-         FROM wishlist_items wi
+        "SELECT 1 FROM wishlist_items wi
          JOIN wishlists w ON w.wishlistID = wi.wishlistID
-         WHERE w.userID = ? AND wi.productID = ?
-         LIMIT 1"
+         WHERE w.userID = ? AND wi.productID = ? LIMIT 1"
     );
     if ($wishlistStmt) {
         $wishlistStmt->bind_param("ii", $userId, $productId);
@@ -590,15 +604,10 @@ if ($userId > 0) {
 
 $reviewStatus = (string)($_GET["review_status"] ?? "");
 $reviewSuccessMessage = "";
-if ($reviewStatus === "saved") {
-    $reviewSuccessMessage = "Your review was saved successfully.";
-} elseif ($reviewStatus === "admin_deleted") {
-    $reviewSuccessMessage = "Review was removed.";
-} elseif ($reviewStatus === "admin_reply_saved") {
-    $reviewSuccessMessage = "Admin reply saved.";
-} elseif ($reviewStatus === "admin_reply_deleted") {
-    $reviewSuccessMessage = "Admin reply removed.";
-}
+if ($reviewStatus === "saved") $reviewSuccessMessage = "Your review was saved successfully.";
+elseif ($reviewStatus === "admin_deleted") $reviewSuccessMessage = "Review was removed.";
+elseif ($reviewStatus === "admin_reply_saved") $reviewSuccessMessage = "Admin reply saved.";
+elseif ($reviewStatus === "admin_reply_deleted") $reviewSuccessMessage = "Admin reply removed.";
 $defaultReviewRating = max(1, min(5, (int)$reviewInput["rating"]));
 $openReviewForm = $canWriteReview && (!empty($reviewErrors) || ((string)($_GET["write_review"] ?? "") === "1"));
 $couponFeedbackText = "If valid, the discount will be applied during checkout.";
@@ -619,6 +628,9 @@ if ($storedCouponCode !== '') {
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script>
+    window.APP_CSRF_TOKEN = <?= json_encode($_SESSION['csrf_token'] ?? '') ?>;
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= htmlspecialchars((string)$product["nameEN"]) ?> - <?= htmlspecialchars($systemTitle) ?></title>
@@ -629,29 +641,13 @@ if ($storedCouponCode !== '') {
     <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . "/assets/js/translations.js") ?>" defer></script>
     <script src="assets/js/wishlist-live.js" defer></script>
     <style>
-        .price-row {
-            display: flex;
-            align-items: baseline;
-            gap: 10px;
-        }
-        .price-row .price-current {
-            color: #7c2de2;
-            font-weight: 800;
-        }
-        .price-row .price-original {
-            display: none;
-            color: #8f7dad;
-            text-decoration: line-through;
-            font-weight: 600;
-            font-size: 1.1rem;
-        }
-        .price-row.is-discounted .price-current {
-            color: #1f8d40;
-        }
-        .price-row.is-discounted .price-original {
-            display: inline;
-        }
+        .price-row { display: flex; align-items: baseline; gap: 10px; }
+        .price-row .price-current { color: #7c2de2; font-weight: 800; }
+        .price-row .price-original { display: none; color: #8f7dad; text-decoration: line-through; font-weight: 600; font-size: 1.1rem; }
+        .price-row.is-discounted .price-current { color: #1f8d40; }
+        .price-row.is-discounted .price-original { display: inline; }
     </style>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
 </head>
 <body class="site-page">
 <?php
@@ -662,15 +658,20 @@ include __DIR__ . "/include/header.php";
 <main class="product-page">
     <div class="product-wrap">
         <section class="product-gallery">
-            <div class="main-image-wrap">
-                <img id="main-product-image" src="<?= htmlspecialchars($photos[0]) ?>" alt="<?= htmlspecialchars((string)$product["nameEN"]) ?>">
-            </div>
-            <div class="thumbs-wrap">
-                <?php foreach ($photos as $idx => $src): ?>
-                    <button type="button" class="thumb-btn <?= $idx === 0 ? "active" : "" ?>" data-image-src="<?= htmlspecialchars($src) ?>" aria-label="View image <?= $idx + 1 ?>">
-                        <img src="<?= htmlspecialchars($src) ?>" alt="Product image <?= $idx + 1 ?>">
-                    </button>
-                <?php endforeach; ?>
+            <div id="product-carousel" class="carousel slide" data-bs-ride="carousel" data-bs-interval="2000">
+                <div class="carousel-inner" id="product-carousel-inner">
+                    <?php foreach ($photos as $idx => $src): ?>
+                    <div class="carousel-item <?= $idx === 0 ? 'active' : '' ?>">
+                        <img src="<?= htmlspecialchars($src) ?>" class="d-block w-100" style="object-fit:cover;border-radius:16px;max-height:480px" alt="<?= htmlspecialchars((string)$product['nameEN']) ?>">
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <button class="carousel-control-prev" type="button" data-bs-target="#product-carousel" data-bs-slide="prev">
+                    <span class="carousel-control-prev-icon"></span>
+                </button>
+                <button class="carousel-control-next" type="button" data-bs-target="#product-carousel" data-bs-slide="next">
+                    <span class="carousel-control-next-icon"></span>
+                </button>
             </div>
         </section>
 
@@ -680,8 +681,7 @@ include __DIR__ . "/include/header.php";
             <div class="rating-row">
                 <?php
                 $filled = (int)round((float)$product["avgRating"]);
-                for ($i = 1; $i <= 5; $i++):
-                ?>
+                for ($i = 1; $i <= 5; $i++): ?>
                     <i class="<?= $i <= $filled ? "fas" : "far" ?> fa-star"></i>
                 <?php endfor; ?>
                 <span><?= number_format((float)$product["avgRating"], 1) ?> (<?= (int)$product["reviewCount"] ?> reviews)</span>
@@ -695,35 +695,29 @@ include __DIR__ . "/include/header.php";
                 <span class="price-current" id="price-current">&euro;<?= number_format(!empty($initialCouponEvaluation['valid']) ? (float)$initialCouponEvaluation['discounted_price'] : $baseProductPrice, 2) ?></span>
             </div>
 
-            <p class="desc-text">
-                <?= nl2br(htmlspecialchars((string)($product["descriptionEN"] ?: "Handmade item by Creations by Athina."))) ?>
-            </p>
+            <p class="desc-text"><?= nl2br(htmlspecialchars((string)($product["descriptionEN"] ?: "Handmade item by Creations by Athina."))) ?></p>
 
             <?php if (!empty($uniqueSizes)): ?>
                 <div class="size-row" id="size-row">
                     <?php foreach ($uniqueSizes as $idx => $sizeLabel): ?>
-                        <button
-                            type="button"
-                            class="size-chip <?= $idx === 0 ? "active" : "" ?>"
-                            data-size="<?= htmlspecialchars($sizeLabel) ?>">
-                            <?= htmlspecialchars($sizeLabel) ?>
-                        </button>
+                        <button type="button" class="size-chip <?= $idx === 0 ? "active" : "" ?>" data-size="<?= htmlspecialchars($sizeLabel) ?>"><?= htmlspecialchars($sizeLabel) ?></button>
                     <?php endforeach; ?>
                 </div>
             <?php endif; ?>
 
             <?php if (!empty($uniqueColors)): ?>
-                <div class="color-row" id="color-row">
-                    <?php foreach ($uniqueColors as $idx => $color): ?>
-                        <button
-                            type="button"
-                            class="color-dot <?= $idx === 0 ? "active" : "" ?>"
-                            style="background: <?= htmlspecialchars($color["hex"]) ?>;"
-                            data-color-id="<?= (int)$color["id"] ?>"
-                            data-color-name="<?= htmlspecialchars($color["name"]) ?>"
-                            title="<?= htmlspecialchars($color["name"]) ?>">
-                        </button>
-                    <?php endforeach; ?>
+                <div class="color-row" id="color-row" style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">
+                    <label style="font-size:13px;font-weight:600;color:#374151;margin:0">Colour</label>
+                    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                        <select id="color-select" style="min-width:200px;padding:8px 12px;border:1px solid #d6c7ea;border-radius:8px;font-size:14px;color:#4b3569;background:#fff;cursor:pointer">
+                            <option value="">— Select colour —</option>
+                            <?php foreach ($uniqueColors as $color): ?>
+                                <option value="<?= (int)$color["id"] ?>" data-color-name="<?= htmlspecialchars($color["name"]) ?>" data-photo="<?= htmlspecialchars($color["photoPath"] ?? "") ?>">
+                                    <?= htmlspecialchars($color["name"]) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
                 </div>
             <?php endif; ?>
 
@@ -756,9 +750,7 @@ include __DIR__ . "/include/header.php";
             </div>
 
             <div class="action-row">
-                <button type="button" class="add-cart-btn" id="add-cart-btn">
-                    <i class="fas fa-cart-plus"></i> Add to Cart
-                </button>
+                <button type="button" class="add-cart-btn" id="add-cart-btn"><i class="fas fa-cart-plus"></i> Add to Cart</button>
                 <form method="post" class="wishlist-form">
                     <input type="hidden" name="action" value="toggle_wishlist_item">
                     <input type="hidden" name="product_id" value="<?= (int)$product["productID"] ?>">
@@ -773,15 +765,10 @@ include __DIR__ . "/include/header.php";
                 <div>
                     <span>Availability:</span>
                     <strong class="<?= ((int)$product["inventory"] > 0 || (string)$product["cartStatus"] === "made_to_order") ? "in-stock" : "out-stock" ?>">
-                        <?php if ((string)$product["cartStatus"] === "made_to_order"): ?>
-                            Made to Order
-                        <?php elseif ((string)$product["cartStatus"] === "low_stock" || ((int)$product["inventory"] > 0 && (int)$product["inventory"] <= 3)): ?>
-                            Only <?= (int)$product["inventory"] ?> left
-                        <?php elseif ((int)$product["inventory"] > 0): ?>
-                            In Stock
-                        <?php else: ?>
-                            Out of Stock
-                        <?php endif; ?>
+                        <?php if ((string)$product["cartStatus"] === "made_to_order"): ?>Made to Order
+                        <?php elseif ((string)$product["cartStatus"] === "low_stock" || ((int)$product["inventory"] > 0 && (int)$product["inventory"] <= 3)): ?>Only <?= (int)$product["inventory"] ?> left
+                        <?php elseif ((int)$product["inventory"] > 0): ?>In Stock
+                        <?php else: ?>Out of Stock<?php endif; ?>
                     </strong>
                 </div>
             </div>
@@ -807,13 +794,12 @@ include __DIR__ . "/include/header.php";
             <div class="review-alert error"><?= htmlspecialchars(implode(" ", $reviewErrors)) ?></div>
         <?php endif; ?>
         <?php if ($userId > 0 && !$canWriteReview): ?>
-            <div class="review-alert info">
-                Review opens only after your order is delivered and payment is confirmed.
-            </div>
+            <div class="review-alert info">Review opens only after your order is delivered and payment is confirmed.</div>
         <?php endif; ?>
 
         <?php if ($userId > 0 && $canWriteReview): ?>
             <form method="post" class="review-form <?= $openReviewForm ? "is-open" : "" ?>" id="write-review-form">
+                <?= app_csrf_input() ?>
                 <input type="hidden" name="action" value="submit_review">
                 <div class="review-form-title">Share your experience</div>
 
@@ -828,12 +814,7 @@ include __DIR__ . "/include/header.php";
                 </div>
 
                 <label class="review-label" for="review_text">Review</label>
-                <textarea
-                    id="review_text"
-                    name="review_text"
-                    rows="4"
-                    maxlength="1200"
-                    placeholder="Write your review here..."><?= htmlspecialchars($reviewInput["review_text"]) ?></textarea>
+                <textarea id="review_text" name="review_text" rows="4" maxlength="1200" placeholder="Write your review here..."><?= htmlspecialchars($reviewInput["review_text"]) ?></textarea>
 
                 <div class="review-form-actions">
                     <button type="submit" class="submit-review-btn">Submit Review</button>
@@ -854,9 +835,7 @@ include __DIR__ . "/include/header.php";
                                     <span class="verified-pill">Verified</span>
                                 <?php endif; ?>
                             </div>
-                            <time datetime="<?= htmlspecialchars((string)date("c", strtotime($review["timestamp"]))) ?>">
-                                <?= htmlspecialchars((string)date("Y-m-d", strtotime($review["timestamp"]))) ?>
-                            </time>
+                            <time datetime="<?= htmlspecialchars((string)date("c", strtotime($review["timestamp"]))) ?>"><?= htmlspecialchars((string)date("Y-m-d", strtotime($review["timestamp"]))) ?></time>
                         </div>
                         <div class="review-stars">
                             <?php for ($i = 1; $i <= 5; $i++): ?>
@@ -870,9 +849,7 @@ include __DIR__ . "/include/header.php";
                                 <div class="review-admin-reply-head">
                                     <strong><?= htmlspecialchars($review["adminReplyAuthor"]) ?></strong>
                                     <?php if ($review["adminReplyTimestamp"] !== ""): ?>
-                                        <time datetime="<?= htmlspecialchars((string)date("c", strtotime($review["adminReplyTimestamp"]))) ?>">
-                                            <?= htmlspecialchars((string)date("Y-m-d", strtotime($review["adminReplyTimestamp"]))) ?>
-                                        </time>
+                                        <time datetime="<?= htmlspecialchars((string)date("c", strtotime($review["adminReplyTimestamp"]))) ?>"><?= htmlspecialchars((string)date("Y-m-d", strtotime($review["adminReplyTimestamp"]))) ?></time>
                                     <?php endif; ?>
                                 </div>
                                 <p><?= nl2br(htmlspecialchars($review["adminReplyText"])) ?></p>
@@ -882,12 +859,14 @@ include __DIR__ . "/include/header.php";
                         <?php if ($isAdmin): ?>
                             <div class="review-admin-actions">
                                 <form method="post" onsubmit="return confirm('Remove this review?');">
+                                    <?= app_csrf_input() ?>
                                     <input type="hidden" name="action" value="admin_delete_review">
                                     <input type="hidden" name="review_id" value="<?= (int)$review["id"] ?>">
                                     <button type="submit" class="submit-review-btn review-admin-danger">Delete Review</button>
                                 </form>
                                 <?php if ($review["adminReplyText"] !== ""): ?>
                                     <form method="post" onsubmit="return confirm('Remove this admin reply?');">
+                                        <?= app_csrf_input() ?>
                                         <input type="hidden" name="action" value="admin_delete_reply">
                                         <input type="hidden" name="review_id" value="<?= (int)$review["id"] ?>">
                                         <button type="submit" class="submit-review-btn review-admin-light">Remove Reply</button>
@@ -895,15 +874,11 @@ include __DIR__ . "/include/header.php";
                                 <?php endif; ?>
                             </div>
                             <form method="post" class="review-admin-reply-form">
+                                <?= app_csrf_input() ?>
                                 <input type="hidden" name="action" value="admin_reply_review">
                                 <input type="hidden" name="review_id" value="<?= (int)$review["id"] ?>">
                                 <label class="review-label" for="admin_reply_<?= (int)$review["id"] ?>">Admin Reply</label>
-                                <textarea
-                                    id="admin_reply_<?= (int)$review["id"] ?>"
-                                    name="admin_reply_text"
-                                    rows="3"
-                                    maxlength="2500"
-                                    placeholder="Write an admin response..."><?= htmlspecialchars($review["adminReplyText"]) ?></textarea>
+                                <textarea id="admin_reply_<?= (int)$review["id"] ?>" name="admin_reply_text" rows="3" maxlength="2500" placeholder="Write an admin response..."><?= htmlspecialchars($review["adminReplyText"]) ?></textarea>
                                 <div class="review-form-actions">
                                     <button type="submit" class="submit-review-btn">Save Reply</button>
                                 </div>
@@ -930,28 +905,29 @@ include __DIR__ . "/include/header.php";
     var selectedColorId = null;
     var selectedSize = null;
 
-    var mainImage = document.getElementById("main-product-image");
-    var thumbs = Array.prototype.slice.call(document.querySelectorAll(".thumb-btn"));
-    thumbs.forEach(function (btn) {
-        btn.addEventListener("click", function () {
-            var src = btn.getAttribute("data-image-src");
-            if (src && mainImage) {
-                mainImage.src = src;
-            }
-            thumbs.forEach(function (item) {
-                item.classList.remove("active");
-            });
-            btn.classList.add("active");
+    var colorPhotos   = <?= json_encode($colorPhotos, JSON_UNESCAPED_UNICODE) ?>;
+    var defaultPhotos = <?= json_encode($photos,      JSON_UNESCAPED_UNICODE) ?>;
+
+    function pcpSwapImages(colorId) {
+        var imgs = (colorId && colorPhotos[colorId] && colorPhotos[colorId].length) ? colorPhotos[colorId] : defaultPhotos;
+        var inner = document.getElementById('product-carousel-inner');
+        if (!inner) return;
+        inner.innerHTML = '';
+        imgs.forEach(function(src, idx) {
+            var div = document.createElement('div');
+            div.className = 'carousel-item' + (idx === 0 ? ' active' : '');
+            div.innerHTML = '<img src="' + src + '" class="d-block w-100" style="object-fit:cover;border-radius:16px;max-height:480px" alt="Product image">';
+            inner.appendChild(div);
         });
-    });
+        var el = document.getElementById('product-carousel');
+        if (el && window.bootstrap) bootstrap.Carousel.getOrCreateInstance(el).to(0);
+    }
 
     var qtyOut = document.getElementById("qty-value");
     var qtyMinus = document.getElementById("qty-minus");
     var qtyPlus = document.getElementById("qty-plus");
     function getSelectedStock() {
-        if (cartStatus === "made_to_order") {
-            return 999;
-        }
+        if (cartStatus === "made_to_order") return 999;
         if (hasSelectableVariations) {
             var v = findSelectedVariation();
             return v ? Number(v.stock || 0) : 0;
@@ -961,41 +937,27 @@ include __DIR__ . "/include/header.php";
     function clampQtyToStock() {
         if (!qtyOut) return;
         var stock = getSelectedStock();
-        if (stock > 0) {
-            qty = Math.min(qty, stock);
-        }
+        if (stock > 0) qty = Math.min(qty, stock);
         qty = Math.max(1, qty);
         qtyOut.textContent = String(qty);
     }
     if (qtyMinus && qtyPlus && qtyOut) {
-        qtyMinus.addEventListener("click", function () {
-            qty = Math.max(1, qty - 1);
-            qtyOut.textContent = String(qty);
-        });
+        qtyMinus.addEventListener("click", function () { qty = Math.max(1, qty - 1); qtyOut.textContent = String(qty); });
         qtyPlus.addEventListener("click", function () {
             var stock = getSelectedStock();
-            if (stock > 0) {
-                qty = Math.min(stock, qty + 1);
-            } else {
-                qty = Math.min(99, qty + 1);
-            }
+            if (stock > 0) qty = Math.min(stock, qty + 1);
+            else qty = Math.min(99, qty + 1);
             qtyOut.textContent = String(qty);
         });
     }
 
-    function normalize(value) {
-        return String(value || "").trim().toLowerCase();
-    }
+    function normalize(value) { return String(value || "").trim().toLowerCase(); }
 
-    var variationUsesSize = hasSelectableVariations && variations.some(function (item) {
-        return normalize(item.size) !== "";
-    });
-    var variationUsesColor = hasSelectableVariations && variations.some(function (item) {
-        return Number(item.colorID || 0) > 0;
-    });
+    var variationUsesSize = hasSelectableVariations && variations.some(function (item) { return normalize(item.size) !== ""; });
+    var variationUsesColor = hasSelectableVariations && variations.some(function (item) { return Number(item.colorID || 0) > 0; });
 
     var sizeChips = Array.prototype.slice.call(document.querySelectorAll(".size-chip"));
-    var colorDots = Array.prototype.slice.call(document.querySelectorAll(".color-dot"));
+    var colorSelect = document.getElementById("color-select");
     var colorStockEl = document.getElementById("color-stock");
     var variantStatus = document.getElementById("variant-status");
     var addCartBtn = document.getElementById("add-cart-btn");
@@ -1004,57 +966,44 @@ include __DIR__ . "/include/header.php";
     if (hasSelectableVariations) {
         variations.forEach(function (item) {
             var colorId = Number(item.colorID || 0);
-            if (!colorId) {
-                return;
-            }
+            if (!colorId) return;
             var qty = Number(item.stock || 0);
             colorStockMap[colorId] = (colorStockMap[colorId] || 0) + qty;
         });
     }
 
-    function updateColorDots() {
-        if (!colorDots.length) {
-            return;
-        }
-        if (!hasSelectableVariations || !variationUsesColor) {
-            colorDots.forEach(function (dot) {
-                dot.dataset.colorStock = String(Number(productInventory || 0));
-                dot.classList.remove("is-out");
-            });
-            return;
-        }
-        colorDots.forEach(function (dot) {
-            var colorId = parseInt(dot.getAttribute("data-color-id") || "0", 10) || 0;
-            var stock = Number(colorStockMap[colorId] || 0);
-            dot.dataset.colorStock = String(stock);
-            if (stock <= 0) {
-                dot.classList.add("is-out");
-                dot.title = (dot.getAttribute("data-color-name") || "Color") + " (Out of stock)";
+    function updateColorSelect() {
+        if (!colorSelect) return;
+        for (var i = 1; i < colorSelect.options.length; i++) {
+            var opt = colorSelect.options[i];
+            var colorId = parseInt(opt.value) || 0;
+            if (!hasSelectableVariations || !variationUsesColor) {
+                opt.disabled = false;
+                opt.text = opt.dataset.colorName ? (colorId + " \u2014 " + opt.dataset.colorName) : opt.text;
             } else {
-                dot.classList.remove("is-out");
+                var stock = Number(colorStockMap[colorId] || 0);
+                if (stock <= 0) {
+                    opt.disabled = true;
+                    opt.text = (opt.dataset.colorName || "Color") + " (Out of stock)";
+                } else {
+                    opt.disabled = false;
+                    opt.text = opt.dataset.colorName || "Color";
+                }
             }
-        });
+        }
     }
 
     function updateColorStockDisplay() {
-        if (!colorStockEl) {
-            return;
-        }
+        if (!colorStockEl) return;
         colorStockEl.classList.remove("is-error", "is-warning");
-        if (!selectedColorId) {
-            colorStockEl.textContent = "";
-            return;
-        }
-        var stock = Number(colorStockMap[selectedColorId] || 0);
-        var activeDot = document.querySelector(".color-dot.active");
-        var name = activeDot ? (activeDot.getAttribute("data-color-name") || "") : "";
-        colorStockEl.textContent = name ? name : "";
+        if (!selectedColorId) { colorStockEl.textContent = ""; return; }
+        var selOpt = colorSelect ? colorSelect.options[colorSelect.selectedIndex] : null;
+        var name = selOpt ? (selOpt.dataset.colorName || "") : "";
+        colorStockEl.textContent = name;
     }
 
     function findSelectedVariation() {
-        if (!hasSelectableVariations) {
-            return null;
-        }
+        if (!hasSelectableVariations) return null;
 
         var sizeFilterEnabled = variationUsesSize && !!selectedSize;
         var colorFilterEnabled = variationUsesColor && !!selectedColorId;
@@ -1064,40 +1013,23 @@ include __DIR__ . "/include/header.php";
             var colorOk = !colorFilterEnabled || Number(item.colorID || 0) === Number(selectedColorId || 0);
             return sizeOk && colorOk;
         });
-        if (exact) {
-            return exact;
-        }
-
+        if (exact) return exact;
         if (sizeFilterEnabled) {
-            var bySize = variations.find(function (item) {
-                return normalize(item.size) === normalize(selectedSize);
-            });
-            if (bySize) {
-                return bySize;
-            }
+            var bySize = variations.find(function (item) { return normalize(item.size) === normalize(selectedSize); });
+            if (bySize) return bySize;
         }
-
         if (colorFilterEnabled) {
-            var byColor = variations.find(function (item) {
-                return Number(item.colorID || 0) === Number(selectedColorId || 0);
-            });
-            if (byColor) {
-                return byColor;
-            }
+            var byColor = variations.find(function (item) { return Number(item.colorID || 0) === Number(selectedColorId || 0); });
+            if (byColor) return byColor;
         }
-
         return variations[0] || null;
     }
 
     function setVariantStatus(text, isError) {
-        if (!variantStatus) {
-            return;
-        }
+        if (!variantStatus) return;
         variantStatus.textContent = text || "";
         variantStatus.classList.remove("is-error", "is-success");
-        if (!text) {
-            return;
-        }
+        if (!text) return;
         variantStatus.classList.add(isError ? "is-error" : "is-success");
     }
 
@@ -1105,129 +1037,84 @@ include __DIR__ . "/include/header.php";
         var available = true;
         var selectedVariation = findSelectedVariation();
         var requireSizeSelection = variationUsesSize && sizeChips.length > 0;
-        var requireColorSelection = variationUsesColor && colorDots.length > 0;
+        var requireColorSelection = variationUsesColor && colorSelect !== null;
         var requireExact = (requireSizeSelection || requireColorSelection);
 
         if (hasSelectableVariations) {
             if (requireColorSelection && selectedColorId && cartStatus !== "made_to_order") {
                 var colorStock = Number(colorStockMap[selectedColorId] || 0);
-                if (colorStock <= 0) {
-                    available = false;
-                    setVariantStatus("Selected color is out of stock.", true);
-                }
+                if (colorStock <= 0) { available = false; setVariantStatus("Selected color is out of stock.", true); }
             }
             if (selectedVariation) {
                 var sizeExact = !requireSizeSelection || (!!selectedSize && normalize(selectedVariation.size) === normalize(selectedSize));
                 var colorExact = !requireColorSelection || (!!selectedColorId && Number(selectedVariation.colorID || 0) === Number(selectedColorId || 0));
-                if (requireExact && (!sizeExact || !colorExact)) {
-                    available = false;
-                    setVariantStatus("Please select a valid size and color.", true);
-                }
+                if (requireExact && (!sizeExact || !colorExact)) { available = false; setVariantStatus("Please select a valid size and color.", true); }
 
                 if (available) {
                     var stock = Number(selectedVariation.stock || 0);
-                    if (cartStatus !== "made_to_order" && stock <= 0) {
-                        available = false;
-                        setVariantStatus("Selected variation is out of stock.", true);
-                    } else if (cartStatus === "made_to_order") {
-                        setVariantStatus("Made to order.", false);
-                    } else {
-                        setVariantStatus("In stock", false);
-                    }
+                    if (cartStatus !== "made_to_order" && stock <= 0) { available = false; setVariantStatus("Selected variation is out of stock.", true); }
+                    else if (cartStatus === "made_to_order") setVariantStatus("Made to order.", false);
+                    else setVariantStatus("In stock", false);
                 }
-            } else if (requireExact) {
-                available = false;
-                setVariantStatus("Please select a valid size and color.", true);
-            }
+            } else if (requireExact) { available = false; setVariantStatus("Please select a valid size and color.", true); }
         } else {
-            if (cartStatus !== "made_to_order" && Number(productInventory) <= 0) {
-                available = false;
-                setVariantStatus("Out of stock.", true);
-            } else if (cartStatus === "made_to_order") {
-                setVariantStatus("Made to order.", false);
-            } else {
-                setVariantStatus("In stock", false);
-            }
+            if (cartStatus !== "made_to_order" && Number(productInventory) <= 0) { available = false; setVariantStatus("Out of stock.", true); }
+            else if (cartStatus === "made_to_order") setVariantStatus("Made to order.", false);
+            else setVariantStatus("In stock", false);
         }
 
-        if (addCartBtn) {
-            addCartBtn.disabled = !available;
-        }
+        if (addCartBtn) addCartBtn.disabled = !available;
         updateColorStockDisplay();
         clampQtyToStock();
-        return {
-            available: available,
-            selectedVariation: selectedVariation
-        };
+        return { available: available, selectedVariation: selectedVariation };
     }
 
     sizeChips.forEach(function (chip) {
         chip.addEventListener("click", function () {
-            sizeChips.forEach(function (item) {
-                item.classList.remove("active");
-            });
+            sizeChips.forEach(function (item) { item.classList.remove("active"); });
             chip.classList.add("active");
             selectedSize = (chip.getAttribute("data-size") || "").trim() || null;
             updateAddToCartState();
         });
     });
-    if (sizeChips.length) {
-        sizeChips[0].click();
-    }
+    if (sizeChips.length) sizeChips[0].click();
 
-    colorDots.forEach(function (dot) {
-        dot.addEventListener("click", function () {
-            colorDots.forEach(function (item) {
-                item.classList.remove("active");
-            });
-            dot.classList.add("active");
-            selectedColorId = parseInt(dot.getAttribute("data-color-id") || "0", 10) || null;
+    if (colorSelect) {
+        colorSelect.addEventListener("change", function () {
+            selectedColorId = parseInt(colorSelect.value) || null;
+            updateColorStockDisplay();
             updateAddToCartState();
+            pcpSwapImages(selectedColorId);
         });
-    });
-    updateColorDots();
-    if (colorDots.length) {
-        var firstAvailable = colorDots.find(function (dot) {
-            var stock = Number(dot.dataset.colorStock || 0);
-            return stock > 0;
-        });
-        (firstAvailable || colorDots[0]).click();
+        updateColorSelect();
+        for (var i = 1; i < colorSelect.options.length; i++) {
+            if (!colorSelect.options[i].disabled) {
+                colorSelect.selectedIndex = i;
+                colorSelect.dispatchEvent(new Event("change"));
+                break;
+            }
+        }
     }
     updateAddToCartState();
 
     function updateCartBadge(count) {
         var icon = document.querySelector("a.cart-icon");
-        if (!icon) {
-            return;
-        }
-
+        if (!icon) return;
         var badge = icon.querySelector(".cart-count");
         if (count > 0) {
-            if (!badge) {
-                badge = document.createElement("span");
-                badge.className = "cart-count";
-                icon.appendChild(badge);
-            }
+            if (!badge) { badge = document.createElement("span"); badge.className = "cart-count"; icon.appendChild(badge); }
             badge.textContent = count > 99 ? "99+" : String(count);
-        } else if (badge) {
-            badge.remove();
-        }
+        } else if (badge) badge.remove();
     }
 
     function showToast(message, isError) {
         var toast = document.querySelector(".pd-toast");
-        if (!toast) {
-            toast = document.createElement("div");
-            toast.className = "pd-toast";
-            document.body.appendChild(toast);
-        }
+        if (!toast) { toast = document.createElement("div"); toast.className = "pd-toast"; document.body.appendChild(toast); }
         toast.textContent = message;
         toast.classList.toggle("error", !!isError);
         toast.classList.add("show");
         clearTimeout(toast._timer);
-        toast._timer = setTimeout(function () {
-            toast.classList.remove("show");
-        }, 2200);
+        toast._timer = setTimeout(function () { toast.classList.remove("show"); }, 2200);
     }
 
     var couponInput = document.getElementById("coupon-code");
@@ -1240,14 +1127,10 @@ include __DIR__ . "/include/header.php";
     var basePrice = Number(priceRow ? priceRow.getAttribute("data-base-price") : 0);
     var appliedCouponCode = <?= json_encode(!empty($initialCouponEvaluation['valid']) ? $storedCouponCode : "") ?>;
 
-    function formatMoney(value) {
-        return "\u20AC" + Number(value || 0).toFixed(2);
-    }
+    function formatMoney(value) { return "\u20AC" + Number(value || 0).toFixed(2); }
 
     function normalizeCouponInput() {
-        if (!couponInput) {
-            return "";
-        }
+        if (!couponInput) return "";
         var code = String(couponInput.value || "").trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "");
         couponInput.value = code;
         return code;
@@ -1261,59 +1144,35 @@ include __DIR__ . "/include/header.php";
     }
 
     function renderPrice(discountedPrice, hasDiscount) {
-        if (!priceRow || !priceCurrent) {
-            return;
-        }
+        if (!priceRow || !priceCurrent) return;
         if (hasDiscount) {
             priceRow.classList.add("is-discounted");
             priceCurrent.textContent = formatMoney(discountedPrice);
-            if (priceOriginal) {
-                priceOriginal.textContent = formatMoney(basePrice);
-            }
-            return;
+            if (priceOriginal) priceOriginal.textContent = formatMoney(basePrice);
+        } else {
+            priceRow.classList.remove("is-discounted");
+            priceCurrent.textContent = formatMoney(basePrice);
         }
-        priceRow.classList.remove("is-discounted");
-        priceCurrent.textContent = formatMoney(basePrice);
     }
 
     function parseJsonResponse(response) {
         return response.text().then(function (raw) {
             var clean = String(raw || "").replace(/^\uFEFF+/, "").trim();
-            if (!clean) {
-                return {};
-            }
-            try {
-                return JSON.parse(clean);
-            } catch (err) {
-                return {
-                    success: false,
-                    valid: false,
-                    message: "Unexpected server response while validating coupon."
-                };
+            if (!clean) return {};
+            try { return JSON.parse(clean); } catch (err) {
+                return { success: false, valid: false, message: "Unexpected server response while validating coupon." };
             }
         });
     }
 
     function persistCoupon(action, code) {
         var payload = { action: action || "remove_coupon" };
-        if (action === "set_coupon") {
-            payload.coupon_code = code || "";
-        }
+        if (action === "set_coupon") payload.coupon_code = code || "";
         return fetch("cart_api.php", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": window.APP_CSRF_TOKEN || "" },
             body: JSON.stringify(payload)
-        })
-            .then(parseJsonResponse)
-            .then(function (data) {
-                if (!data || !data.success) {
-                    return false;
-                }
-                return true;
-            })
-            .catch(function () {
-                return false;
-            });
+        }).then(parseJsonResponse).then(function (data) { return data && data.success; }).catch(function () { return false; });
     }
 
     function validateCouponForProduct(code) {
@@ -1321,22 +1180,15 @@ include __DIR__ . "/include/header.php";
         body.set("coupon_code", code || "");
         return fetch("product.php?id=" + encodeURIComponent(String(productId)) + "&coupon_preview=1", {
             method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+            headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "X-CSRF-Token": window.APP_CSRF_TOKEN || "" },
             body: body.toString()
-        })
-            .then(parseJsonResponse)
-            .catch(function () {
-                return {
-                    valid: false,
-                    message: "Network error while validating coupon."
-                };
-            });
+        }).then(parseJsonResponse).catch(function () {
+            return { valid: false, message: "Network error while validating coupon." };
+        });
     }
 
     function applyCoupon() {
-        if (!couponInput) {
-            return;
-        }
+        if (!couponInput) return;
         var couponCode = normalizeCouponInput();
         if (!couponCode) {
             renderPrice(basePrice, false);
@@ -1356,7 +1208,6 @@ include __DIR__ . "/include/header.php";
                 persistCoupon("remove_coupon");
                 return;
             }
-
             persistCoupon("set_coupon", couponCode).then(function (saved) {
                 if (!saved) {
                     setCouponFeedback("Coupon is valid, but could not be saved. Please try again.", true);
@@ -1374,9 +1225,7 @@ include __DIR__ . "/include/header.php";
     }
 
     function removeCoupon() {
-        if (couponInput) {
-            couponInput.value = "";
-        }
+        if (couponInput) couponInput.value = "";
         appliedCouponCode = "";
         renderPrice(basePrice, false);
         setCouponFeedback("Coupon removed.", false);
@@ -1384,31 +1233,16 @@ include __DIR__ . "/include/header.php";
         persistCoupon("remove_coupon");
     }
 
-    if (couponFeedback && couponFeedback.getAttribute("data-is-error") === "1") {
-        couponFeedback.style.color = "#b42318";
-    }
-
-    if (couponApplyBtn) {
-        couponApplyBtn.addEventListener("click", function () {
-            applyCoupon();
-        });
-    }
-    if (couponRemoveBtn) {
-        couponRemoveBtn.addEventListener("click", function () {
-            removeCoupon();
-        });
-    }
+    if (couponFeedback && couponFeedback.getAttribute("data-is-error") === "1") couponFeedback.style.color = "#b42318";
+    if (couponApplyBtn) couponApplyBtn.addEventListener("click", applyCoupon);
+    if (couponRemoveBtn) couponRemoveBtn.addEventListener("click", removeCoupon);
 
     if (addCartBtn) {
         addCartBtn.addEventListener("click", function () {
             var state = updateAddToCartState();
-            if (!state.available) {
-                showToast("Please select an available option.", true);
-                return;
-            }
+            if (!state.available) { showToast("Please select an available option.", true); return; }
             if (hasSelectableVariations && (!state.selectedVariation || !state.selectedVariation.variationID)) {
-                showToast("Please select a valid size and color.", true);
-                return;
+                showToast("Please select a valid size and color.", true); return;
             }
 
             var payload = {
@@ -1420,46 +1254,28 @@ include __DIR__ . "/include/header.php";
                     message: (document.getElementById("gift-note") && document.getElementById("gift-note").value || "").trim()
                 }
             };
-            if (appliedCouponCode) {
-                payload.coupon_code = appliedCouponCode;
-            }
+            if (appliedCouponCode) payload.coupon_code = appliedCouponCode;
 
             if (hasSelectableVariations) {
                 payload.variation = {};
-                if (variationUsesColor && selectedColorId) {
-                    payload.variation.color_id = selectedColorId;
-                }
-                if (variationUsesSize && selectedSize) {
-                    payload.variation.size = selectedSize;
-                }
-                if (state.selectedVariation && state.selectedVariation.yarnType) {
-                    payload.variation.yarn_type = state.selectedVariation.yarnType;
-                }
-                if (state.selectedVariation && state.selectedVariation.variationID) {
-                    payload.variation_id = state.selectedVariation.variationID;
-                }
+                if (variationUsesColor && selectedColorId) payload.variation.color_id = selectedColorId;
+                if (variationUsesSize && selectedSize) payload.variation.size = selectedSize;
+                if (state.selectedVariation && state.selectedVariation.yarnType) payload.variation.yarn_type = state.selectedVariation.yarnType;
+                if (state.selectedVariation && state.selectedVariation.variationID) payload.variation_id = state.selectedVariation.variationID;
             }
 
             fetch("cart_api.php", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", "X-CSRF-Token": window.APP_CSRF_TOKEN || "" },
                 body: JSON.stringify(payload)
-            })
-                .then(function (response) {
-                    return response.json();
-                })
-                .then(function (data) {
-                    if (data && data.success) {
-                        var count = data.cart && data.cart.totals ? data.cart.totals.items_count : 0;
-                        updateCartBadge(Number(count) || 0);
-                        showToast(data.notice || "Added to cart.");
-                    } else {
-                        showToast((data && data.message) || "Could not add to cart.", true);
-                    }
-                })
-                .catch(function () {
-                    showToast("Network error.", true);
-                });
+            }).then(function (response) { return response.json(); })
+            .then(function (data) {
+                if (data && data.success) {
+                    var count = data.cart && data.cart.totals ? data.cart.totals.items_count : 0;
+                    updateCartBadge(Number(count) || 0);
+                    showToast(data.notice || "Added to cart.");
+                } else { showToast((data && data.message) || "Could not add to cart.", true); }
+            }).catch(function () { showToast("Network error.", true); });
         });
     }
 
@@ -1468,34 +1284,25 @@ include __DIR__ . "/include/header.php";
     if (writeReviewBtn && writeReviewForm) {
         writeReviewBtn.addEventListener("click", function () {
             writeReviewForm.classList.toggle("is-open");
-            if (writeReviewForm.classList.contains("is-open")) {
-                writeReviewForm.scrollIntoView({ behavior: "smooth", block: "center" });
-            }
+            if (writeReviewForm.classList.contains("is-open")) writeReviewForm.scrollIntoView({ behavior: "smooth", block: "center" });
         });
     }
 
     var ratingInputs = Array.prototype.slice.call(document.querySelectorAll(".review-rating-input input[type='radio']"));
     function paintRatingSelection() {
-        if (!ratingInputs.length) {
-            return;
-        }
-        var selected = ratingInputs.find(function (input) {
-            return input.checked;
-        });
+        if (!ratingInputs.length) return;
+        var selected = ratingInputs.find(function (input) { return input.checked; });
         var selectedValue = selected ? Number(selected.value) : 0;
         ratingInputs.forEach(function (input) {
             var label = input.closest(".review-star-option");
-            if (!label) {
-                return;
-            }
+            if (!label) return;
             label.classList.toggle("is-on", Number(input.value) <= selectedValue);
         });
     }
-    ratingInputs.forEach(function (input) {
-        input.addEventListener("change", paintRatingSelection);
-    });
+    ratingInputs.forEach(function (input) { input.addEventListener("change", paintRatingSelection); });
     paintRatingSelection();
 })();
 </script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
