@@ -4,6 +4,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 require_once __DIR__ . '/security.php';
+require_once __DIR__ . '/homepage_customization.php';
 
 $isLoggedIn = isset($_SESSION["user"]);
 $wishlistCount = 0;
@@ -25,6 +26,9 @@ $rootPrefix = (
 $headerName  = $GLOBALS['header_user_full_name'] ?? ($_SESSION["user"]["full_name"] ?? "Guest");
 $headerRole  = $GLOBALS['header_user_role']      ?? ($_SESSION["user"]["role"] ?? "guest");
 $initials    = $GLOBALS['header_user_initials']  ?? null;
+$homepageSettings = isset($conn) && $conn instanceof mysqli ? app_homepage_load_settings($conn) : [];
+$headerLogoPath = (string)($homepageSettings['header_logo_path'] ?? '');
+$headerLogoUrl = app_homepage_asset_url($headerLogoPath, $rootPrefix);
 
 // Fallback initials generation if not provided
 if ($isLoggedIn && !$initials) {
@@ -43,7 +47,13 @@ if ($isLoggedIn && !$initials) {
         <div class="header-content">
             <!-- Logo: works from root and subfolders -->
             <a href="<?php echo $rootPrefix; ?>index.php" class="logo" aria-label="Creations by Athina Home">
-                <div class="logo-icon">CA</div>
+                <?php if ($headerLogoUrl !== ''): ?>
+                    <div class="logo-icon logo-icon-image">
+                        <img src="<?= htmlspecialchars($headerLogoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="Creations by Athina logo">
+                    </div>
+                <?php else: ?>
+                    <div class="logo-icon">CA</div>
+                <?php endif; ?>
                 <span class="logo-text">Creations by Athina</span>
             </a>
 

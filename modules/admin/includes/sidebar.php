@@ -17,6 +17,7 @@ $nav = [
     ['id' => 'analytics_reports',      'label' => 'Analytics & Reports',    'icon' => 'fa-chart-bar',      'file' => 'analytics_reports.php'],
     ['id' => 'marketing_integrations', 'label' => 'Marketing Integrations', 'icon' => 'fa-envelope',       'file' => 'marketing_integrations.php'],
     ['id' => 'content_management',     'label' => 'Content Management',     'icon' => 'fa-file-alt',       'file' => 'content_management.php'],
+    ['id' => 'homepage_customization', 'label' => 'Home Page Customization','icon' => 'fa-image',          'file' => 'homepage_customization.php'],
 ];
 $siteRoot = rtrim(dirname(dirname(dirname($_SERVER['SCRIPT_NAME'] ?? ''))), '/');
 if ($siteRoot === '') {

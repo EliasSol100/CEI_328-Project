@@ -2,6 +2,7 @@
 session_start();
 require_once "authentication/database.php";
 require_once "authentication/get_config.php";
+require_once __DIR__ . "/include/homepage_customization.php";
 
 // --------------------------------------------------
 // Site configuration
@@ -175,6 +176,8 @@ if ($sellingFastRes) {
         $sellingFastProducts[] = $row;
     }
 }
+
+$homepageSettings = app_homepage_load_settings($conn);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -195,7 +198,7 @@ if ($sellingFastRes) {
     ?>
 
     <!-- Hero Section -->
-    <section class="hero">
+    <section class="hero" style="background-image: url('<?= htmlspecialchars($homepageSettings['hero_image'], ENT_QUOTES, 'UTF-8') ?>');">
         <div class="hero-overlay"></div>
         <div class="hero-content">
             <h1 class="hero-title" data-translate="heroTitle">
@@ -219,22 +222,12 @@ if ($sellingFastRes) {
                 Explore our favourite crochet plushies by theme
             </p>
             <div class="collection-grid">
-                <a href="shop.php?category=dragon" class="collection-card">
-                    <div class="collection-image img-1"></div>
-                    <div class="collection-label" data-translate="dragonPlushies">Dragon Plushies</div>
-                </a>
-                <a href="shop.php?category=electric" class="collection-card">
-                    <div class="collection-image img-2"></div>
-                    <div class="collection-label" data-translate="electricFriends">Electric Friends</div>
-                </a>
-                <a href="shop.php?category=sea" class="collection-card">
-                    <div class="collection-image img-3"></div>
-                    <div class="collection-label" data-translate="seaCreatures">Sea Creatures</div>
-                </a>
-                <a href="shop.php?category=bunny" class="collection-card">
-                    <div class="collection-image img-4"></div>
-                    <div class="collection-label" data-translate="bunnyPlushies">Bunny Plushies</div>
-                </a>
+                <?php foreach ($homepageSettings['collections'] as $collection): ?>
+                    <a href="<?= htmlspecialchars($collection['link'], ENT_QUOTES, 'UTF-8') ?>" class="collection-card">
+                        <div class="collection-image" style="background-image: url('<?= htmlspecialchars($collection['image'], ENT_QUOTES, 'UTF-8') ?>');"></div>
+                        <div class="collection-label"><?= htmlspecialchars($collection['label'], ENT_QUOTES, 'UTF-8') ?></div>
+                    </a>
+                <?php endforeach; ?>
             </div>
         </div>
     </section>
@@ -471,10 +464,9 @@ if ($sellingFastRes) {
             <h2 class="section-title" data-translate="followJourney">Follow Our Journey</h2>
             <p class="section-subtitle" data-translate="instagramHandle">@creationsbyathina</p>
             <div class="journey-grid">
-                <div class="journey-image img-journey-1"></div>
-                <div class="journey-image img-journey-2"></div>
-                <div class="journey-image img-journey-3"></div>
-                <div class="journey-image img-journey-4"></div>
+                <?php foreach ($homepageSettings['journey_images'] as $journeyImage): ?>
+                    <div class="journey-image" style="background-image: url('<?= htmlspecialchars($journeyImage, ENT_QUOTES, 'UTF-8') ?>');"></div>
+                <?php endforeach; ?>
             </div>
         </div>
     </section>
