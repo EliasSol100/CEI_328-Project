@@ -29,7 +29,7 @@ function notifyAdminNewOrder(mysqli $conn, string $message): void {
     if (!$tableChecked) {
         $conn->query("
             CREATE TABLE IF NOT EXISTS admin_notifications (
-                id INT AUTO_INCREMENT PRIMARY KEY,
+                notification_id INT AUTO_INCREMENT PRIMARY KEY,
                 message TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 is_read TINYINT(1) DEFAULT 0

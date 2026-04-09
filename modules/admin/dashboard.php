@@ -40,11 +40,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['notif_action'])) {
         mysqli_query($conn, "ALTER TABLE admin_notifications ADD COLUMN is_read TINYINT(1) NOT NULL DEFAULT 0");
     }
 
+    $notifIdColumn = 'id';
+    $legacyIdColCheck = mysqli_query($conn, "SHOW COLUMNS FROM admin_notifications LIKE 'id'");
+    if (!$legacyIdColCheck || mysqli_num_rows($legacyIdColCheck) === 0) {
+        $newIdColCheck = mysqli_query($conn, "SHOW COLUMNS FROM admin_notifications LIKE 'notification_id'");
+        if ($newIdColCheck && mysqli_num_rows($newIdColCheck) > 0) {
+            $notifIdColumn = 'notification_id';
+        }
+    }
+
     $action = trim((string)($_POST['notif_action'] ?? ''));
     if ($action === 'dismiss_one') {
         $notifId = (int)($_POST['notif_id'] ?? 0);
         if ($notifId > 0) {
-            $stmt = mysqli_prepare($conn, "UPDATE admin_notifications SET is_read = 1 WHERE id = ?");
+            $stmt = mysqli_prepare($conn, "UPDATE admin_notifications SET is_read = 1 WHERE {$notifIdColumn} = ?");
             if ($stmt) {
                 mysqli_stmt_bind_param($stmt, 'i', $notifId);
                 mysqli_stmt_execute($stmt);
@@ -256,9 +265,17 @@ $unreadCount = 0;
 $orderNumberToId = [];
 $tableCheck = mysqli_query($conn, "SHOW TABLES LIKE 'admin_notifications'");
 if ($tableCheck && mysqli_num_rows($tableCheck) > 0) {
+    $notifIdColumn = 'id';
     $colCheck = mysqli_query($conn, "SHOW COLUMNS FROM admin_notifications LIKE 'is_read'");
     if ($colCheck && mysqli_num_rows($colCheck) === 0) {
         mysqli_query($conn, "ALTER TABLE admin_notifications ADD COLUMN is_read TINYINT(1) NOT NULL DEFAULT 0");
+    }
+    $legacyIdColCheck = mysqli_query($conn, "SHOW COLUMNS FROM admin_notifications LIKE 'id'");
+    if (!$legacyIdColCheck || mysqli_num_rows($legacyIdColCheck) === 0) {
+        $newIdColCheck = mysqli_query($conn, "SHOW COLUMNS FROM admin_notifications LIKE 'notification_id'");
+        if ($newIdColCheck && mysqli_num_rows($newIdColCheck) > 0) {
+            $notifIdColumn = 'notification_id';
+        }
     }
 
     $countRes = mysqli_query($conn, "SELECT COUNT(*) AS c FROM admin_notifications WHERE is_read = 0");
@@ -269,10 +286,10 @@ if ($tableCheck && mysqli_num_rows($tableCheck) > 0) {
 
     $nr = mysqli_query(
         $conn,
-        "SELECT id, message, created_at, is_read
+        "SELECT {$notifIdColumn} AS id, message, created_at, is_read
          FROM admin_notifications
          WHERE is_read = 0
-         ORDER BY id DESC
+         ORDER BY {$notifIdColumn} DESC
          LIMIT 8"
     );
     if ($nr) {
