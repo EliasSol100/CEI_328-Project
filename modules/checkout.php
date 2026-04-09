@@ -7,6 +7,9 @@ define('INCLUDE_CHECK', true);
 // Correct relative path: go up one level from 'modules' to project root, then into 'authentication'
 require_once __DIR__ . '/../authentication/database.php';
 require_once __DIR__ . '/../include/loyalty_program.php';
+require_once __DIR__ . '/../include/payment_gateway.php';
+require_once __DIR__ . '/../include/checkout_payment_helpers.php';
+require_once __DIR__ . '/../include/translation_helpers.php';
 require_once __DIR__ . '/place_order.php';
 
 // Optional: include get_config.php if it exists (to avoid errors if missing)
@@ -286,6 +289,11 @@ $project = rtrim(str_replace('\\', '/', dirname(dirname($_SERVER['SCRIPT_NAME'] 
 if ($project === '' || $project === '.') {
     $project = '';
 }
+
+$availablePaymentMethods = payment_gateway_available_methods($conn);
+$defaultPaymentMethod = !empty($availablePaymentMethods['stripe'])
+    ? 'stripe'
+    : (!empty($availablePaymentMethods['paypal']) ? 'paypal' : '');
 
 // ----- CSRF TOKEN -----
 if (empty($_SESSION['csrf_token'])) {
@@ -638,9 +646,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (empty($_POST[$field])) $errors[$field] = "$label is required";
         }
 
-        $allowedPaymentMethods = ['stripe', 'paypal'];
+        $allowedPaymentMethods = array_keys(array_filter($availablePaymentMethods));
         $paymentMethod = trim((string)($_POST['payment_method'] ?? ''));
-        if ($paymentMethod !== '' && !in_array($paymentMethod, $allowedPaymentMethods, true)) {
+        if (empty($allowedPaymentMethods)) {
+            $errors['payment_method'] = 'No online payment methods have been configured yet.';
+        } elseif ($paymentMethod !== '' && !in_array($paymentMethod, $allowedPaymentMethods, true)) {
             $errors['payment_method'] = 'Selected payment method is not available.';
         }
 
@@ -728,8 +738,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (empty($errors)) {
             try {
-                $conn->begin_transaction();
-
                 $shippingCost = checkoutShippingCost(
                     $shippingCountry,
                     $shippingSpeed,
@@ -737,156 +745,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     (float)$freeShippingThreshold,
                     $shippingRatesByCountry
                 );
-                $freeShippingFlag = $shippingCost <= 0 ? 1 : 0;
-                $shippingMessage = $freeShippingFlag
-                    ? "Free Shipping Applied!"
-                    : "Add €" . number_format($shippingDifference, 2) . " more for free delivery!";
-
-                $lockedLoyaltyBalance = ($isLoggedIn && $userId > 0)
-                    ? loyaltyGetCurrentBalance($conn, $userId, true)
-                    : 0;
-                $finalLoyaltyRedemption = loyaltyBuildRedemptionPreview(
+                $previewLoyaltyRedemption = loyaltyBuildRedemptionPreview(
                     $selectedLoyaltyPoints,
-                    $lockedLoyaltyBalance,
+                    $availableLoyaltyBalance,
                     $loyaltyEligibleSubtotal
                 );
-                if ($selectedLoyaltyPoints > 0 && $finalLoyaltyRedemption['error'] !== '') {
-                    throw new RuntimeException((string)$finalLoyaltyRedemption['error']);
+                if ($selectedLoyaltyPoints > 0 && $previewLoyaltyRedemption['error'] !== '') {
+                    throw new RuntimeException((string)$previewLoyaltyRedemption['error']);
                 }
 
-                $loyaltyDiscount = (float)($finalLoyaltyRedemption['discount_amount'] ?? 0);
+                $loyaltyDiscount = (float)($previewLoyaltyRedemption['discount_amount'] ?? 0);
                 $combinedDiscountTotal = round($couponDiscount + $loyaltyDiscount, 2);
-                $loyaltyEarnEligibleAmount = max(0, round($loyaltyEligibleSubtotal - $loyaltyDiscount, 2));
-                $earnedPoints = loyaltyCalculateEarnedPoints($loyaltyEarnEligibleAmount);
                 $totalAmount = max(0, ($cartTotal - $combinedDiscountTotal) + $shippingCost);
-
-                // Centralized Place Order module call:
-                // creates order header, order lines, payment row and shipment summary.
-                $placed = placeOrder($conn, [
-                    'payment_confirmed' => true,
+                $pendingPayment = checkout_payment_store_pending([
+                    'payment_method' => $totalAmount > 0 ? $paymentMethod : 'manual',
                     'items' => $cartItems,
-                    'user_id' => $userId > 0 ? $userId : null,
-                    'is_guest' => $isLoggedIn ? 0 : 1,
-                    'email' => $isLoggedIn ? $userEmail : trim((string)($_POST['email'] ?? '')),
-                    'customer_name' => $isLoggedIn ? (string)$userFullName : trim((string)($_POST['full_name'] ?? 'Customer')),
-                    'order_status' => 'pending',
-                    'payment_status' => 'paid',
-                    'payment_provider' => trim((string)($_POST['payment_method'] ?? 'manual')),
+                    'is_logged_in' => $isLoggedIn,
+                    'user_id' => $userId,
+                    'user_email' => $isLoggedIn ? (string)$userEmail : '',
+                    'user_full_name' => $isLoggedIn ? (string)$userFullName : '',
+                    'guest_email' => !$isLoggedIn ? trim((string)($_POST['email'] ?? '')) : '',
+                    'guest_full_name' => !$isLoggedIn ? trim((string)($_POST['full_name'] ?? 'Customer')) : '',
+                    'guest_phone' => !$isLoggedIn ? trim((string)($_POST['phone'] ?? '')) : '',
+                    'create_account' => !$isLoggedIn && !empty($_POST['create_account']) && $_POST['create_account'] === 'yes',
                     'subtotal' => $cartTotal,
-                    'discount_total' => $combinedDiscountTotal,
+                    'coupon_discount' => $couponDiscount,
+                    'coupon_code' => $selectedCouponCode,
+                    'selected_loyalty_points' => $selectedLoyaltyPoints,
+                    'loyalty_eligible_subtotal' => $loyaltyEligibleSubtotal,
                     'shipping_cost' => $shippingCost,
-                    'total_amount' => $totalAmount,
+                    'shipping_country' => $shippingCountry,
+                    'shipping_speed' => $shippingSpeed,
                     'shipping_address' => trim((string)($_POST['shipping_address'] ?? '')),
                     'shipping_city' => trim((string)($_POST['shipping_city'] ?? '')),
                     'shipping_postal_code' => trim((string)($_POST['shipping_postal_code'] ?? '')),
-                    'shipping_country' => $shippingCountry,
                     'shipping_label' => trim((string)($_POST['shipping_label'] ?? '')),
                     'courier' => $courier,
-                    'shipping_priority' => $shippingSpeed,
                     'fulfillment_mode' => $fulfillmentMode,
+                    'total_amount' => $totalAmount,
+                    'cart_count' => $cartCount,
+                    'site_title' => $system_title,
+                    'free_shipping_threshold' => $freeShippingThreshold,
                 ]);
-                $orderId = (int)$placed['order_id'];
-                $orderNumber = (string)$placed['order_number'];
 
-                $accountCreated = false;
-                $loyaltyUserId = $isLoggedIn && $userId > 0 ? $userId : 0;
-                if (!$isLoggedIn && !empty($_POST['create_account']) && $_POST['create_account'] === 'yes') {
-                    $tempPassword = bin2hex(random_bytes(5));
-                    $hash = password_hash($tempPassword, PASSWORD_DEFAULT);
-                    $nameParts = explode(' ', trim($_POST['full_name']), 2);
-                    $first = $nameParts[0];
-                    $last = $nameParts[1] ?? '';
-
-                            $check = $conn->prepare("SELECT userID FROM users WHERE email = ?");
-                    $check->bind_param("s", $_POST['email']);
-                    $check->execute();
-                    $check->store_result();
-                    if ($check->num_rows == 0) {
-                        // Keep new-account creation aligned with the current users table constraints.
-                        $username = strtolower(preg_replace('/[^a-z0-9]/', '', strstr($_POST['email'], '@', true) ?: 'user')) . rand(100, 999);
-                        $fullName = trim($first . ' ' . $last);
-                        $insert = $conn->prepare("INSERT INTO users (full_name, email, username, password, phone, role) VALUES (?,?,?,?,?,'user')");
-                        $insert->bind_param("sssss", $fullName, $_POST['email'], $username, $hash, $_POST['phone']);
-                        if ($insert->execute()) {
-                            $newUserId = $insert->insert_id;
-                            $upd = $conn->prepare("UPDATE orders SET userID = ?, isGuestFlag = 0 WHERE orderID = ?");
-                            $upd->bind_param("ii", $newUserId, $orderId);
-                            $upd->execute();
-                            $upd->close();
-                            $_SESSION['temp_password'] = $tempPassword;
-                            $accountCreated = true;
-                            $loyaltyUserId = (int)$newUserId;
-                        }
-                        $insert->close();
-                    }
-                    $check->close();
+                if ($totalAmount <= 0) {
+                    checkout_payment_finalize_paid_order($conn, $pendingPayment, 'manual', 'FREE_' . strtoupper(bin2hex(random_bytes(5))));
+                    header('Location: ' . $project . '/modules/checkout_success.php');
+                    exit;
                 }
 
-                $loyaltyOutcome = loyaltyApplyOrderTransactions(
-                    $conn,
-                    $loyaltyUserId,
-                    $orderId,
-                    (int)($finalLoyaltyRedemption['points_to_redeem'] ?? 0),
-                    $loyaltyDiscount,
-                    $earnedPoints
-                );
+                if ($paymentMethod === 'stripe') {
+                    $gatewayStart = payment_gateway_create_stripe_checkout_session($conn, [
+                        'checkout_token' => (string)$pendingPayment['checkout_token'],
+                        'total_amount' => $totalAmount,
+                        'customer_email' => $isLoggedIn ? (string)$userEmail : trim((string)($_POST['email'] ?? '')),
+                        'line_item_name' => 'Creations by Athina Order',
+                        'line_item_description' => 'Checkout for ' . max(1, (int)$cartCount) . ' handmade item(s)',
+                    ]);
+                } else {
+                    $gatewayStart = payment_gateway_create_paypal_order($conn, [
+                        'checkout_token' => (string)$pendingPayment['checkout_token'],
+                        'total_amount' => $totalAmount,
+                        'customer_email' => $isLoggedIn ? (string)$userEmail : trim((string)($_POST['email'] ?? '')),
+                        'line_item_name' => 'Creations by Athina Order',
+                        'site_title' => $system_title,
+                    ]);
+                }
 
-                $conn->commit();
+                $pendingPayment['gateway_reference'] = (string)$gatewayStart['gateway_reference'];
+                $_SESSION['pending_checkout_payment'] = $pendingPayment;
 
-                // Send customer confirmation email only after DB commit succeeds.
-                // If email fails, order is still valid and stored.
-                $confirmationEmailTo = $isLoggedIn ? (string)$userEmail : trim((string)($_POST['email'] ?? ''));
-                $confirmationName = $isLoggedIn ? (string)$userFullName : trim((string)($_POST['full_name'] ?? 'Customer'));
-                $emailResult = sendOrderConfirmationEmail([
-                    'to_email' => $confirmationEmailTo,
-                    'customer_name' => $confirmationName,
-                    'order_id' => $orderId,
-                    'order_number' => $orderNumber,
-                    'total' => $totalAmount,
-                    'shipping_cost' => $shippingCost,
-                    'shipping_address' => trim((string)($_POST['shipping_address'] ?? '')),
-                    'shipping_city' => trim((string)($_POST['shipping_city'] ?? '')),
-                    'shipping_postal_code' => trim((string)($_POST['shipping_postal_code'] ?? '')),
-                    'shipping_country' => $shippingCountry,
-                    'shipping_label' => trim((string)($_POST['shipping_label'] ?? '')),
-                    'courier' => $courier,
-                    'shipping_priority' => $shippingSpeed,
-                    'fulfillment_mode' => $fulfillmentMode,
-                    'items' => $cartItems,
-                ]);
-
-                unset($_SESSION['cart']);
-                unset($_SESSION['cart_coupon_code']);
-                checkoutResetLoyaltySelection();
-
-                $_SESSION['checkout_result'] = [
-                    'order_id'         => $orderId,
-                    'order_number'     => $orderNumber,
-                    'total'            => $totalAmount,
-                    'shipping_message' => $shippingMessage,
-                    'free_shipping'    => $freeShippingEligible,
-                    'account_created'  => $accountCreated,
-                    'discount_total'   => $combinedDiscountTotal,
-                    'coupon_discount'  => $couponDiscount,
-                    'loyalty_redeemed_points' => (int)($loyaltyOutcome['redeemed_points'] ?? 0),
-                    'loyalty_redeem_discount' => (float)($loyaltyOutcome['redeem_discount'] ?? 0),
-                    'loyalty_earned_points' => (int)($loyaltyOutcome['earned_points'] ?? 0),
-                    'loyalty_balance_after' => (int)($loyaltyOutcome['balance_after'] ?? 0),
-                    'loyalty_account_available' => $loyaltyUserId > 0,
-                    'coupon_code'      => $selectedCouponCode,
-                    'confirmation_email_to' => $confirmationEmailTo,
-                    'confirmation_email_sent' => (bool)($emailResult['sent'] ?? false),
-                    'confirmation_email_error' => (string)($emailResult['error'] ?? '')
-                ];
-
-                // NOTE: underscore filename is the actual file in this project.
-                header('Location: ' . $project . '/modules/checkout_success.php');
+                header('Location: ' . (string)$gatewayStart['redirect_url']);
                 exit;
-
-            } catch (Exception $e) {
-                $conn->rollback();
-                $error = 'Order failed: ' . $e->getMessage();
-                error_log("Checkout error: " . $e->getMessage());
+            } catch (Throwable $e) {
+                $error = 'Payment could not be started: ' . $e->getMessage();
+                error_log("Checkout payment start error: " . $e->getMessage());
             }
         }
     }
@@ -901,11 +834,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link rel="stylesheet" href="../assets/styling/styles.css">
     <link rel="stylesheet" href="../assets/styling/header.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="../assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/translations.js') ?>" defer></script>
 </head>
-<body class="site-page">
+<body class="site-page"<?= app_translate_page_title_attrs('Checkout - ' . $system_title, 'Ολοκλήρωση Παραγγελίας - ' . $system_title) ?>>
 <?php
 $headerPath = __DIR__ . '/../include/header.php';
 if (file_exists($headerPath)) {
@@ -938,7 +869,7 @@ if (file_exists($headerPath)) {
                         <?php if (isset($errors['full_name'])): ?><span class="error"><?= $errors['full_name'] ?></span><?php endif; ?>
                     </div>
                     <div class="form-group">
-                        <label>Email *</label>
+                        <label><span data-translate="checkoutEmail">Email</span> *</label>
                         <input type="email" name="email" value="<?= htmlspecialchars($formData['email']??'') ?>" class="<?= isset($errors['email'])?'error-field':'' ?>" required>
                         <?php if (isset($errors['email'])): ?><span class="error"><?= $errors['email'] ?></span><?php endif; ?>
                     </div>
@@ -956,9 +887,9 @@ if (file_exists($headerPath)) {
                     <div class="form-group">
                         <label class="option-label">
                             <input type="checkbox" id="use_saved_address" name="use_saved_address" value="1" <?= (($formData['use_saved_address'] ?? '0') === '1') ? 'checked' : '' ?>>
-                            Auto-fill with my default address
+                            <span data-translate="checkoutUseDefaultAddress">Auto-fill with my default address</span>
                         </label>
-                        <span class="form-helper">Uses your default address from My Account. You can still edit every field manually.</span>
+                        <span class="form-helper" data-translate="checkoutUseDefaultAddressHelp">Uses your default address from My Account. You can still edit every field manually.</span>
                     </div>
                     <?php endif; ?>
                     <div class="form-group">
@@ -1000,18 +931,18 @@ if (file_exists($headerPath)) {
                         <?php if (isset($errors['shipping_country'])): ?><span class="error"><?= $errors['shipping_country'] ?></span><?php endif; ?>
                     </div>
                     <div class="form-group">
-                        <label>Label (optional)</label>
-                        <input type="text" id="shipping_label" name="shipping_label" value="<?= htmlspecialchars($formData['shipping_label']??'') ?>" placeholder="Home, Office, Gift address...">
+                        <label data-translate="checkoutLabelOptional">Label (optional)</label>
+                        <input type="text" id="shipping_label" name="shipping_label" value="<?= htmlspecialchars($formData['shipping_label']??'') ?>" data-translate-placeholder="checkoutLabelPlaceholder" placeholder="Home, Office, Gift address...">
                     </div>
                 </fieldset>
 
                 <fieldset>
                     <legend data-translate="checkoutShippingMethod">Shipping Method</legend>
                     <div class="form-group">
-                        <label>Delivery Option *</label>
+                            <label><span data-translate="checkoutDeliveryOption">Delivery Option</span> *</label>
                         <div class="form-options">
                             <?php foreach ($shippingModeLabels as $modeKey => $modeLabel): ?>
-                                <label class="option-label"><input type="radio" name="fulfillment_mode" value="<?= htmlspecialchars($modeKey) ?>" <?= (($formData['fulfillment_mode'] ?? 'delivery') === $modeKey) ? 'checked' : '' ?>> <?= htmlspecialchars($modeLabel) ?></label>
+                                <label class="option-label"><input type="radio" name="fulfillment_mode" value="<?= htmlspecialchars($modeKey) ?>" <?= (($formData['fulfillment_mode'] ?? 'delivery') === $modeKey) ? 'checked' : '' ?>> <span<?= $modeKey === 'delivery' ? app_translate_text_attrs('Deliver to my address', 'Παράδοση στη διεύθυνσή μου') : app_translate_text_attrs('Pickup from courier point', 'Παραλαβή από σημείο courier') ?>><?= htmlspecialchars($modeLabel) ?></span></label>
                             <?php endforeach; ?>
                         </div>
                         <?php if (isset($errors['fulfillment_mode'])): ?><span class="error"><?= $errors['fulfillment_mode'] ?></span><?php endif; ?>
@@ -1024,13 +955,13 @@ if (file_exists($headerPath)) {
                                 <option value="<?= htmlspecialchars($courierCode) ?>" <?= ($formData['courier']??'')===$courierCode ? 'selected' : '' ?>><?= htmlspecialchars($courierName) ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <span class="form-helper">Couriers update automatically based on the selected country.</span>
+                        <span class="form-helper" data-translate="checkoutCouriersUpdateHelp">Couriers update automatically based on the selected country.</span>
                         <?php if (isset($errors['courier'])): ?><span class="error"><?= $errors['courier'] ?></span><?php endif; ?>
                     </div>
                     <div class="form-group" id="akis-point-wrapper" style="display:none;">
-                        <label>Επιλέξτε Σημείο Παραλαβής Akis Express *</label>
+                        <label data-translate="checkoutPickupPointLabel">Επιλέξτε Σημείο Παραλαβής Akis Express *</label>
                         <select id="akis_pickup_point" name="akis_pickup_point">
-                            <option value="">-- Επιλέξτε Πόλη --</option>
+                            <option value="" data-translate="checkoutPickupPointPlaceholder">Επιλέξτε Πόλη</option>
                             <option>Αγία Βαρβάρα (Αντιπρόσωπος)</option>
                             <option>Αγία Νάπα (Αντιπρόσωπος)</option>
                             <option>Αγία Φύλα (Αντιπρόσωπος)</option>
@@ -1123,22 +1054,23 @@ if (file_exists($headerPath)) {
                 <fieldset>
                     <legend data-translate="checkoutPayment">Payment</legend>
                     <div class="form-options form-options-column">
-                        <label class="option-label"><input type="radio" name="payment_method" value="stripe" <?= ($formData['payment_method']??'stripe')=='stripe'?'checked':'' ?> required> Credit Card (Stripe)</label>
-                        <label class="option-label"><input type="radio" name="payment_method" value="paypal" <?= ($formData['payment_method']??'')=='paypal'?'checked':'' ?>> PayPal</label>
+                        <label class="option-label"><input type="radio" name="payment_method" value="stripe" <?= (($formData['payment_method'] ?? $defaultPaymentMethod) === 'stripe') ? 'checked' : '' ?> <?= empty($availablePaymentMethods['stripe']) ? 'disabled' : '' ?> required> <span data-translate="checkoutPaymentStripe">Credit Card (Stripe)</span><?= empty($availablePaymentMethods['stripe']) ? ' <em>(Not configured)</em>' : '' ?></label>
+                        <label class="option-label"><input type="radio" name="payment_method" value="paypal" <?= (($formData['payment_method'] ?? $defaultPaymentMethod) === 'paypal') ? 'checked' : '' ?> <?= empty($availablePaymentMethods['paypal']) ? 'disabled' : '' ?>> <span data-translate="checkoutPaymentPaypal">PayPal</span><?= empty($availablePaymentMethods['paypal']) ? ' <em>(Not configured)</em>' : '' ?></label>
                     </div>
+                    <span class="form-helper">Successful payments redirect to the confirmation page automatically. If a payment is cancelled or fails, the customer will be sent to the checkout failed page.</span>
                     <?php if (isset($errors['payment_method'])): ?><span class="error"><?= $errors['payment_method'] ?></span><?php endif; ?>
                 </fieldset>
 
                 <fieldset>
-                    <legend>Coupon</legend>
+                    <legend data-translate="checkoutCouponTitle">Coupon</legend>
                     <div class="form-group">
-                        <label>Coupon Code</label>
+                        <label data-translate="checkoutCouponLabel">Coupon Code</label>
                         <div class="coupon-row">
-                            <input type="text" name="coupon_code" value="<?= htmlspecialchars($formData['coupon_code'] ?? '') ?>" placeholder="Enter coupon code (if available)">
+                            <input type="text" name="coupon_code" value="<?= htmlspecialchars($formData['coupon_code'] ?? '') ?>" data-translate-placeholder="checkoutCouponPlaceholder" placeholder="Enter coupon code (if available)">
                         </div>
                         <div class="coupon-actions">
-                            <button type="submit" name="coupon_action" value="apply" class="btn-inline btn-apply" formnovalidate>Apply</button>
-                            <button type="submit" name="coupon_action" value="remove" class="btn-inline" formnovalidate>Remove</button>
+                            <button type="submit" name="coupon_action" value="apply" class="btn-inline btn-apply" formnovalidate data-translate="apply">Apply</button>
+                            <button type="submit" name="coupon_action" value="remove" class="btn-inline" formnovalidate data-translate="remove">Remove</button>
                         </div>
                         <?php if ($couponMessage !== ''): ?><span class="form-helper"><?= htmlspecialchars($couponMessage) ?></span><?php endif; ?>
                         <?php if (isset($errors['coupon_code'])): ?><span class="error"><?= $errors['coupon_code'] ?></span><?php endif; ?>
@@ -1146,39 +1078,37 @@ if (file_exists($headerPath)) {
                 </fieldset>
 
                 <fieldset>
-                    <legend>Loyalty Program</legend>
+                    <legend data-translate="checkoutLoyaltyTitle">Loyalty Program</legend>
                     <?php if ($isLoggedIn && $userId > 0): ?>
                     <div class="form-group">
-                        <label>Your loyalty balance</label>
+                        <label data-translate="checkoutLoyaltyBalance">Your loyalty balance</label>
                         <span class="form-helper">
                             <strong><?= number_format($availableLoyaltyBalance) ?> points</strong>
-                            worth about €<?= number_format($availableLoyaltyBalance * loyaltyPointValueEuro(), 2) ?>.
-                            Earn <?= loyaltyPointsEarnedPerEuro() ?> point per €1 spent and redeem <?= loyaltyPointsRedeemPerEuro() ?> points for every €1.00 off.
+                            <span<?= app_translate_text_attrs('worth about €' . number_format($availableLoyaltyBalance * loyaltyPointValueEuro(), 2) . '. Earn ' . loyaltyPointsEarnedPerEuro() . ' point per €1 spent and redeem ' . loyaltyPointsRedeemPerEuro() . ' points for every €1.00 off.', 'αξίας περίπου €' . number_format($availableLoyaltyBalance * loyaltyPointValueEuro(), 2) . '. Κερδίζετε ' . loyaltyPointsEarnedPerEuro() . ' πόντο για κάθε €1 που ξοδεύετε και εξαργυρώνετε ' . loyaltyPointsRedeemPerEuro() . ' πόντους για κάθε €1.00 έκπτωση.') ?>>worth about €<?= number_format($availableLoyaltyBalance * loyaltyPointValueEuro(), 2) ?>. Earn <?= loyaltyPointsEarnedPerEuro() ?> point per €1 spent and redeem <?= loyaltyPointsRedeemPerEuro() ?> points for every €1.00 off.</span>
                         </span>
                     </div>
                     <div class="form-group">
-                        <label>Redeem points</label>
+                        <label data-translate="checkoutRedeemPoints">Redeem points</label>
                         <div class="coupon-row">
-                            <input type="number" min="0" step="1" name="loyalty_points" value="<?= htmlspecialchars($formData['loyalty_points'] ?? '') ?>" placeholder="Enter points to redeem">
+                            <input type="number" min="0" step="1" name="loyalty_points" value="<?= htmlspecialchars($formData['loyalty_points'] ?? '') ?>" data-translate-placeholder="checkoutRedeemPlaceholder" placeholder="Enter points to redeem">
                         </div>
                         <div class="coupon-actions">
-                            <button type="submit" name="loyalty_action" value="apply" class="btn-inline btn-apply" formnovalidate>Apply</button>
-                            <button type="submit" name="loyalty_action" value="remove" class="btn-inline" formnovalidate>Remove</button>
+                            <button type="submit" name="loyalty_action" value="apply" class="btn-inline btn-apply" formnovalidate data-translate="apply">Apply</button>
+                            <button type="submit" name="loyalty_action" value="remove" class="btn-inline" formnovalidate data-translate="remove">Remove</button>
                         </div>
                         <span class="form-helper">
-                            Max usable on this order: <strong><?= number_format((int)($loyaltyRedemption['max_points_allowed'] ?? 0)) ?> points</strong>
-                            for up to €<?= number_format(((int)($loyaltyRedemption['max_points_allowed'] ?? 0)) * loyaltyPointValueEuro(), 2) ?> off.
+                            <span<?= app_translate_text_attrs('Max usable on this order: ' . number_format((int)($loyaltyRedemption['max_points_allowed'] ?? 0)) . ' points for up to €' . number_format(((int)($loyaltyRedemption['max_points_allowed'] ?? 0)) * loyaltyPointValueEuro(), 2) . ' off.', 'Μέγιστο που μπορείτε να χρησιμοποιήσετε σε αυτή την παραγγελία: ' . number_format((int)($loyaltyRedemption['max_points_allowed'] ?? 0)) . ' πόντοι για έως €' . number_format(((int)($loyaltyRedemption['max_points_allowed'] ?? 0)) * loyaltyPointValueEuro(), 2) . ' έκπτωση.') ?>>Max usable on this order: <strong><?= number_format((int)($loyaltyRedemption['max_points_allowed'] ?? 0)) ?> points</strong> for up to €<?= number_format(((int)($loyaltyRedemption['max_points_allowed'] ?? 0)) * loyaltyPointValueEuro(), 2) ?> off.</span>
                         </span>
                         <span class="form-helper">
-                            Estimated points after this purchase: <strong><?= number_format($estimatedEarnedPoints) ?> points</strong>.
+                            <span<?= app_translate_text_attrs('Estimated points after this purchase: ' . number_format($estimatedEarnedPoints) . ' points.', 'Εκτιμώμενοι πόντοι μετά από αυτή την αγορά: ' . number_format($estimatedEarnedPoints) . ' πόντοι.') ?>>Estimated points after this purchase: <strong><?= number_format($estimatedEarnedPoints) ?> points</strong>.</span>
                         </span>
                         <?php if ($loyaltyMessage !== ''): ?><span class="form-helper"><?= htmlspecialchars($loyaltyMessage) ?></span><?php endif; ?>
                         <?php if (isset($errors['loyalty_points'])): ?><span class="error"><?= $errors['loyalty_points'] ?></span><?php endif; ?>
                     </div>
                     <?php else: ?>
                     <div class="form-group">
-                        <label>Loyalty rewards</label>
-                        <span class="form-helper">Sign in to redeem points now, or create an account during checkout to start earning points from this order.</span>
+                        <label data-translate="checkoutLoyaltySignInLabel">Loyalty rewards</label>
+                        <span class="form-helper" data-translate="checkoutLoyaltySignInHelp">Sign in to redeem points now, or create an account during checkout to start earning points from this order.</span>
                     </div>
                     <?php endif; ?>
                 </fieldset>
@@ -1212,37 +1142,44 @@ if (file_exists($headerPath)) {
                     }
                     $price = (float)($item['price'] ?? $item['pricing']['unitTotal'] ?? ($basePrice + $addonsCost));
                     $qty = (int)($item['quantity'] ?? 1);
+                    $optionBits = [];
+                    if (!empty($item['variation']['colorName'])) $optionBits[] = (string)$item['variation']['colorName'];
+                    if (!empty($item['variation']['size'])) $optionBits[] = (string)$item['variation']['size'];
+                    if (!empty($item['variation']['yarnType'])) $optionBits[] = (string)$item['variation']['yarnType'];
+                    $customSummary = trim((string)($item['customization']['summary'] ?? ''));
                     $giftBits = [];
-                    if (!empty($item['addons']['giftWrapping'])) $giftBits[] = 'Gift Wrapping (+€2.00)';
-                    if (!empty($item['addons']['giftBagFlag'])) $giftBits[] = 'Gift Bag (+€1.50)';
-                    if (!empty($item['addons']['giftMessage'])) $giftBits[] = 'Note: ' . (string)$item['addons']['giftMessage'];
+                    if (!empty($item['addons']['giftWrapping'])) $giftBits[] = '<span' . app_translate_text_attrs('Gift Wrapping (+€2.00)', 'Συσκευασία δώρου (+€2.00)') . '>Gift Wrapping (+€2.00)</span>';
+                    if (!empty($item['addons']['giftBagFlag'])) $giftBits[] = '<span' . app_translate_text_attrs('Gift Bag (+€1.50)', 'Τσάντα δώρου (+€1.50)') . '>Gift Bag (+€1.50)</span>';
+                    if (!empty($item['addons']['giftMessage'])) $giftBits[] = '<span' . app_translate_text_attrs('Note: ' . (string)$item['addons']['giftMessage'], 'Σημείωση: ' . (string)$item['addons']['giftMessage']) . '>Note: ' . (string)$item['addons']['giftMessage'] . '</span>';
                 ?>
                 <div class="order-item">
                     <div class="order-item-main">
                         <span><?= htmlspecialchars($name) ?> x<?= $qty ?></span>
                         <span>&euro;<?= number_format($price*$qty,2) ?></span>
                     </div>
+                    <?php if (!empty($optionBits)): ?>
+                    <div class="order-item-addons">
+                        <span<?= app_translate_text_attrs('Options: ' . implode(' / ', $optionBits), 'Επιλογές: ' . implode(' / ', $optionBits)) ?>>Options: <?= htmlspecialchars(implode(' / ', $optionBits)) ?></span>
+                    </div>
+                    <?php endif; ?>
+                    <?php if ($customSummary !== ''): ?>
+                    <div class="order-item-addons">
+                        <span<?= app_translate_text_attrs('Custom request: ' . $customSummary, 'Προσαρμοσμένο αίτημα: ' . $customSummary) ?>>Custom request: <?= htmlspecialchars($customSummary) ?></span>
+                    </div>
+                    <?php endif; ?>
                     <?php if (!empty($giftBits)): ?>
                     <div class="order-item-addons">
-                        <?= htmlspecialchars(implode(' | ', $giftBits)) ?>
+                        <?= implode(' | ', $giftBits) ?>
                     </div>
                     <?php endif; ?>
                 </div>
                 <?php endforeach; ?>
                 <hr class="summary-divider">
                 <div class="summary-row"><span data-translate="subtotal">Subtotal</span><span>&euro;<span id="orderSubtotal"><?= number_format($cartTotal,2) ?></span></span></div>
-                <div class="summary-row"><span>Coupon Discount</span><span>-&euro;<span id="orderCouponDiscount"><?= number_format($couponDiscount,2) ?></span></span></div>
-                <div class="summary-row"><span>Loyalty Discount</span><span>-&euro;<span id="orderLoyaltyDiscount"><?= number_format($loyaltyDiscount,2) ?></span></span></div>
+                <div class="summary-row"><span data-translate="checkoutCouponDiscount">Coupon Discount</span><span>-&euro;<span id="orderCouponDiscount"><?= number_format($couponDiscount,2) ?></span></span></div>
+                <div class="summary-row"><span data-translate="checkoutLoyaltyDiscount">Loyalty Discount</span><span>-&euro;<span id="orderLoyaltyDiscount"><?= number_format($loyaltyDiscount,2) ?></span></span></div>
                 <div class="summary-row"><span data-translate="shipping">Shipping</span><span id="orderShipping"><?= $freeShippingEligible ? 'FREE' : ('€' . number_format($displayShippingCost,2)) ?></span></div>
                 <div class="summary-row summary-row-total"><span data-translate="total">Total</span><span>&euro;<span id="orderTotal"><?= number_format($displayTotal,2) ?></span></span></div>
-            </div>
-
-            <div class="courier-map-card" id="courier-map-card">
-                <h3 id="courier-map-title">Courier Locations</h3>
-                <p id="courier-map-hint">Select a courier to preview pickup spots.</p>
-                <div id="courier-map-frame" class="courier-map-frame" aria-label="Courier pickup spot map"></div>
-                <div class="courier-map-links" id="courier-map-links"></div>
-                <div class="courier-map-points" id="courier-map-points"></div>
             </div>
         </div>
     </div>
@@ -1293,6 +1230,13 @@ if (file_exists($headerPath)) {
         Cyprus: { lat: 35.1400, lng: 33.3600 },
         Greece: { lat: 38.1200, lng: 23.7200 }
     };
+
+    function t(key, params) {
+        if (window.appTranslate) {
+            return window.appTranslate(key, params || {});
+        }
+        return key;
+    }
 
     var mapConfigs = {
         akis_express: {
@@ -1472,7 +1416,7 @@ if (file_exists($headerPath)) {
         var country = selectedCountry();
         var speed = selectedSpeed();
         var currentShippingCost = shippingCost(country, speed);
-        if (shippingOut) shippingOut.textContent = currentShippingCost === 0 ? 'FREE' : formatMoney(currentShippingCost);
+        if (shippingOut) shippingOut.textContent = currentShippingCost === 0 ? t('freeLabel') : formatMoney(currentShippingCost);
         var total = Math.max(0, subtotal - couponDiscount - loyaltyDiscount + currentShippingCost);
         if (totalOut) totalOut.textContent = total.toFixed(2);
         if (btnTotalOut) btnTotalOut.textContent = total.toFixed(2);
@@ -1481,7 +1425,7 @@ if (file_exists($headerPath)) {
     function updateSpeedLabels() {
         var country = selectedCountry();
         var rates = getCountryRates(country);
-        var freeText = '(FREE over \u20AC' + Number(freeThreshold).toFixed(0) + ')';
+        var freeText = '(' + t('checkoutFreeOverAmount', { amount: Number(freeThreshold).toFixed(0) }) + ')';
         if (standardCostLabelEl) {
             standardCostLabelEl.textContent = subtotal >= freeThreshold ? freeText : '(' + formatMoney(rates.standard || 0) + ')';
         }
@@ -1503,7 +1447,7 @@ if (file_exists($headerPath)) {
         courierEl.innerHTML = '';
         var placeholder = document.createElement('option');
         placeholder.value = '';
-        placeholder.textContent = 'Select';
+        placeholder.textContent = t('checkoutSelect');
         courierEl.appendChild(placeholder);
 
         keys.forEach(function (code, index) {
@@ -1634,8 +1578,8 @@ if (file_exists($headerPath)) {
         var base = courier ? mapConfigs[courier] : null;
         if (!base) {
             return {
-                title: 'Courier Pickup Spots',
-                hint: 'Select a courier to preview pickup spots.',
+                title: t('courierPickupSpots'),
+                hint: t('courierMapHint'),
                 color: '#8a4dd6',
                 links: [],
                 points: [],
@@ -1660,8 +1604,8 @@ if (file_exists($headerPath)) {
         return {
             title: base.title,
             hint: mode === 'delivery'
-                ? 'Showing the closest pickup point for the selected courier.'
-                : 'Showing pickup points for the selected courier.',
+                ? t('courierMapHintDelivery')
+                : t('courierMapHintPickup'),
             color: base.color,
             links: base.links || [],
             points: mapPoints,
@@ -1672,7 +1616,7 @@ if (file_exists($headerPath)) {
     }
 
     function renderMap(config) {
-        if (courierMapTitle) courierMapTitle.textContent = config.title || 'Courier Pickup Spots';
+        if (courierMapTitle) courierMapTitle.textContent = config.title || t('courierPickupSpots');
         if (courierMapHint) courierMapHint.textContent = config.hint || '';
 
         if (courierMapLinks) {
@@ -1692,12 +1636,12 @@ if (file_exists($headerPath)) {
 
             if (!config.points || config.points.length === 0) {
                 var emptyChip = document.createElement('span');
-                emptyChip.textContent = 'No pickup points available for this courier.';
+                emptyChip.textContent = t('courierNoPickupPoints');
                 courierMapPoints.appendChild(emptyChip);
             } else if (config.mode === 'delivery' && config.closestPoint) {
                 var closestOnly = document.createElement('span');
                 closestOnly.classList.add('is-closest');
-                closestOnly.textContent = 'Closest: ' + formatPointLabel(config.closestPoint);
+                closestOnly.textContent = t('courierClosestPrefix') + ' ' + formatPointLabel(config.closestPoint);
                 courierMapPoints.appendChild(closestOnly);
             } else {
                 var closestKey = config.closestPoint ? pointKey(config.closestPoint) : '';
@@ -1705,7 +1649,7 @@ if (file_exists($headerPath)) {
                     var chip = document.createElement('span');
                     if (closestKey !== '' && pointKey(point) === closestKey) {
                         chip.classList.add('is-closest');
-                        chip.textContent = formatPointLabel(point) + ' (Closest)';
+                        chip.textContent = formatPointLabel(point) + ' ' + t('courierClosestSuffix');
                     } else {
                         chip.textContent = formatPointLabel(point);
                     }
@@ -1753,14 +1697,14 @@ if (file_exists($headerPath)) {
             return {
                 pattern: '[0-9]{4}',
                 maxLength: 4,
-                error: 'Cyprus postal code must be exactly 4 digits.'
+                error: t('checkoutCyprusPostalRule')
             };
         }
 
         return {
             pattern: '[0-9]{5}',
             maxLength: 5,
-            error: 'Greece postal code must be exactly 5 digits.'
+            error: t('checkoutGreecePostalRule')
         };
     }
 

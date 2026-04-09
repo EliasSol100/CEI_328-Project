@@ -3,6 +3,7 @@ session_start();
 require_once "authentication/database.php";
 require_once "authentication/get_config.php";
 require_once __DIR__ . "/include/homepage_customization.php";
+require_once __DIR__ . "/include/translation_helpers.php";
 
 // --------------------------------------------------
 // Site configuration
@@ -177,6 +178,98 @@ if ($sellingFastRes) {
     }
 }
 
+$bestSellerProducts = [];
+$bestSellerSql = "
+    SELECT
+        p.productID,
+        p.nameEN,
+        p.nameGR,
+        p.nameGR,
+        p.basePrice,
+        p.inventory,
+        p.cartStatus,
+        GROUP_CONCAT(ph.imageID ORDER BY ph.imageID ASC SEPARATOR ',') AS imageIDs,
+        COALESCE(rv.review_count, 0) AS reviewCount,
+        COALESCE(rv.avg_rating, 0) AS avgRating,
+        CASE
+            WHEN pso.productID IS NULL THEN COALESCE(os.total_qty, 0)
+            ELSE pso.manual_total_sales + GREATEST(
+                0,
+                COALESCE(os.total_qty, 0) - COALESCE(pso.auto_sales_baseline, COALESCE(os.total_qty, 0))
+            )
+        END AS totalSales
+    FROM products p
+    LEFT JOIN photos ph ON ph.productID = p.productID
+    LEFT JOIN (
+        SELECT productID, SUM(quantity) AS total_qty
+        FROM order_items
+        GROUP BY productID
+    ) os ON os.productID = p.productID
+    LEFT JOIN product_sales_overrides pso ON pso.productID = p.productID
+    LEFT JOIN (
+        SELECT productID, COUNT(*) AS review_count, ROUND(AVG(rating), 1) AS avg_rating
+        FROM reviews
+        GROUP BY productID
+    ) rv ON rv.productID = p.productID
+    WHERE p.cartStatus IN ('active', 'low_stock', 'out_of_stock', 'made_to_order')
+      AND p.isSellingFast = 0
+    GROUP BY p.productID
+    ORDER BY totalSales DESC, rv.avg_rating DESC, p.productID DESC
+    LIMIT 4
+";
+$bestSellerRes = $conn->query($bestSellerSql);
+if ($bestSellerRes) {
+    while ($row = $bestSellerRes->fetch_assoc()) {
+        $bestSellerProducts[] = $row;
+    }
+}
+
+if (count($bestSellerProducts) < 4) {
+    $bestSellerProducts = [];
+    $bestSellerFallbackSql = "
+        SELECT
+            p.productID,
+            p.nameEN,
+            p.nameGR,
+            p.basePrice,
+            p.inventory,
+            p.cartStatus,
+            GROUP_CONCAT(ph.imageID ORDER BY ph.imageID ASC SEPARATOR ',') AS imageIDs,
+            COALESCE(rv.review_count, 0) AS reviewCount,
+            COALESCE(rv.avg_rating, 0) AS avgRating,
+            CASE
+                WHEN pso.productID IS NULL THEN COALESCE(os.total_qty, 0)
+                ELSE pso.manual_total_sales + GREATEST(
+                    0,
+                    COALESCE(os.total_qty, 0) - COALESCE(pso.auto_sales_baseline, COALESCE(os.total_qty, 0))
+                )
+            END AS totalSales
+        FROM products p
+        LEFT JOIN photos ph ON ph.productID = p.productID
+        LEFT JOIN (
+            SELECT productID, SUM(quantity) AS total_qty
+            FROM order_items
+            GROUP BY productID
+        ) os ON os.productID = p.productID
+        LEFT JOIN product_sales_overrides pso ON pso.productID = p.productID
+        LEFT JOIN (
+            SELECT productID, COUNT(*) AS review_count, ROUND(AVG(rating), 1) AS avg_rating
+            FROM reviews
+            GROUP BY productID
+        ) rv ON rv.productID = p.productID
+        WHERE p.cartStatus IN ('active', 'low_stock', 'out_of_stock', 'made_to_order')
+        GROUP BY p.productID
+        ORDER BY totalSales DESC, rv.avg_rating DESC, p.productID DESC
+        LIMIT 4
+    ";
+    $bestSellerFallbackRes = $conn->query($bestSellerFallbackSql);
+    if ($bestSellerFallbackRes) {
+        while ($row = $bestSellerFallbackRes->fetch_assoc()) {
+            $bestSellerProducts[] = $row;
+        }
+    }
+}
+
 $homepageSettings = app_homepage_load_settings($conn);
 ?>
 <!DOCTYPE html>
@@ -191,26 +284,27 @@ $homepageSettings = app_homepage_load_settings($conn);
     <script src="assets/js/translations.js" defer></script>
     <script src="assets/js/header.js" defer></script>
 </head>
-<body class="site-page">
+<body class="site-page"<?= app_translate_page_title_attrs('Creations by Athina - Handmade Crochet Plushies', 'Creations by Athina - Χειροποίητα Πλεκτά Λούτρινα') ?>>
     <?php
     $activePage = 'home';
     include __DIR__ . '/include/header.php';
     ?>
 
     <!-- Hero Section -->
-    <section class="hero" style="background-image: url('<?= htmlspecialchars($homepageSettings['hero_image'], ENT_QUOTES, 'UTF-8') ?>');">
+    <section class="hero" style="background-image: url('<?= htmlspecialchars(app_homepage_asset_url($homepageSettings['hero_image']), ENT_QUOTES, 'UTF-8') ?>');">
         <div class="hero-overlay"></div>
         <div class="hero-content">
-            <h1 class="hero-title" data-translate="heroTitle">
-                Handmade Amigurumi Plushies & Crochet Gifts
-            </h1>
-            <p class="hero-subtitle" data-translate="heroSubtitle">
-                Discover soft, cuddly amigurumi friends and crochet gifts, all handmade with love by Athina.
-            </p>
-            <a href="shop.php" class="cta-button">
-                <span data-translate="shopNow">Shop Now</span>
-                <i class="fas fa-arrow-right"></i>
-            </a>
+            <div class="hero-copy">
+                <h1 class="hero-title" data-translate="heroTitle">
+                    Soft Handmade Crochet Treasures
+                </h1>
+                <p class="hero-subtitle" data-translate="heroSubtitle">
+                    Discover cozy plushies, thoughtful gifts, and charming crochet creations made with love by Athina.
+                </p>
+                <a href="shop.php" class="cta-button hero-cta-button">
+                    <span data-translate="shopNow">Shop Now</span>
+                </a>
+            </div>
         </div>
     </section>
 
@@ -224,7 +318,7 @@ $homepageSettings = app_homepage_load_settings($conn);
             <div class="collection-grid">
                 <?php foreach ($homepageSettings['collections'] as $collection): ?>
                     <a href="<?= htmlspecialchars($collection['link'], ENT_QUOTES, 'UTF-8') ?>" class="collection-card">
-                        <div class="collection-image" style="background-image: url('<?= htmlspecialchars($collection['image'], ENT_QUOTES, 'UTF-8') ?>');"></div>
+                        <div class="collection-image" style="background-image: url('<?= htmlspecialchars(app_homepage_asset_url($collection['image']), ENT_QUOTES, 'UTF-8') ?>');"></div>
                         <div class="collection-label"><?= htmlspecialchars($collection['label'], ENT_QUOTES, 'UTF-8') ?></div>
                     </a>
                 <?php endforeach; ?>
@@ -235,9 +329,9 @@ $homepageSettings = app_homepage_load_settings($conn);
     <?php if (!empty($sellingFastProducts)): ?>
     <section class="selling-fast">
         <div class="container">
-            <h2 class="section-title">Selling Fast</h2>
-            <p class="section-subtitle">
-                Our most popular items that costumers love right now
+            <h2 class="section-title" data-translate="sellingFast">Selling Fast</h2>
+            <p class="section-subtitle" data-translate="sellingFastSubtitle">
+                Our most popular items that customers love right now
             </p>
             <div class="products-grid">
                 <?php foreach ($sellingFastProducts as $product): ?>
@@ -252,7 +346,7 @@ $homepageSettings = app_homepage_load_settings($conn);
                     ?>
                     <article class="product-card">
                         <div class="product-image-wrapper">
-                            <span class="selling-fast-badge">Selling Fast</span>
+                            <span class="selling-fast-badge" data-translate="sellingFast">Selling Fast</span>
                             <?php if ($primaryImage > 0): ?>
                                 <a href="product.php?id=<?= $pid ?>" class="product-card-link" aria-label="View <?= htmlspecialchars($product['nameEN']) ?>">
                                     <img
@@ -269,14 +363,14 @@ $homepageSettings = app_homepage_load_settings($conn);
                                 <?= app_csrf_input() ?>
                                 <input type="hidden" name="action" value="toggle_wishlist_item">
                                 <input type="hidden" name="product_id" value="<?= $pid ?>">
-                                <button class="wishlist-btn <?= $inWishlist ? 'is-active' : '' ?>" type="submit" title="<?= $inWishlist ? 'Remove from wishlist' : 'Add to wishlist' ?>">
+                                <button class="wishlist-btn <?= $inWishlist ? 'is-active' : '' ?>" type="submit" title="<?= $inWishlist ? 'Remove from wishlist' : 'Add to wishlist' ?>"<?= app_translate_title_attrs($inWishlist ? 'Remove from wishlist' : 'Add to wishlist', $inWishlist ? 'Αφαίρεση από τη λίστα επιθυμιών' : 'Προσθήκη στη λίστα επιθυμιών') ?>>
                                     <i class="<?= $inWishlist ? 'fas' : 'far' ?> fa-heart"></i>
                                 </button>
                             </form>
                         </div>
                         <div class="product-info">
                             <h3 class="product-name">
-                                <a href="product.php?id=<?= $pid ?>" class="product-title-link">
+                                <a href="product.php?id=<?= $pid ?>" class="product-title-link" data-product-name data-name-en="<?= htmlspecialchars((string)$product['nameEN'], ENT_QUOTES, 'UTF-8') ?>" data-name-el="<?= htmlspecialchars((string)($product['nameGR'] ?: $product['nameEN']), ENT_QUOTES, 'UTF-8') ?>">
                                     <?= htmlspecialchars($product['nameEN']) ?>
                                 </a>
                             </h3>
@@ -290,13 +384,13 @@ $homepageSettings = app_homepage_load_settings($conn);
                                 <span class="rating-count">(<?= (int)$product['reviewCount'] ?>)</span>
                             </div>
                             <?php if ($product['cartStatus'] === 'made_to_order'): ?>
-                                <span class="stock-badge stock-badge-alt">Made to Order</span>
+                                <span class="stock-badge stock-badge-alt" data-translate="madeToOrder">Made to Order</span>
                             <?php elseif ($isOutStock): ?>
-                                <span class="stock-badge stock-badge-out">Out of Stock</span>
+                                <span class="stock-badge stock-badge-out" data-translate="outOfStock">Out of Stock</span>
                             <?php elseif ($isLowStock): ?>
-                                <span class="stock-badge stock-badge-low">Only <?= (int)$product['inventory'] ?> left</span>
+                                <span class="stock-badge stock-badge-low"<?= app_translate_text_attrs('Only ' . (int)$product['inventory'] . ' left', 'Μόνο ' . (int)$product['inventory'] . ' έμειναν') ?>>Only <?= (int)$product['inventory'] ?> left</span>
                             <?php else: ?>
-                                <span class="stock-badge">In Stock</span>
+                                <span class="stock-badge" data-translate="inStock">In Stock</span>
                             <?php endif; ?>
                         </div>
                     </article>
@@ -307,6 +401,79 @@ $homepageSettings = app_homepage_load_settings($conn);
     <?php endif; ?>
 
     <!-- Best Sellers Section -->
+    <?php if (!empty($bestSellerProducts)): ?>
+    <section class="best-sellers">
+        <div class="container">
+            <h2 class="section-title" data-translate="bestSellers">Best Sellers</h2>
+            <p class="section-subtitle" data-translate="mostLoved">
+                Our most loved handmade plushies
+            </p>
+            <div class="products-grid">
+                <?php foreach ($bestSellerProducts as $product): ?>
+                    <?php
+                    $pid = (int)$product['productID'];
+                    $inWishlist = in_array($pid, $wishlistedProductIDs, true);
+                    $imageIDs = !empty($product['imageIDs']) ? array_map('intval', explode(',', $product['imageIDs'])) : [];
+                    $primaryImage = $imageIDs[0] ?? 0;
+                    $isOutStock = ((string)$product['cartStatus'] === 'out_of_stock') || ((int)$product['inventory'] <= 0 && (string)$product['cartStatus'] !== 'made_to_order');
+                    $isLowStock = ((string)$product['cartStatus'] === 'low_stock') || (!$isOutStock && (int)$product['inventory'] > 0 && (int)$product['inventory'] <= 3);
+                    $filledStars = (int)round((float)$product['avgRating']);
+                    ?>
+                    <article class="product-card">
+                        <div class="product-image-wrapper">
+                            <?php if ($primaryImage > 0): ?>
+                                <a href="product.php?id=<?= $pid ?>" class="product-card-link" aria-label="View <?= htmlspecialchars($product['nameEN']) ?>">
+                                    <img
+                                        class="product-image-display"
+                                        src="modules/admin/ajax/product_image.php?id=<?= $primaryImage ?>"
+                                        alt="<?= htmlspecialchars($product['nameEN']) ?>">
+                                </a>
+                            <?php else: ?>
+                                <a href="product.php?id=<?= $pid ?>" class="product-card-link product-image-placeholder" aria-label="View <?= htmlspecialchars($product['nameEN']) ?>">
+                                    <i class="fas fa-image"></i>
+                                </a>
+                            <?php endif; ?>
+                            <form method="post" action="wishlist_toggle.php">
+                                <?= app_csrf_input() ?>
+                                <input type="hidden" name="action" value="toggle_wishlist_item">
+                                <input type="hidden" name="product_id" value="<?= $pid ?>">
+                                <button class="wishlist-btn <?= $inWishlist ? 'is-active' : '' ?>" type="submit" title="<?= $inWishlist ? 'Remove from wishlist' : 'Add to wishlist' ?>"<?= app_translate_title_attrs($inWishlist ? 'Remove from wishlist' : 'Add to wishlist', $inWishlist ? 'Αφαίρεση από τη λίστα επιθυμιών' : 'Προσθήκη στη λίστα επιθυμιών') ?>>
+                                    <i class="<?= $inWishlist ? 'fas' : 'far' ?> fa-heart"></i>
+                                </button>
+                            </form>
+                        </div>
+                        <div class="product-info">
+                            <h3 class="product-name">
+                                <a href="product.php?id=<?= $pid ?>" class="product-title-link" data-product-name data-name-en="<?= htmlspecialchars((string)$product['nameEN'], ENT_QUOTES, 'UTF-8') ?>" data-name-el="<?= htmlspecialchars((string)($product['nameGR'] ?: $product['nameEN']), ENT_QUOTES, 'UTF-8') ?>">
+                                    <?= htmlspecialchars($product['nameEN']) ?>
+                                </a>
+                            </h3>
+                            <p class="product-price">&euro;<?= number_format((float)$product['basePrice'], 0) ?></p>
+                            <div class="product-rating">
+                                <div class="stars">
+                                    <?php for ($i = 1; $i <= 5; $i++): ?>
+                                        <i class="<?= $i <= $filledStars ? 'fas' : 'far' ?> fa-star"></i>
+                                    <?php endfor; ?>
+                                </div>
+                                <span class="rating-count">(<?= (int)$product['reviewCount'] ?>)</span>
+                            </div>
+                            <?php if ($product['cartStatus'] === 'made_to_order'): ?>
+                                <span class="stock-badge stock-badge-alt" data-translate="madeToOrder">Made to Order</span>
+                            <?php elseif ($isOutStock): ?>
+                                <span class="stock-badge stock-badge-out" data-translate="outOfStock">Out of Stock</span>
+                            <?php elseif ($isLowStock): ?>
+                                <span class="stock-badge stock-badge-low"<?= app_translate_text_attrs('Only ' . (int)$product['inventory'] . ' left', 'Μόνο ' . (int)$product['inventory'] . ' έμειναν') ?>>Only <?= (int)$product['inventory'] ?> left</span>
+                            <?php else: ?>
+                                <span class="stock-badge" data-translate="inStock">In Stock</span>
+                            <?php endif; ?>
+                        </div>
+                    </article>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    </section>
+    <?php endif; ?>
+    <?php if (false): ?>
     <section class="best-sellers">
         <div class="container">
             <h2 class="section-title" data-translate="bestSellers">Best Sellers</h2>
@@ -451,6 +618,8 @@ $homepageSettings = app_homepage_load_settings($conn);
         </div>
     </section>
 
+    <?php endif; ?>
+
     <!-- View All Products Button Section -->
     <section class="view-all-section">
         <div class="container">
@@ -465,7 +634,7 @@ $homepageSettings = app_homepage_load_settings($conn);
             <p class="section-subtitle" data-translate="instagramHandle">@creationsbyathina</p>
             <div class="journey-grid">
                 <?php foreach ($homepageSettings['journey_images'] as $journeyImage): ?>
-                    <div class="journey-image" style="background-image: url('<?= htmlspecialchars($journeyImage, ENT_QUOTES, 'UTF-8') ?>');"></div>
+                    <div class="journey-image" style="background-image: url('<?= htmlspecialchars(app_homepage_asset_url($journeyImage), ENT_QUOTES, 'UTF-8') ?>');"></div>
                 <?php endforeach; ?>
             </div>
         </div>

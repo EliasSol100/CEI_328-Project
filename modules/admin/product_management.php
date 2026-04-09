@@ -14,6 +14,37 @@ if ($sellingFastColumn && mysqli_num_rows($sellingFastColumn) === 0) {
 }
 ensureMadeToOrderProductSchema($conn);
 
+function productMgmtEnsurePhotoStorageSchema(mysqli $conn): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    $tableCheck = mysqli_query($conn, "SHOW TABLES LIKE 'photos'");
+    if (!$tableCheck || mysqli_num_rows($tableCheck) === 0) {
+        return;
+    }
+
+    $columnRes = mysqli_query(
+        $conn,
+        "SELECT DATA_TYPE
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'photos'
+           AND COLUMN_NAME = 'photo'
+         LIMIT 1"
+    );
+    $column = $columnRes ? mysqli_fetch_assoc($columnRes) : null;
+    $type = strtolower((string)($column['DATA_TYPE'] ?? ''));
+    if ($type === 'blob' || $type === 'tinyblob') {
+        mysqli_query($conn, "ALTER TABLE photos MODIFY COLUMN photo MEDIUMBLOB NOT NULL");
+    }
+}
+
+productMgmtEnsurePhotoStorageSchema($conn);
+
 function productMgmtBuildProjectBasePath(): string {
     $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
     $base = rtrim(str_replace('\\', '/', dirname(dirname(dirname($script)))), '/');

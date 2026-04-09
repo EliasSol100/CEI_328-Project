@@ -101,6 +101,11 @@ function switchTab(btn, group) {
   var target = btn.getAttribute('data-tab');
   var content = document.getElementById(target);
   if (content) content.classList.add('active');
+
+  var activeInput = document.querySelector('[data-active-tab-input="' + group + '"]');
+  if (activeInput) {
+    activeInput.value = btn.getAttribute('data-tab-key') || target || '';
+  }
 }
 
 /* ── Auto-dismiss flash messages ─────────────────── */

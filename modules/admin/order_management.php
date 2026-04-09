@@ -1,9 +1,12 @@
 ﻿<?php
 require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/../../include/product_option_helpers.php';
 
 $current_page = 'order_management';
 $flash = '';
+
+app_product_options_ensure_schema($conn);
 
 if (empty($_SESSION['admin_order_token'])) {
     $_SESSION['admin_order_token'] = bin2hex(random_bytes(32));
@@ -944,9 +947,15 @@ if (isset($_GET['view'])) {
             oi.quantity,
             oi.unitPrice,
             p.nameEN,
-            p.category
+            p.category,
+            oi.customizationNote,
+            pv.size,
+            pv.yarnType,
+            c.colorName
         FROM order_items oi
         LEFT JOIN products p ON p.productID = oi.productID
+        LEFT JOIN product_variations pv ON pv.variationID = oi.variationID
+        LEFT JOIN colors c ON c.colorID = pv.colorID
         WHERE oi.orderID = ?
         ORDER BY oi.orderItemID ASC
     ';
@@ -1181,8 +1190,24 @@ $receiptStatuses = ['paid', 'completed', 'captured', 'succeeded'];
             </thead>
             <tbody>
               <?php foreach ($viewItems as $it): ?>
+              <?php
+                $itemMetaBits = [];
+                if (!empty($it['colorName'])) $itemMetaBits[] = (string)$it['colorName'];
+                if (!empty($it['size'])) $itemMetaBits[] = (string)$it['size'];
+                if (!empty($it['yarnType'])) $itemMetaBits[] = (string)$it['yarnType'];
+                $itemMetaText = !empty($itemMetaBits) ? implode(' / ', $itemMetaBits) : '';
+                $customizationNote = trim((string)($it['customizationNote'] ?? ''));
+              ?>
               <tr>
-                <td><?= htmlspecialchars((string)($it['nameEN'] ?? 'Product')) ?></td>
+                <td>
+                  <div><?= htmlspecialchars((string)($it['nameEN'] ?? 'Product')) ?></div>
+                  <?php if ($itemMetaText !== ''): ?>
+                    <div class="text-sm text-muted"><?= htmlspecialchars($itemMetaText) ?></div>
+                  <?php endif; ?>
+                  <?php if ($customizationNote !== ''): ?>
+                    <div class="text-sm text-muted">Custom request: <?= htmlspecialchars($customizationNote) ?></div>
+                  <?php endif; ?>
+                </td>
                 <td class="text-muted"><?= htmlspecialchars((string)($it['category'] ?? '-')) ?></td>
                 <td><?= (int)$it['quantity'] ?></td>
                 <td>EUR <?= number_format((float)$it['unitPrice'], 2) ?></td>

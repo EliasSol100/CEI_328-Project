@@ -36,7 +36,7 @@
             customOrderStep2Title: '2. Συμφωνήστε ιδιωτικά τις λεπτομέρειες',
             customOrderStep2Text: 'Η πλήρης συζήτηση γίνεται απευθείας με την ιδιοκτήτρια, μαζί με χρόνο παράδοσης, φωτογραφίες και την τελική συμφωνημένη τιμή.',
             customOrderStep3Title: '3. Λάβε το ιδιωτικό checkout link',
-            customOrderStep3Text: 'Όταν η παραγγελία είναι έτοιμη, η ιδιοκτήτρια σου στέλνει προσωπικό product link που ανοίγει μόνο από τον λογαριασμό σου.',
+            customOrderStep3Text: 'Όταν η παραγγελία είναι έτοιμη, η ιδιοκτήτρια σού στέλνει προσωπικό product link που ανοίγει μόνο από τον λογαριασμό σου.',
             customOrderReadyTitle: 'Πριν Λάβεις το Link',
             customOrderInfo1Title: 'Χρησιμοποίησε το σωστό email λογαριασμού',
             customOrderInfo1Text: 'Το ιδιωτικό custom product ανοίγει μόνο όταν συνδεθείς με το ίδιο email που έχει ορίσει η ιδιοκτήτρια για την παραγγελία σου.',
@@ -53,19 +53,34 @@
 
     function applyCustomOrderTranslations(lang) {
         var map = customOrderTranslations[lang] || customOrderTranslations.en;
-        if (map.pageTitle) document.title = map.pageTitle;
+
+        if (map.pageTitle) {
+            document.title = map.pageTitle;
+        }
+
         document.querySelectorAll('[data-co-text]').forEach(function (element) {
             var key = element.getAttribute('data-co-text');
-            if (map[key]) element.textContent = map[key];
+            if (key && map[key]) {
+                element.textContent = map[key];
+            }
         });
     }
 
-    applyCustomOrderTranslations(currentLanguage);
+    function getActiveLanguage() {
+        return document.documentElement.lang || localStorage.getItem('language') || currentLanguage || 'en';
+    }
 
-    var langObserver = new MutationObserver(function () {
-        var lang = document.documentElement.lang || localStorage.getItem('language') || 'en';
+    applyCustomOrderTranslations(getActiveLanguage());
+
+    document.addEventListener('app:languagechange', function (event) {
+        var lang = (event && event.detail && event.detail.lang) ? event.detail.lang : getActiveLanguage();
         applyCustomOrderTranslations(lang);
     });
+
+    var langObserver = new MutationObserver(function () {
+        applyCustomOrderTranslations(getActiveLanguage());
+    });
+
     langObserver.observe(document.documentElement, {
         attributes: true,
         attributeFilter: ['lang']

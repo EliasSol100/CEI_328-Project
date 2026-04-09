@@ -14,6 +14,7 @@ if (!defined('INCLUDE_CHECK') && !defined('PLACE_ORDER_DIRECT')) {
 
 // Trigger stock deduction + threshold checks after order placement.
 require_once __DIR__ . '/stock_management.php';
+require_once __DIR__ . '/../include/product_option_helpers.php';
 
 /**
  * Create an admin notification row for newly placed orders.
@@ -344,6 +345,7 @@ function generateOrderNumber(mysqli $conn): string {
  * @throws Exception
  */
 function placeOrder(mysqli $conn, array $input): array {
+    app_product_options_ensure_schema($conn);
     ensureOrderShippingSchema($conn);
 
     $paymentConfirmed = (bool)($input['payment_confirmed'] ?? false);
@@ -425,8 +427,8 @@ function placeOrder(mysqli $conn, array $input): array {
     // 2) Order lines (products + variations + gift add-ons)
     $lineStmt = $conn->prepare(
         "INSERT INTO order_items (
-            orderID, productID, variationID, quantity, unitPrice, costPriceSnapshot, giftWrapping, giftBagFlag, giftMessage
-        ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)"
+            orderID, productID, variationID, quantity, unitPrice, costPriceSnapshot, giftWrapping, giftBagFlag, giftMessage, customizationNote
+        ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)"
     );
     if (!$lineStmt) {
         throw new Exception('Failed to prepare order item insert: ' . $conn->error);
@@ -479,9 +481,13 @@ function placeOrder(mysqli $conn, array $input): array {
         if ($giftMessage === '') {
             $giftMessage = null;
         }
+        $customizationNote = trim((string)($item['customization']['summary'] ?? ''));
+        if ($customizationNote === '') {
+            $customizationNote = null;
+        }
 
         $lineStmt->bind_param(
-            "iiiidiis",
+            "iiiidiiss",
             $orderID,
             $productID,
             $variationID,
@@ -489,7 +495,8 @@ function placeOrder(mysqli $conn, array $input): array {
             $unitPrice,
             $giftWrapping,
             $giftBagFlag,
-            $giftMessage
+            $giftMessage,
+            $customizationNote
         );
         if (!$lineStmt->execute()) {
             throw new Exception('Failed to insert order line: ' . $lineStmt->error);

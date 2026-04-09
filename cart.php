@@ -2,6 +2,7 @@
 session_start();
 require_once "authentication/database.php";
 require_once "include/security.php";
+require_once "include/translation_helpers.php";
 
 function getCartLineAvailableStock(mysqli $conn, array $item): int {
     $productId = (int)($item['product']['id'] ?? $item['productID'] ?? 0);
@@ -95,7 +96,7 @@ function cartRecalc(array $items): array {
     foreach ($items as $item) {
         $q      = (int)($item['quantity'] ?? 0);
         $count += $q;
-        $sub   += (float)($item['product']['basePrice'] ?? 0) * $q;
+        $sub   += (float)($item['price'] ?? $item['product']['basePrice'] ?? 0) * $q;
         $addonsCost = (float)($item['addons']['addonsCost'] ?? 0);
         if ($addonsCost <= 0) {
             if (!empty($item['addons']['giftWrapping'])) $addonsCost += 2.0;
@@ -170,7 +171,7 @@ unset($_SESSION['cart_notice']);
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/translations.js') ?>" defer></script>
 </head>
-<body class="site-page">
+<body class="site-page"<?= app_translate_page_title_attrs('Shopping Cart - Athina E-Shop', 'Καλάθι Αγορών - Athina E-Shop') ?>>
 
 <?php include __DIR__ . '/include/header.php'; ?>
 
@@ -187,7 +188,7 @@ unset($_SESSION['cart_notice']);
             </span>
         </h1>
         <?php if (!empty($cartNotice['message'])): ?>
-        <div style="margin:-16px 0 18px;padding:10px 12px;border-radius:10px;background:#ffe8e8;color:#8f1f1f;border:1px solid #f3c8c8;">
+        <div style="margin:-16px 0 18px;padding:10px 12px;border-radius:10px;background:#ffe8e8;color:#8f1f1f;border:1px solid #f3c8c8;"<?= !empty($cartNotice['message']) && preg_match('/^Only (\d+) left in stock\.$/', (string)$cartNotice['message'], $cartNoticeMatch) ? app_translate_text_attrs('Only ' . (int)$cartNoticeMatch[1] . ' left in stock.', 'Μόνο ' . (int)$cartNoticeMatch[1] . ' έμειναν σε απόθεμα.') : '' ?>>
             <?= htmlspecialchars((string)$cartNotice['message']) ?>
         </div>
         <?php endif; ?>
@@ -209,14 +210,16 @@ unset($_SESSION['cart_notice']);
                     $pid = (int)($item['product']['id'] ?? $item['productID'] ?? 0);
                     $productUrl = $pid > 0 ? ('product.php?id=' . $pid) : '#';
                     $imageSrc = $productImageMap[$pid] ?? 'assets/images/athina-eshop-logo.png';
+                    $cartNameEn = (string)($item['product']['nameEN'] ?? $item['product']['name'] ?? 'Product');
+                    $cartNameEl = (string)($item['product']['nameGR'] ?? $cartNameEn);
                 ?>
                 <div class="cart-item">
-                    <a href="<?= htmlspecialchars($productUrl) ?>" class="cart-item-image-link" title="View product details">
-                        <img src="<?= htmlspecialchars($imageSrc) ?>" alt="<?= htmlspecialchars($item['product']['nameEN'] ?? 'Product') ?>" class="cart-item-image">
+                    <a href="<?= htmlspecialchars($productUrl) ?>" class="cart-item-image-link" title="View product details"<?= app_translate_title_attrs('View product details', 'Δείτε λεπτομέρειες προϊόντος') ?>>
+                        <img src="<?= htmlspecialchars($imageSrc) ?>" alt="<?= htmlspecialchars($cartNameEn) ?>" class="cart-item-image">
                     </a>
                     <div class="cart-item-info">
                         <div class="cart-item-name">
-                            <a href="<?= htmlspecialchars($productUrl) ?>"><?= htmlspecialchars($item['product']['nameEN'] ?? '') ?></a>
+                            <a href="<?= htmlspecialchars($productUrl) ?>" data-product-name data-name-en="<?= htmlspecialchars($cartNameEn) ?>" data-name-el="<?= htmlspecialchars($cartNameEl) ?>"><?= htmlspecialchars($cartNameEn) ?></a>
                         </div>
                         <?php if (!empty($item['variation'])): ?>
                         <div class="cart-item-variant">
@@ -229,16 +232,21 @@ unset($_SESSION['cart_notice']);
                             ?>
                         </div>
                         <?php endif; ?>
-                        <div class="cart-item-unit-price">€<?= number_format((float)($item['product']['basePrice'] ?? 0), 2) ?> <span data-translate="each">each</span></div>
+                        <div class="cart-item-unit-price">€<?= number_format((float)($item['price'] ?? $item['product']['basePrice'] ?? 0), 2) ?> <span data-translate="each">each</span></div>
+                        <?php if (!empty($item['customization']['summary'])): ?>
+                        <div class="cart-item-variant" style="margin-top:6px;">
+                            <?= htmlspecialchars((string)$item['customization']['summary']) ?>
+                        </div>
+                        <?php endif; ?>
                         <?php
                             $addonBits = [];
-                            if (!empty($item['addons']['giftWrapping'])) $addonBits[] = 'Gift Wrapping (+€2.00)';
-                            if (!empty($item['addons']['giftBagFlag'])) $addonBits[] = 'Gift Bag (+€1.50)';
-                            if (!empty($item['addons']['giftMessage'])) $addonBits[] = 'Note: ' . (string)$item['addons']['giftMessage'];
+                            if (!empty($item['addons']['giftWrapping'])) $addonBits[] = '<span' . app_translate_text_attrs('Gift Wrapping (+€2.00)', 'Συσκευασία δώρου (+€2.00)') . '>Gift Wrapping (+€2.00)</span>';
+                            if (!empty($item['addons']['giftBagFlag'])) $addonBits[] = '<span' . app_translate_text_attrs('Gift Bag (+€1.50)', 'Τσάντα δώρου (+€1.50)') . '>Gift Bag (+€1.50)</span>';
+                            if (!empty($item['addons']['giftMessage'])) $addonBits[] = '<span' . app_translate_text_attrs('Note: ' . (string)$item['addons']['giftMessage'], 'Σημείωση: ' . (string)$item['addons']['giftMessage']) . '>Note: ' . (string)$item['addons']['giftMessage'] . '</span>';
                         ?>
                         <?php if (!empty($addonBits)): ?>
                         <div class="cart-item-variant" style="margin-top:6px;">
-                            <?= htmlspecialchars(implode(' | ', $addonBits)) ?>
+                            <?= implode(' | ', $addonBits) ?>
                         </div>
                         <?php endif; ?>
                     </div>

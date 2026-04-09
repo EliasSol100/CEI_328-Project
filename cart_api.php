@@ -4,8 +4,11 @@ declare(strict_types=1);
 session_start();
 require_once "authentication/database.php";
 require_once "include/security.php";
+require_once __DIR__ . '/include/product_option_helpers.php';
 require_once __DIR__ . '/include/made_to_order_access.php';
 header('Content-Type: application/json; charset=utf-8');
+
+app_product_options_ensure_schema($conn);
 
 /* =========================
    GET: Return cart OR variations for a product
@@ -106,6 +109,7 @@ try {
     $size        = trim((string)($variationInput['size'] ?? ''));
     $yarnType    = trim((string)($variationInput['yarn_type'] ?? ''));
     $colorId     = toInt($variationInput['color_id'] ?? null);
+    $customizationInput = is_array($payload['customization'] ?? null) ? $payload['customization'] : [];
 
     $addons = normalizeAddons($payload['addons'] ?? []);
 
@@ -114,6 +118,7 @@ try {
 
     $cartStatus  = (string)$product['cartStatus'];
     $hasVariants = ((int)$product['hasVariants'] === 1);
+    $customColorFields = (int)($product['customColorFields'] ?? 0);
     $hasStoredVariations = $hasVariants ? productHasVariationRows($conn, $productId) : false;
 
     if ($cartStatus !== 'active' && $cartStatus !== 'made_to_order' && $cartStatus !== 'low_stock') {
@@ -136,9 +141,6 @@ try {
             }
         } elseif ($size !== '') {
             $variation = fetchVariationBySize($conn, $productId, $size);
-        } else {
-            // No variation specified; pick the first available one automatically.
-            $variation = fetchFirstVariation($conn, $productId);
         }
 
         // If no DB variation row exists but client provided variation fields,
@@ -151,10 +153,16 @@ try {
                 'colorID' => (int)($colorId ?? 0),
                 'colorName' => ($colorId !== null && $colorId > 0) ? fetchColorName($conn, (int)$colorId) : '',
             ];
-        } elseif ($variation === null) {
-            // Fallback for inconsistent catalog data:
-            // if hasVariants=1 but no variation row exists, treat as non-variant item.
-            $effectiveHasVariants = false;
+        }
+    }
+
+    $customization = normalizeCustomization($customizationInput, $product);
+    if ($customColorFields > 0) {
+        if ($customization['field1'] === '') {
+            badRequest('Please enter your custom colour request.');
+        }
+        if ($customColorFields > 1 && $customization['field2'] === '') {
+            badRequest('Please complete all custom colour fields.');
         }
     }
 
@@ -181,6 +189,7 @@ try {
         $cart['items'],
         $productId,
         $effectiveHasVariants ? ($variation ?? $customVariation) : null,
+        $customization,
         $addons
     );
 
@@ -197,11 +206,12 @@ try {
     if (!empty($addons['gift_wrapping'])) $addonsCost += 2.0;
     if (!empty($addons['gift_bag'])) $addonsCost += 1.5;
 
-    $unitPrice = (float)$product['basePrice'];
+    $resolvedVariation = $variation ?? $customVariation;
+    $unitPrice = (float)($resolvedVariation['price'] ?? $product['basePrice'] ?? 0);
     $unitTotal = $unitPrice + $addonsCost;
     $lineTotal = $unitTotal * $newQty;
 
-    $resolvedVariation = $variation ?? $customVariation;
+    $customizationSummary = app_product_options_build_customization_summary($product, $customization);
     $lineItem = [
         'product' => [
             'id' => (int)$product['productID'],
@@ -218,13 +228,22 @@ try {
             'yarnType' => trim((string)($resolvedVariation['yarnType'] ?? '')),
             'colorID' => toInt($resolvedVariation['colorID'] ?? null),
             'colorName' => (string)($resolvedVariation['colorName'] ?? ''),
+            'price' => round((float)($resolvedVariation['price'] ?? $unitPrice), 2),
         ] : null,
         'quantity' => $newQty,
+        'price' => round($unitPrice, 2),
         'addons' => [
             'giftWrapping' => $addons['gift_wrapping'],
             'giftBagFlag' => $addons['gift_bag'],
             'giftMessage' => $addons['message'],
             'addonsCost' => round($addonsCost, 2),
+        ],
+        'customization' => [
+            'field1' => $customization['field1'],
+            'field2' => $customization['field2'],
+            'label1' => $customization['label1'],
+            'label2' => $customization['label2'],
+            'summary' => $customizationSummary,
         ],
         'pricing' => [
             'unitTotal' => round($unitTotal, 2),
@@ -293,6 +312,20 @@ function normalizeCouponCode(string $code): string {
     $code = preg_replace('/[^A-Z0-9_-]/', '', $code);
     return (string)$code;
 }
+function normalizeCustomization($input, array $product): array {
+    $input = is_array($input) ? $input : [];
+    $field1 = trim((string)($input['field1'] ?? ''));
+    $field2 = trim((string)($input['field2'] ?? ''));
+    if (mb_strlen($field1) > 120) $field1 = mb_substr($field1, 0, 120);
+    if (mb_strlen($field2) > 120) $field2 = mb_substr($field2, 0, 120);
+
+    return [
+        'field1' => $field1,
+        'field2' => $field2,
+        'label1' => trim((string)($product['customColorLabel1'] ?? '')),
+        'label2' => trim((string)($product['customColorLabel2'] ?? '')),
+    ];
+}
 function &getOrInitCart(): array {
     if (!isset($_SESSION['cart']) || !is_array($_SESSION['cart'])) {
         $_SESSION['cart'] = [
@@ -304,7 +337,7 @@ function &getOrInitCart(): array {
     }
     return $_SESSION['cart'];
 }
-function findExistingLineIndex(array $items, int $productId, ?array $variation, array $addons): ?int {
+function findExistingLineIndex(array $items, int $productId, ?array $variation, array $customization, array $addons): ?int {
     foreach ($items as $i => $item) {
         if ((int)($item['product']['id'] ?? 0) !== $productId) continue;
 
@@ -332,6 +365,10 @@ function findExistingLineIndex(array $items, int $productId, ?array $variation, 
                 if ($targetColor !== $existingColor) continue;
             }
         }
+
+        $existingCustomization = is_array($item['customization'] ?? null) ? $item['customization'] : [];
+        if ((string)($existingCustomization['field1'] ?? '') !== (string)($customization['field1'] ?? '')) continue;
+        if ((string)($existingCustomization['field2'] ?? '') !== (string)($customization['field2'] ?? '')) continue;
 
         $ad = $item['addons'] ?? [];
         if ((bool)($ad['giftWrapping'] ?? false) !== (bool)$addons['gift_wrapping']) continue;
@@ -364,7 +401,8 @@ function recalcCartTotals(array $items): array {
 
 /* ===== DB (mysqli) ===== */
 function fetchProduct(mysqli $conn, int $productId): ?array {
-    $sql = "SELECT productID, sku, nameGR, nameEN, inventory, basePrice, cartStatus, hasVariants
+    $sql = "SELECT productID, sku, nameGR, nameEN, inventory, basePrice, cartStatus, hasVariants,
+                   customColorFields, customColorLabel1, customColorLabel2
             FROM products WHERE productID = ? LIMIT 1";
     $st = $conn->prepare($sql);
     if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
@@ -385,7 +423,7 @@ function productHasVariationRows(mysqli $conn, int $productId): bool {
     return (bool)$row;
 }
 function fetchVariationById(mysqli $conn, int $variationId, int $productId): ?array {
-    $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, c.colorName
+    $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, pv.price, c.colorName
             FROM product_variations pv
             LEFT JOIN colors c ON c.colorID = pv.colorID
             WHERE pv.variationID = ? AND pv.productID = ?
@@ -399,7 +437,7 @@ function fetchVariationById(mysqli $conn, int $variationId, int $productId): ?ar
     return $row ?: null;
 }
 function fetchVariationByFields(mysqli $conn, int $productId, string $size, string $yarnType, int $colorId): ?array {
-    $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, c.colorName
+    $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, pv.price, c.colorName
             FROM product_variations pv
             LEFT JOIN colors c ON c.colorID = pv.colorID
             WHERE pv.productID=? AND pv.size=? AND pv.yarnType=? AND pv.colorID=?
@@ -413,7 +451,7 @@ function fetchVariationByFields(mysqli $conn, int $productId, string $size, stri
     return $row ?: null;
 }
 function fetchVariationByColorAndSize(mysqli $conn, int $productId, string $size, int $colorId): ?array {
-    $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, c.colorName
+    $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, pv.price, c.colorName
             FROM product_variations pv
             LEFT JOIN colors c ON c.colorID = pv.colorID
             WHERE pv.productID=? AND pv.size=? AND pv.colorID=?
@@ -428,7 +466,7 @@ function fetchVariationByColorAndSize(mysqli $conn, int $productId, string $size
     return $row ?: null;
 }
 function fetchVariationBySize(mysqli $conn, int $productId, string $size): ?array {
-    $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, c.colorName
+    $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, pv.price, c.colorName
             FROM product_variations pv
             LEFT JOIN colors c ON c.colorID = pv.colorID
             WHERE pv.productID=? AND pv.size=?
@@ -437,21 +475,6 @@ function fetchVariationBySize(mysqli $conn, int $productId, string $size): ?arra
     $st = $conn->prepare($sql);
     if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
     $st->bind_param("is", $productId, $size);
-    $st->execute();
-    $row = $st->get_result()->fetch_assoc();
-    $st->close();
-    return $row ?: null;
-}
-function fetchFirstVariation(mysqli $conn, int $productId): ?array {
-    $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, c.colorName
-            FROM product_variations pv
-            LEFT JOIN colors c ON c.colorID = pv.colorID
-            WHERE pv.productID = ?
-              AND (pv.colorID IS NULL OR c.isActive = 1)
-            ORDER BY pv.variationID ASC LIMIT 1";
-    $st = $conn->prepare($sql);
-    if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
-    $st->bind_param("i", $productId);
     $st->execute();
     $row = $st->get_result()->fetch_assoc();
     $st->close();
@@ -468,7 +491,7 @@ function fetchColorName(mysqli $conn, int $colorId): string {
     return trim((string)($row['colorName'] ?? ''));
 }
 function fetchAllVariations(mysqli $conn, int $productId): array {
-    $sql = "SELECT pv.variationID, pv.size, pv.yarnType, pv.colorID, c.colorName,
+    $sql = "SELECT pv.variationID, pv.size, pv.yarnType, pv.colorID, pv.price, c.colorName,
                    COALESCE(vs.quantityAvailable, p.inventory, 0) AS stock
             FROM product_variations pv
             LEFT JOIN colors c ON c.colorID = pv.colorID
@@ -490,6 +513,7 @@ function fetchAllVariations(mysqli $conn, int $productId): array {
             'yarnType'    => (string)$row['yarnType'],
             'colorID'     => toInt($row['colorID'] ?? null),
             'colorName'   => (string)($row['colorName'] ?? ''),
+            'price'       => isset($row['price']) ? (float)$row['price'] : null,
             'stock'       => (int)$row['stock'],
         ];
     }

@@ -3,6 +3,8 @@ session_start();
 require_once "authentication/database.php";
 require_once "authentication/get_config.php";
 require_once "include/security.php";
+require_once "include/product_option_helpers.php";
+require_once "include/translation_helpers.php";
 require_once __DIR__ . '/include/made_to_order_access.php';
 
 $system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
@@ -15,6 +17,7 @@ if (!file_exists($logo_path)) {
     $logo_path = "assets/images/athina-eshop-logo.png";
 }
 ensureMadeToOrderProductSchema($conn);
+app_product_options_ensure_schema($conn);
 
 // --------- User / Profile handling ----------
 $role     = "guest";
@@ -124,6 +127,62 @@ function ensureProductSalesOverridesSchema(mysqli $conn): void {
 }
 
 ensureProductSalesOverridesSchema($conn);
+
+function shopCategoryLabels(): array
+{
+    return [
+        'Plushies' => ['en' => 'Plushies', 'el' => 'Λούτρινα'],
+        'Characters' => ['en' => 'Characters', 'el' => 'Χαρακτήρες'],
+        'Blankets' => ['en' => 'Blankets', 'el' => 'Κουβέρτες'],
+    ];
+}
+
+function shopTagDefinitions(): array
+{
+    return [
+        'velvet-soft' => ['en' => 'Velvet Soft', 'el' => 'Βελούδινα και απαλά'],
+        'sea-life' => ['en' => 'Sea Life', 'el' => 'Θαλασσινή έμπνευση'],
+        'character-faves' => ['en' => 'Character Faves', 'el' => 'Αγαπημένοι χαρακτήρες'],
+        'nursery-cozy' => ['en' => 'Nursery Cozy', 'el' => 'Για παιδικό δωμάτιο'],
+        'playful-animals' => ['en' => 'Playful Animals', 'el' => 'Χαριτωμένα ζωάκια'],
+        'best-sellers' => ['en' => 'Best Sellers', 'el' => 'Δημοφιλείς επιλογές'],
+    ];
+}
+
+function shopProductTags(array $product): array
+{
+    $tags = [];
+    $sku = trim((string)($product['sku'] ?? ''));
+
+    switch ($sku) {
+        case 'ATH-REAL-CHICK-HAT':
+            $tags = ['playful-animals', 'velvet-soft', 'nursery-cozy'];
+            break;
+        case 'ATH-REAL-OCTOPUS':
+        case 'ATH-REAL-WHALE':
+            $tags = ['sea-life', 'velvet-soft'];
+            break;
+        case 'ATH-REAL-BEE':
+            $tags = ['playful-animals', 'velvet-soft'];
+            break;
+        case 'ATH-REAL-SPONGEBOB':
+        case 'ATH-REAL-PATRICK':
+            $tags = ['character-faves'];
+            break;
+        case 'ATH-REAL-FROG-LEGS':
+            $tags = ['playful-animals', 'velvet-soft'];
+            break;
+        case 'ATH-REAL-BLANKETS':
+            $tags = ['nursery-cozy'];
+            break;
+    }
+
+    if (!empty($product['isSellingFast'])) {
+        $tags[] = 'best-sellers';
+    }
+
+    return array_values(array_unique($tags));
+}
 
 // Backfill the Selling Fast flag on older databases before shop queries use it.
 $sellingFastColumn = $conn->query("SHOW COLUMNS FROM products LIKE 'isSellingFast'");
@@ -295,6 +354,7 @@ if (!empty($accessibleMadeToOrderIds)) {
 
 // Load distinct active categories
 $categories = [];
+$categoryLabels = shopCategoryLabels();
 $catRes = $conn->query("
     SELECT DISTINCT category
     FROM products
@@ -307,13 +367,32 @@ if ($catRes) {
         $categories[] = $row['category'];
     }
 }
+usort($categories, static function (string $left, string $right) use ($categoryLabels): int {
+    $order = array_flip(array_keys($categoryLabels));
+    $leftOrder = $order[$left] ?? 999;
+    $rightOrder = $order[$right] ?? 999;
+    if ($leftOrder !== $rightOrder) {
+        return $leftOrder <=> $rightOrder;
+    }
+    return strcasecmp($left, $right);
+});
 
 // Price bounds from DB (all active/made_to_order products)
 $minPrice = 0;
 $maxPrice = 100;
 $priceBoundsRes = $conn->query("
-    SELECT MIN(basePrice) AS min_price, MAX(basePrice) AS max_price
-    FROM products
+    SELECT
+        MIN(COALESCE(vstats.min_price, p.basePrice)) AS min_price,
+        MAX(COALESCE(vstats.max_price, p.basePrice)) AS max_price
+    FROM products p
+    LEFT JOIN (
+        SELECT
+            productID,
+            MIN(CASE WHEN price IS NOT NULL AND price > 0 THEN price END) AS min_price,
+            MAX(CASE WHEN price IS NOT NULL AND price > 0 THEN price END) AS max_price
+        FROM product_variations
+        GROUP BY productID
+    ) vstats ON vstats.productID = p.productID
     WHERE ({$categoryVisibilityWhere})
 ");
 if ($priceBoundsRes && ($bounds = $priceBoundsRes->fetch_assoc())) {
@@ -343,13 +422,25 @@ if (isset($_GET['price_max']) && $_GET['price_max'] !== '') {
 }
 $selectedPriceMax = max((float)$minPrice, min((float)$maxPrice, (float)$selectedPriceMax));
 
+$tagDefinitions = shopTagDefinitions();
+$selectedTags = $_GET['tags'] ?? [];
+if (!is_array($selectedTags)) {
+    $selectedTags = [$selectedTags];
+}
+$selectedTags = array_values(array_unique(array_intersect(
+    array_keys($tagDefinitions),
+    array_map('strval', $selectedTags)
+)));
+
 // ---------------------------------------------
 // Load products from DB (with active search + filters)
 // ---------------------------------------------
 $products = [];
 $sql = "
-    SELECT p.productID, p.nameEN, p.nameGR, p.basePrice, p.inventory,
+    SELECT p.productID, p.sku, p.nameEN, p.nameGR, p.basePrice, p.inventory,
            p.cartStatus, p.category, p.hasVariants,
+           COALESCE(vstats.min_price, p.basePrice) AS displayMinPrice,
+           COALESCE(vstats.max_price, p.basePrice) AS displayMaxPrice,
            CASE
                WHEN pso.productID IS NULL THEN COALESCE(os.total_qty, 0)
                ELSE pso.manual_total_sales + GREATEST(
@@ -366,6 +457,14 @@ $sql = "
         FROM order_items
         GROUP BY productID
     ) os ON os.productID = p.productID
+    LEFT JOIN (
+        SELECT
+            productID,
+            MIN(CASE WHEN price IS NOT NULL AND price > 0 THEN price END) AS min_price,
+            MAX(CASE WHEN price IS NOT NULL AND price > 0 THEN price END) AS max_price
+        FROM product_variations
+        GROUP BY productID
+    ) vstats ON vstats.productID = p.productID
     LEFT JOIN product_sales_overrides pso ON pso.productID = p.productID
     WHERE ({$catalogVisibilityWhere})
 ";
@@ -396,7 +495,7 @@ if ($searchQuery !== '') {
     $bindValues[] = $like;
 }
 
-$sql .= " AND p.basePrice <= ?";
+$sql .= " AND COALESCE(vstats.min_price, p.basePrice) <= ?";
 $bindTypes .= 'd';
 $bindValues[] = (float)$selectedPriceMax;
 
@@ -421,6 +520,18 @@ if ($stmtProducts) {
     $stmtProducts->close();
 }
 
+foreach ($products as &$productRow) {
+    $productRow['derivedTags'] = shopProductTags($productRow);
+}
+unset($productRow);
+
+if (!empty($selectedTags)) {
+    $products = array_values(array_filter($products, static function (array $productRow) use ($selectedTags): bool {
+        $productTags = $productRow['derivedTags'] ?? [];
+        return !empty(array_intersect($selectedTags, $productTags));
+    }));
+}
+
 // Load review summary per product
 $reviewData = [];
 $revRes = $conn->query("
@@ -443,6 +554,19 @@ $cpRes = $conn->query("SELECT productID, photoPath FROM product_color_photos ORD
 if ($cpRes) {
     while ($row = $cpRes->fetch_assoc()) {
         $colorPhotosByProduct[(int)$row['productID']][] = $row['photoPath'];
+    }
+}
+
+$variationPhotosByProduct = [];
+$vpRes = $conn->query("
+    SELECT pv.productID, pvp.photoPath
+    FROM product_variation_photos pvp
+    JOIN product_variations pv ON pv.variationID = pvp.variationID
+    ORDER BY pv.productID ASC, pvp.sortOrder ASC, pvp.variationPhotoID ASC
+");
+if ($vpRes) {
+    while ($row = $vpRes->fetch_assoc()) {
+        $variationPhotosByProduct[(int)$row['productID']][] = $row['photoPath'];
     }
 }
 ?>
@@ -481,7 +605,7 @@ if ($cpRes) {
     </style>
     <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/translations.js') ?>" defer></script>
 </head>
-<body class="site-page">
+<body class="site-page"<?= app_translate_page_title_attrs('Creations by Athina - Shop', 'Creations by Athina - Κατάστημα') ?>>
     <?php
     $activePage = 'shop';
     include __DIR__ . '/include/header.php';
@@ -534,10 +658,11 @@ if ($cpRes) {
                         </label>
 
                         <?php foreach ($categories as $cat): ?>
+                        <?php $catLabel = $categoryLabels[$cat] ?? ['en' => $cat, 'el' => $cat]; ?>
                         <label class="filter-option">
                             <input type="radio" name="category" value="<?= htmlspecialchars($cat) ?>"
                                    <?php echo $selectedCategory === $cat ? 'checked' : ''; ?>>
-                            <span><?= htmlspecialchars($cat) ?></span>
+                            <span<?= app_translate_text_attrs($catLabel['en'], $catLabel['el']) ?>><?= htmlspecialchars($catLabel['en']) ?></span>
                         </label>
                         <?php endforeach; ?>
                     </div>
@@ -562,10 +687,15 @@ if ($cpRes) {
                     <div class="filter-group">
                         <h4 data-translate="tags">Tags</h4>
                         <div class="chip-row">
-                            <span class="chip" data-translate="giftReady">Gift-ready</span>
-                            <span class="chip" data-translate="babySafe">Baby-safe</span>
-                            <span class="chip" data-translate="pastelTag">Pastel</span>
-                            <span class="chip" data-translate="limitedTag">Limited</span>
+                            <?php foreach ($tagDefinitions as $tagKey => $tagDef): ?>
+                            <label class="tag-chip">
+                                <input type="checkbox"
+                                       name="tags[]"
+                                       value="<?= htmlspecialchars($tagKey) ?>"
+                                       <?= in_array($tagKey, $selectedTags, true) ? 'checked' : '' ?>>
+                                <span<?= app_translate_text_attrs($tagDef['en'], $tagDef['el']) ?>><?= htmlspecialchars($tagDef['en']) ?></span>
+                            </label>
+                            <?php endforeach; ?>
                         </div>
                     </div>
 
@@ -596,7 +726,7 @@ if ($cpRes) {
                     <div class="shop-grid">
 
                         <?php if (empty($products)): ?>
-                        <p style="grid-column:1/-1;text-align:center;color:#888;padding:40px 0;">
+                        <p style="grid-column:1/-1;text-align:center;color:#888;padding:40px 0;" data-translate="shopNoResults">
                             No products match your search or filters.
                         </p>
                         <?php endif; ?>
@@ -609,8 +739,12 @@ if ($cpRes) {
                             $catName   = $p['category'] ?? '';
                             $imageIDs   = !empty($p['imageIDs']) ? array_map('intval', explode(',', $p['imageIDs'])) : [];
                             $colorPaths = $colorPhotosByProduct[$pid] ?? [];
+                            $variationPaths = $variationPhotosByProduct[$pid] ?? [];
+                            $productTags = $p['derivedTags'] ?? [];
                             $rev    = $reviewData[$pid] ?? ['cnt' => 0, 'avg' => 0.0];
                             $stars  = '';
+                            $displayMinPrice = (float)($p['displayMinPrice'] ?? $p['basePrice'] ?? 0);
+                            $displayMaxPrice = (float)($p['displayMaxPrice'] ?? $p['basePrice'] ?? 0);
                             $filled = (int)round($rev['avg']);
                             for ($i = 1; $i <= 5; $i++) {
                                 $stars .= $i <= $filled ? '&#9733;' : '&#9734;';
@@ -619,14 +753,15 @@ if ($cpRes) {
                         <article id="product-<?= $pid ?>"
                                  class="shop-product-card is-clickable"
                                  data-category="<?= htmlspecialchars($catName) ?>"
-                                 data-price="<?= (float)$p['basePrice'] ?>"
+                                 data-price="<?= $displayMinPrice ?>"
+                                 data-tags="<?= htmlspecialchars(implode(',', $productTags)) ?>"
                                  data-product-url="product.php?id=<?= $pid ?>"
                                  tabindex="0"
                                  role="link"
                                  aria-label="View <?= htmlspecialchars($p['nameEN']) ?>">
                             <div class="shop-product-image">
                                 <?php if (!empty($p['isSellingFast'])): ?>
-                                <span class="shop-selling-fast-badge">Selling Fast</span>
+                                <span class="shop-selling-fast-badge" data-translate="sellingFast">Selling Fast</span>
                                 <?php endif; ?>
                                 <?php
                                     // Combine blob photos + color photos
@@ -634,9 +769,21 @@ if ($cpRes) {
                                     foreach ($imageIDs as $imgID) {
                                         $allSlides[] = ['type' => 'blob', 'src' => 'modules/admin/ajax/product_image.php?id=' . $imgID];
                                     }
+                                    foreach ($variationPaths as $vp) {
+                                        $allSlides[] = ['type' => 'path', 'src' => $vp];
+                                    }
                                     foreach ($colorPaths as $cp) {
                                         $allSlides[] = ['type' => 'path', 'src' => $cp];
                                     }
+                                    $seenSlideSources = [];
+                                    $allSlides = array_values(array_filter($allSlides, static function (array $slide) use (&$seenSlideSources): bool {
+                                        $src = (string)($slide['src'] ?? '');
+                                        if ($src === '' || isset($seenSlideSources[$src])) {
+                                            return false;
+                                        }
+                                        $seenSlideSources[$src] = true;
+                                        return true;
+                                    }));
                                 ?>
                                 <?php if (!empty($allSlides)): ?>
                                 <div id="carousel-<?= $pid ?>" class="carousel slide shop-carousel" data-bs-ride="carousel" data-bs-interval="2000">
@@ -661,21 +808,27 @@ if ($cpRes) {
                                     <?= app_csrf_input() ?>
                                     <input type="hidden" name="action" value="toggle_wishlist_item">
                                     <input type="hidden" name="product_id" value="<?= $pid ?>">
-                                    <button type="submit" class="shop-fav <?= $inWishlist ? 'is-active' : '' ?>" title="<?= $inWishlist ? 'Remove from wishlist' : 'Add to wishlist' ?>">
+                                    <button type="submit" class="shop-fav <?= $inWishlist ? 'is-active' : '' ?>" title="<?= $inWishlist ? 'Remove from wishlist' : 'Add to wishlist' ?>"<?= app_translate_title_attrs($inWishlist ? 'Remove from wishlist' : 'Add to wishlist', $inWishlist ? 'Αφαίρεση από τη λίστα επιθυμιών' : 'Προσθήκη στη λίστα επιθυμιών') ?>>
                                         <i class="<?= $inWishlist ? 'fas' : 'far' ?> fa-heart"></i>
                                     </button>
                                 </form>
                             </div>
                             <div class="shop-product-info">
-                                <h3 class="shop-product-name"><?= htmlspecialchars($p['nameEN']) ?></h3>
+                                <h3 class="shop-product-name" data-product-name data-name-en="<?= htmlspecialchars((string)$p['nameEN'], ENT_QUOTES, 'UTF-8') ?>" data-name-el="<?= htmlspecialchars((string)($p['nameGR'] ?: $p['nameEN']), ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($p['nameEN']) ?></h3>
                                 <div class="shop-price-row">
-                                    <span class="shop-price">&euro;<?= number_format((float)$p['basePrice'], 0) ?></span>
+                                    <span class="shop-price">
+                                        <?php if ($displayMaxPrice > $displayMinPrice): ?>
+                                            &euro;<?= number_format($displayMinPrice, 0) ?> - &euro;<?= number_format($displayMaxPrice, 0) ?>
+                                        <?php else: ?>
+                                            &euro;<?= number_format($displayMinPrice, 0) ?>
+                                        <?php endif; ?>
+                                    </span>
                                     <?php if ($p['cartStatus'] === 'made_to_order'): ?>
-                                        <span class="shop-stock" style="color:#a066f0;">Made to Order</span>
+                                        <span class="shop-stock" style="color:#a066f0;" data-translate="madeToOrder">Made to Order</span>
                                     <?php elseif ($isOutStock): ?>
                                         <span class="shop-stock out" data-translate="outOfStock">Out of Stock</span>
                                     <?php elseif ($isLowStock): ?>
-                                        <span class="shop-stock" style="background:#fff7d1;color:#9a6b00;">Only <?= (int)$p['inventory'] ?> left</span>
+                                        <span class="shop-stock" style="background:#fff7d1;color:#9a6b00;"<?= app_translate_text_attrs('Only ' . (int)$p['inventory'] . ' left', 'Μόνο ' . (int)$p['inventory'] . ' έμειναν') ?>>Only <?= (int)$p['inventory'] ?> left</span>
                                     <?php else: ?>
                                         <span class="shop-stock" data-translate="inStock">In Stock</span>
                                     <?php endif; ?>
@@ -685,7 +838,7 @@ if ($cpRes) {
                                     <span class="shop-review-count">(<?= $rev['cnt'] ?>)</span>
                                 </div>
                                 <div class="shop-review-count" style="margin-top:4px;display:block;">
-                                    <?= (int)($p['totalSales'] ?? 0) ?> sold
+                                    <span<?= app_translate_text_attrs((int)($p['totalSales'] ?? 0) . ' sold', (int)($p['totalSales'] ?? 0) . ' πωλήθηκαν') ?>><?= (int)($p['totalSales'] ?? 0) ?> sold</span>
                                 </div>
                                 <button class="shop-atc-btn"
                                         data-product-id="<?= $pid ?>"
@@ -713,6 +866,7 @@ if ($cpRes) {
 
         const searchInput = document.getElementById('shop-search-input');
         const categoryInputs = document.querySelectorAll('input[type="radio"][name="category"]');
+        const tagInputs = document.querySelectorAll('input[type="checkbox"][name="tags[]"]');
         const priceRange = document.getElementById('price-range');
         const priceMaxLabel = document.getElementById('price-max-label');
         const clearBtn = document.getElementById('clear-filters-btn');
@@ -725,6 +879,10 @@ if ($cpRes) {
 
         categoryInputs.forEach((radio) => {
             radio.addEventListener('change', () => form.submit());
+        });
+
+        tagInputs.forEach((checkbox) => {
+            checkbox.addEventListener('change', () => form.submit());
         });
 
         if (priceRange) {
@@ -768,12 +926,11 @@ if ($cpRes) {
         });
     });
 
-    function currentLang() {
-        return localStorage.getItem('language') || 'en';
-    }
-
-    function t(en, el) {
-        return currentLang() === 'el' ? el : en;
+    function t(key, params = {}) {
+        if (window.appTranslate) {
+            return window.appTranslate(key, params);
+        }
+        return key;
     }
 
     function showToast(msg, isError) {
@@ -815,14 +972,14 @@ if ($cpRes) {
             if (data.success) {
                 const count = data.cart?.totals?.items_count ?? 0;
                 updateCartBadge(count);
-                const msg = data.notice || t('Added to cart!', 'Προστέθηκε στο καλάθι!');
+                const msg = data.notice || t('addedToCart');
                 showToast(msg);
             } else {
-                showToast(data.message || 'Could not add to cart.', true);
+                showToast(data.message || t('couldNotAddToCart'), true);
             }
             return data;
         })
-        .catch(() => showToast('Network error.', true));
+        .catch(() => showToast(t('networkError'), true));
     }
 
     document.querySelectorAll('.shop-atc-btn').forEach(btn => {

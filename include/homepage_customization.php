@@ -9,6 +9,18 @@ if (!function_exists('app_homepage_project_root')) {
     }
 }
 
+if (!function_exists('app_homepage_local_asset_path')) {
+    function app_homepage_local_asset_path(string $path): string
+    {
+        $relativePath = ltrim(trim($path), '/\\');
+        if ($relativePath === '') {
+            return '';
+        }
+
+        return app_homepage_project_root() . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $relativePath);
+    }
+}
+
 if (!function_exists('app_homepage_upload_dir')) {
     function app_homepage_upload_dir(): string
     {
@@ -16,51 +28,65 @@ if (!function_exists('app_homepage_upload_dir')) {
     }
 }
 
+if (!function_exists('app_homepage_collection_count')) {
+    function app_homepage_collection_count(): int
+    {
+        return 4;
+    }
+}
+
+if (!function_exists('app_homepage_journey_count')) {
+    function app_homepage_journey_count(): int
+    {
+        return 3;
+    }
+}
+
+if (!function_exists('app_homepage_hero_canvas_width')) {
+    function app_homepage_hero_canvas_width(): int
+    {
+        return 1920;
+    }
+}
+
+if (!function_exists('app_homepage_hero_canvas_height')) {
+    function app_homepage_hero_canvas_height(): int
+    {
+        return 600;
+    }
+}
+
+if (!function_exists('app_homepage_hero_safe_width')) {
+    function app_homepage_hero_safe_width(): int
+    {
+        return 1172;
+    }
+}
+
+if (!function_exists('app_homepage_hero_dimension_message')) {
+    function app_homepage_hero_dimension_message(): string
+    {
+        return sprintf(
+            'Hero section background must be exactly %dx%d pixels for a full-width upload, or %dx%d pixels for a centered banner that the system expands automatically. Keep important text inside the centered %dx%d safe area.',
+            app_homepage_hero_canvas_width(),
+            app_homepage_hero_canvas_height(),
+            app_homepage_hero_safe_width(),
+            app_homepage_hero_canvas_height(),
+            app_homepage_hero_safe_width(),
+            app_homepage_hero_canvas_height()
+        );
+    }
+}
+
 if (!function_exists('app_homepage_upload_specs')) {
     function app_homepage_upload_specs(): array
     {
-        return [
+        $specs = [
             'homepage_hero_image' => [
                 'label' => 'Hero section background',
-                'width' => 1172,
-                'height' => 600,
+                'width' => app_homepage_hero_canvas_width(),
+                'height' => app_homepage_hero_canvas_height(),
                 'filename' => 'hero-section',
-            ],
-            'homepage_collection_1_image' => [
-                'label' => 'Shop by Collection image 1',
-                'width' => 261,
-                'height' => 260,
-                'filename' => 'shop-collection-1',
-            ],
-            'homepage_collection_2_image' => [
-                'label' => 'Shop by Collection image 2',
-                'width' => 261,
-                'height' => 260,
-                'filename' => 'shop-collection-2',
-            ],
-            'homepage_collection_3_image' => [
-                'label' => 'Shop by Collection image 3',
-                'width' => 261,
-                'height' => 260,
-                'filename' => 'shop-collection-3',
-            ],
-            'homepage_journey_1_image' => [
-                'label' => 'Follow Our Journey image 1',
-                'width' => 361,
-                'height' => 260,
-                'filename' => 'follow-journey-1',
-            ],
-            'homepage_journey_2_image' => [
-                'label' => 'Follow Our Journey image 2',
-                'width' => 361,
-                'height' => 260,
-                'filename' => 'follow-journey-2',
-            ],
-            'homepage_journey_3_image' => [
-                'label' => 'Follow Our Journey image 3',
-                'width' => 361,
-                'height' => 260,
-                'filename' => 'follow-journey-3',
             ],
             'homepage_header_logo_path' => [
                 'label' => 'Header logo',
@@ -69,6 +95,26 @@ if (!function_exists('app_homepage_upload_specs')) {
                 'filename' => 'header-logo',
             ],
         ];
+
+        for ($i = 1; $i <= app_homepage_collection_count(); $i++) {
+            $specs['homepage_collection_' . $i . '_image'] = [
+                'label' => 'Shop by Collection image ' . $i,
+                'width' => 261,
+                'height' => 260,
+                'filename' => 'shop-collection-' . $i,
+            ];
+        }
+
+        for ($i = 1; $i <= app_homepage_journey_count(); $i++) {
+            $specs['homepage_journey_' . $i . '_image'] = [
+                'label' => 'Follow Our Journey image ' . $i,
+                'width' => 361,
+                'height' => 260,
+                'filename' => 'follow-journey-' . $i,
+            ];
+        }
+
+        return $specs;
     }
 }
 
@@ -76,8 +122,7 @@ if (!function_exists('app_homepage_default_config_values')) {
     function app_homepage_default_config_values(): array
     {
         $defaultImage = 'https://images.unsplash.com/photo-1581833971358-2c8b550f87b3?w=1200&q=80';
-
-        return [
+        $defaults = [
             'homepage_hero_image' => $defaultImage,
             'homepage_collection_1_image' => $defaultImage,
             'homepage_collection_1_label' => 'Dragon Plushies',
@@ -88,11 +133,18 @@ if (!function_exists('app_homepage_default_config_values')) {
             'homepage_collection_3_image' => $defaultImage,
             'homepage_collection_3_label' => 'Sea Creatures',
             'homepage_collection_3_link' => 'shop.php?category=sea',
-            'homepage_journey_1_image' => $defaultImage,
-            'homepage_journey_2_image' => $defaultImage,
-            'homepage_journey_3_image' => $defaultImage,
             'homepage_header_logo_path' => '',
         ];
+
+        $defaults['homepage_collection_4_image'] = $defaultImage;
+        $defaults['homepage_collection_4_label'] = 'Handmade Dolls';
+        $defaults['homepage_collection_4_link'] = 'shop.php?category=Dolls';
+
+        for ($i = 1; $i <= app_homepage_journey_count(); $i++) {
+            $defaults['homepage_journey_' . $i . '_image'] = $defaultImage;
+        }
+
+        return $defaults;
     }
 }
 
@@ -206,7 +258,7 @@ if (!function_exists('app_homepage_asset_exists')) {
             return true;
         }
 
-        $absolutePath = app_homepage_project_root() . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim($path, '/\\'));
+        $absolutePath = app_homepage_local_asset_path($path);
         return is_file($absolutePath);
     }
 }
@@ -230,11 +282,224 @@ if (!function_exists('app_homepage_asset_url')) {
     function app_homepage_asset_url(string $path, string $prefix = ''): string
     {
         $path = trim($path);
+        if ($path === '') {
+            return $path;
+        }
+
+        if (app_homepage_is_remote_asset($path)) {
+            return $path;
+        }
+
+        $url = $prefix . ltrim($path, '/\\');
+        $absolutePath = app_homepage_local_asset_path($path);
+        if (!is_file($absolutePath)) {
+            return $url;
+        }
+
+        $version = (int)@filemtime($absolutePath);
+        if ($version <= 0) {
+            return $url;
+        }
+
+        return $url . (strpos($url, '?') === false ? '?' : '&') . 'v=' . $version;
+    }
+}
+
+if (!function_exists('app_homepage_create_gd_image_resource')) {
+    function app_homepage_create_gd_image_resource(string $path, string $mimeType)
+    {
+        switch ($mimeType) {
+            case 'image/jpeg':
+                return @imagecreatefromjpeg($path);
+            case 'image/png':
+                return @imagecreatefrompng($path);
+            case 'image/gif':
+                return @imagecreatefromgif($path);
+            case 'image/webp':
+                return function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($path) : false;
+            default:
+                return false;
+        }
+    }
+}
+
+if (!function_exists('app_homepage_write_gd_image_resource')) {
+    function app_homepage_write_gd_image_resource($image, string $mimeType, string $targetPath): void
+    {
+        $ok = false;
+        switch ($mimeType) {
+            case 'image/jpeg':
+                $ok = @imagejpeg($image, $targetPath, 92);
+                break;
+            case 'image/png':
+                $ok = @imagepng($image, $targetPath, 6);
+                break;
+            case 'image/gif':
+                $ok = @imagegif($image, $targetPath);
+                break;
+            case 'image/webp':
+                $ok = function_exists('imagewebp') ? @imagewebp($image, $targetPath, 90) : false;
+                break;
+        }
+
+        if (!$ok) {
+            throw new RuntimeException('Could not write the processed hero image.');
+        }
+    }
+}
+
+if (!function_exists('app_homepage_expand_hero_asset')) {
+    function app_homepage_expand_hero_asset(string $sourcePath, string $targetPath, string $mimeType, int $sourceWidth, int $sourceHeight): void
+    {
+        $targetWidth = app_homepage_hero_canvas_width();
+        $targetHeight = app_homepage_hero_canvas_height();
+        $sourceImage = app_homepage_create_gd_image_resource($sourcePath, $mimeType);
+
+        if (!$sourceImage) {
+            throw new RuntimeException('Could not read the uploaded hero image.');
+        }
+
+        $canvas = imagecreatetruecolor($targetWidth, $targetHeight);
+        if (!$canvas) {
+            imagedestroy($sourceImage);
+            throw new RuntimeException('Could not prepare the hero image canvas.');
+        }
+
+        $white = imagecolorallocate($canvas, 255, 255, 255);
+        imagefilledrectangle($canvas, 0, 0, $targetWidth, $targetHeight, $white);
+
+        if ($sourceWidth === $targetWidth && $sourceHeight === $targetHeight) {
+            imagecopyresampled($canvas, $sourceImage, 0, 0, 0, 0, $targetWidth, $targetHeight, $sourceWidth, $sourceHeight);
+        } else {
+            $safeWidth = app_homepage_hero_safe_width();
+            if ($sourceWidth !== $safeWidth || $sourceHeight !== $targetHeight) {
+                imagedestroy($canvas);
+                imagedestroy($sourceImage);
+                throw new RuntimeException(app_homepage_hero_dimension_message());
+            }
+
+            $sidePadding = (int)floor(($targetWidth - $sourceWidth) / 2);
+            $edgeSliceWidth = max(1, min(60, (int)floor($sourceWidth * 0.05)));
+
+            imagecopyresampled(
+                $canvas,
+                $sourceImage,
+                0,
+                0,
+                0,
+                0,
+                $sidePadding,
+                $targetHeight,
+                $edgeSliceWidth,
+                $sourceHeight
+            );
+
+            imagecopy(
+                $canvas,
+                $sourceImage,
+                $sidePadding,
+                0,
+                0,
+                0,
+                $sourceWidth,
+                $sourceHeight
+            );
+
+            imagecopyresampled(
+                $canvas,
+                $sourceImage,
+                $sidePadding + $sourceWidth,
+                0,
+                $sourceWidth - $edgeSliceWidth,
+                0,
+                $sidePadding,
+                $targetHeight,
+                $edgeSliceWidth,
+                $sourceHeight
+            );
+
+            $fadeWidth = 56;
+            foreach ([$sidePadding, $sidePadding + $sourceWidth] as $seamX) {
+                for ($offset = -$fadeWidth; $offset <= $fadeWidth; $offset++) {
+                    $x = $seamX + $offset;
+                    if ($x < 0 || $x >= $targetWidth) {
+                        continue;
+                    }
+
+                    $strength = 1 - (abs($offset) / max(1, $fadeWidth));
+                    $alpha = 127 - (int)round($strength * 36);
+                    $fadeColor = imagecolorallocatealpha($canvas, 255, 255, 255, max(0, min(127, $alpha)));
+                    imageline($canvas, $x, 0, $x, $targetHeight, $fadeColor);
+                }
+            }
+        }
+
+        $writePath = $targetPath;
+        $sourceRealPath = @realpath($sourcePath);
+        $targetRealPath = @realpath($targetPath);
+        $replaceOriginal = $sourceRealPath !== false && $targetRealPath !== false && $sourceRealPath === $targetRealPath;
+        if ($replaceOriginal) {
+            $writePath = $targetPath . '.tmp';
+        }
+
+        app_homepage_write_gd_image_resource($canvas, $mimeType, $writePath);
+
+        if ($replaceOriginal) {
+            @unlink($targetPath);
+            if (!@rename($writePath, $targetPath)) {
+                @unlink($writePath);
+                imagedestroy($canvas);
+                imagedestroy($sourceImage);
+                throw new RuntimeException('Could not replace the stored hero image.');
+            }
+        }
+
+        imagedestroy($canvas);
+        imagedestroy($sourceImage);
+    }
+}
+
+if (!function_exists('app_homepage_normalize_local_hero_asset')) {
+    function app_homepage_normalize_local_hero_asset(string $path): string
+    {
+        $path = trim($path);
         if ($path === '' || app_homepage_is_remote_asset($path)) {
             return $path;
         }
 
-        return $prefix . ltrim($path, '/\\');
+        $absolutePath = app_homepage_local_asset_path($path);
+        if (!is_file($absolutePath)) {
+            return $path;
+        }
+
+        $imageInfo = @getimagesize($absolutePath);
+        if ($imageInfo === false) {
+            return $path;
+        }
+
+        $width = (int)($imageInfo[0] ?? 0);
+        $height = (int)($imageInfo[1] ?? 0);
+        if ($width === app_homepage_hero_canvas_width() && $height === app_homepage_hero_canvas_height()) {
+            return $path;
+        }
+
+        if ($width !== app_homepage_hero_safe_width() || $height !== app_homepage_hero_canvas_height()) {
+            return $path;
+        }
+
+        $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $mimeType = (string)($finfo->file($absolutePath) ?: '');
+        if (!app_allowed_image_mime($mimeType)) {
+            return $path;
+        }
+
+        try {
+            app_homepage_expand_hero_asset($absolutePath, $absolutePath, $mimeType, $width, $height);
+        } catch (Throwable $e) {
+            return $path;
+        }
+
+        return $path;
     }
 }
 
@@ -244,9 +509,12 @@ if (!function_exists('app_homepage_load_settings')) {
         $defaults = app_homepage_default_config_values();
         app_homepage_ensure_schema($conn);
 
+        $heroImagePath = app_homepage_get_config_value($conn, 'homepage_hero_image', $defaults['homepage_hero_image']);
+        $heroImagePath = app_homepage_normalize_local_hero_asset($heroImagePath);
+
         $settings = [
             'hero_image' => app_homepage_resolve_asset(
-                app_homepage_get_config_value($conn, 'homepage_hero_image', $defaults['homepage_hero_image']),
+                $heroImagePath,
                 $defaults['homepage_hero_image']
             ),
             'collections' => [],
@@ -254,7 +522,7 @@ if (!function_exists('app_homepage_load_settings')) {
             'header_logo_path' => '',
         ];
 
-        for ($i = 1; $i <= 3; $i++) {
+        for ($i = 1; $i <= app_homepage_collection_count(); $i++) {
             $settings['collections'][] = [
                 'image' => app_homepage_resolve_asset(
                     app_homepage_get_config_value($conn, 'homepage_collection_' . $i . '_image', $defaults['homepage_collection_' . $i . '_image']),
@@ -271,6 +539,9 @@ if (!function_exists('app_homepage_load_settings')) {
                     $defaults['homepage_collection_' . $i . '_link']
                 ),
             ];
+        }
+
+        for ($i = 1; $i <= app_homepage_journey_count(); $i++) {
             $settings['journey_images'][] = app_homepage_resolve_asset(
                 app_homepage_get_config_value($conn, 'homepage_journey_' . $i . '_image', $defaults['homepage_journey_' . $i . '_image']),
                 $defaults['homepage_journey_' . $i . '_image']
@@ -317,7 +588,14 @@ if (!function_exists('app_homepage_save_uploaded_asset')) {
 
         $width = (int)($imageInfo[0] ?? 0);
         $height = (int)($imageInfo[1] ?? 0);
-        if ($width !== (int)$spec['width'] || $height !== (int)$spec['height']) {
+        if ($configKey === 'homepage_hero_image') {
+            $isFullWidthHero = $width === app_homepage_hero_canvas_width() && $height === app_homepage_hero_canvas_height();
+            $isLegacyHero = $width === app_homepage_hero_safe_width() && $height === app_homepage_hero_canvas_height();
+
+            if (!$isFullWidthHero && !$isLegacyHero) {
+                throw new InvalidArgumentException(app_homepage_hero_dimension_message() . sprintf(' Uploaded image is %dx%d.', $width, $height));
+            }
+        } elseif ($width !== (int)$spec['width'] || $height !== (int)$spec['height']) {
             throw new InvalidArgumentException(
                 sprintf(
                     '%s must be exactly %dx%d pixels. Uploaded image is %dx%d.',
@@ -364,6 +642,10 @@ if (!function_exists('app_homepage_save_uploaded_asset')) {
         $targetPath = $uploadDir . DIRECTORY_SEPARATOR . $fileName;
         if (!move_uploaded_file($tmpName, $targetPath)) {
             throw new RuntimeException('Could not save ' . $spec['label'] . '.');
+        }
+
+        if ($configKey === 'homepage_hero_image' && $width === app_homepage_hero_safe_width() && $height === app_homepage_hero_canvas_height()) {
+            app_homepage_expand_hero_asset($targetPath, $targetPath, $mimeType, $width, $height);
         }
 
         return 'uploads/assets/images/homepage/' . $fileName;

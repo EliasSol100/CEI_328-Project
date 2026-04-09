@@ -2,6 +2,7 @@
 session_start();
 require_once "authentication/database.php";
 require_once "authentication/get_config.php";
+require_once "include/translation_helpers.php";
 
 // --------------------------------------------------
 // Site configuration
@@ -105,7 +106,7 @@ $GLOBALS['header_user_role']      = $role;
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/translations.js') ?>" defer></script>
 </head>
-<body class="site-page">
+<body class="site-page"<?= app_translate_page_title_attrs('Creations by Athina - About', 'Creations by Athina - Σχετικά') ?>>
     <?php
     $activePage = 'about';
     include __DIR__ . '/include/header.php';

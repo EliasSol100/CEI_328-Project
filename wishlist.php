@@ -2,6 +2,7 @@
 session_start();
 require_once "authentication/database.php";
 require_once "include/security.php";
+require_once "include/translation_helpers.php";
 
 $userId = $_SESSION["user"]["id"] ?? null;
 $fullName = $_SESSION["user"]["full_name"] ?? "Guest";
@@ -151,7 +152,7 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
     <script src="assets/js/translations.js" defer></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
-<body class="site-page">
+<body class="site-page"<?= app_translate_page_title_attrs('My Wishlist - Athina E-Shop', 'Η Λίστα Επιθυμιών μου - Athina E-Shop') ?>>
     <?php
     $activePage = 'wishlist';
     include __DIR__ . '/include/header.php';
@@ -165,7 +166,7 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
             </div>
 
             <?php if ($message): ?>
-                <div class="wishlist-msg"><?= htmlspecialchars($message) ?></div>
+                <div class="wishlist-msg"<?= $message === 'Item removed from wishlist.' ? app_translate_text_attrs('Item removed from wishlist.', 'Το προϊόν αφαιρέθηκε από τη λίστα επιθυμιών.') : '' ?>><?= htmlspecialchars($message) ?></div>
             <?php endif; ?>
 
             <?php if (empty($sessionItems) && empty($dbItems)): ?>
@@ -179,7 +180,7 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
                                      src="<?= htmlspecialchars($item["image"]) ?>"
                                      alt="<?= htmlspecialchars($item["name"]) ?>">
                                 <div class="wishlist-item-info">
-                                    <strong><?= htmlspecialchars($item["name"]) ?></strong>
+                                    <strong<?= app_translate_text_attrs((string)$item["name"], (string)$item["name"]) ?>><?= htmlspecialchars($item["name"]) ?></strong>
                                     <span>&euro;<?= number_format((float)$item["price"], 0) ?></span>
                                 </div>
                             </div>
@@ -187,7 +188,7 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
                                 <?= app_csrf_input() ?>
                                 <input type="hidden" name="action" value="remove_wishlist_key">
                                 <input type="hidden" name="product_key" value="<?= htmlspecialchars($item["key"]) ?>">
-                                <button type="submit" aria-label="Remove item"><i class="fas fa-trash"></i></button>
+                                <button type="submit" aria-label="Remove item"<?= app_translate_aria_attrs('Remove item', 'Αφαίρεση προϊόντος') ?>><i class="fas fa-trash"></i></button>
                             </form>
                         </li>
                     <?php endforeach; ?>
@@ -203,7 +204,7 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
                                     <div class="wishlist-thumb placeholder"><i class="fas fa-image"></i></div>
                                 <?php endif; ?>
                                 <div class="wishlist-item-info">
-                                    <strong><?= htmlspecialchars($item["name"]) ?></strong>
+                                    <strong<?= app_translate_text_attrs((string)$item["name"], (string)$item["name"]) ?>><?= htmlspecialchars($item["name"]) ?></strong>
                                     <span>&euro;<?= number_format((float)$item["price"], 0) ?></span>
                                 </div>
                             </div>
@@ -211,7 +212,7 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
                                 <?= app_csrf_input() ?>
                                 <input type="hidden" name="action" value="remove_wishlist_pid">
                                 <input type="hidden" name="product_id" value="<?= (int)$item["productID"] ?>">
-                                <button type="submit" aria-label="Remove item"><i class="fas fa-trash"></i></button>
+                                <button type="submit" aria-label="Remove item"<?= app_translate_aria_attrs('Remove item', 'Αφαίρεση προϊόντος') ?>><i class="fas fa-trash"></i></button>
                             </form>
                         </li>
                     <?php endforeach; ?>

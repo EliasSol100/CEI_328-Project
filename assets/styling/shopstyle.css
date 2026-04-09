@@ -93,6 +93,41 @@
     background: #fcf8ff;
 }
 
+.tag-chip {
+    position: relative;
+    display: inline-flex;
+    cursor: pointer;
+}
+
+.tag-chip input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.tag-chip span {
+    border: 1px solid #ead8ff;
+    border-radius: 999px;
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #68458b;
+    background: #fcf8ff;
+    transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.tag-chip:hover span {
+    border-color: #c9a7f2;
+    transform: translateY(-1px);
+}
+
+.tag-chip input:checked + span {
+    background: linear-gradient(90deg, rgba(124, 58, 237, 0.12), rgba(236, 72, 153, 0.12));
+    border-color: #9b63f6;
+    color: #5b2ba0;
+    box-shadow: 0 8px 16px rgba(124, 58, 237, 0.14);
+}
+
 /* --- COLOR FILTERS (now matching plush colours) --- */
 
 .color-filter-row {
@@ -280,10 +315,12 @@
 }
 
 .shop-product-image {
-    height: 220px;
-    background-size: cover;
+    height: 280px;
+    background-size: contain;
+    background-repeat: no-repeat;
     background-position: center;
     position: relative;
+    background-color: #fcf8ff;
 }
 
 .shop-selling-fast-badge {

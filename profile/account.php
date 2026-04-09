@@ -4,6 +4,7 @@ session_start();
 require_once "../authentication/database.php";
 require_once "../include/security.php";
 require_once "../include/loyalty_program.php";
+require_once "../include/translation_helpers.php";
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
@@ -1001,7 +1002,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
     <script src="../assets/js/translations.js" defer></script>
 </head>
 
-<body class="account-page">
+<body class="account-page"<?= app_translate_page_title_attrs('My Account - Athina E-Shop', 'Ο Λογαριασμός μου - Athina E-Shop') ?>>
 
 <?php include "../include/header.php"; ?>
 
@@ -1051,7 +1052,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                     style="right: -4px; bottom: -4px;"
                                     data-bs-toggle="modal"
                                     data-bs-target="#avatarModal"
-                                    aria-label="Change profile picture">
+                                    aria-label="Change profile picture"<?= app_translate_aria_attrs('Change profile picture', 'Αλλαγή εικόνας προφίλ') ?>>
                                 <i class="bi bi-pencil"></i>
                             </button>
                         </div>
@@ -1068,7 +1069,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                         <a href="account.php?tab=loyalty"
                            class="list-group-item list-group-item-action <?= $activeTab === 'loyalty' ? 'active' : '' ?>">
                             <i class="bi bi-stars me-2"></i>
-                            <span>Loyalty</span>
+                            <span data-translate="sidebarLoyalty">Loyalty</span>
                         </a>
                         <a href="account.php?tab=addresses"
                            class="list-group-item list-group-item-action <?= $activeTab === 'addresses' ? 'active' : '' ?>">
@@ -1123,24 +1124,24 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                                         <h5 class="mb-1">
                                                             <?= htmlspecialchars($order["orderNumber"] ?: ("ORD-" . $orderId)) ?>
                                                         </h5>
-                                                        <div class="text-muted small">
+                                                        <div class="text-muted small"<?= app_translate_text_attrs('Placed on ' . formatDateTime($order["createdAt"] ?? null), 'Ημερομηνία παραγγελίας ' . formatDateTime($order["createdAt"] ?? null)) ?>>
                                                             Placed on <?= htmlspecialchars(formatDateTime($order["createdAt"] ?? null)) ?>
                                                         </div>
                                                         <div class="mt-2 d-flex gap-2 flex-wrap">
                                                             <span class="badge <?= $statusClass ?>">
                                                                 <?= htmlspecialchars($statusLabel) ?>
                                                             </span>
-                                                            <span class="badge <?= $paymentClass ?>">
+                                                            <span class="badge <?= $paymentClass ?>"<?= app_translate_text_attrs('Payment: ' . $paymentKey, 'Πληρωμή: ' . $paymentKey) ?>>
                                                                 Payment: <?= htmlspecialchars($paymentKey) ?>
                                                             </span>
                                                         </div>
                                                     </div>
                                                     <div class="text-end">
-                                                        <div class="text-muted small">Total</div>
+                                                        <div class="text-muted small" data-translate="accountTotalLabel">Total</div>
                                                         <div class="fw-semibold fs-5">
                                                             EUR <?= number_format((float)$order["totalAmount"], 2) ?>
                                                         </div>
-                                                        <div class="text-muted small">
+                                                        <div class="text-muted small"<?= app_translate_text_attrs((int)$order["itemCount"] . ' item(s)', (int)$order["itemCount"] . ' προϊόν(τα)') ?>>
                                                             <?= (int)$order["itemCount"] ?> item(s)
                                                         </div>
                                                     </div>
@@ -1148,7 +1149,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
 
                                                 <?php if (!empty($itemsPreview)): ?>
                                                     <div class="mt-3">
-                                                        <div class="small text-muted mb-1">Items</div>
+                                                        <div class="small text-muted mb-1" data-translate="accountItemsLabel">Items</div>
                                                         <div class="small">
                                                             <?php
                                                             $previewList = array_slice($itemsPreview, 0, 3);
@@ -1166,11 +1167,11 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                                         <a href="../modules/receipt.php?order_id=<?= $orderId ?>"
                                                            class="btn btn-outline-secondary btn-sm"
                                                            target="_blank" rel="noopener">
-                                                            <i class="bi bi-receipt"></i> Generate Receipt
+                                                            <i class="bi bi-receipt"></i> <span data-translate="accountGenerateReceipt">Generate Receipt</span>
                                                         </a>
                                                     <?php else: ?>
                                                         <button type="button" class="btn btn-outline-secondary btn-sm" disabled>
-                                                            <i class="bi bi-receipt"></i> Receipt Unavailable
+                                                            <i class="bi bi-receipt"></i> <span data-translate="accountReceiptUnavailable">Receipt Unavailable</span>
                                                         </button>
                                                     <?php endif; ?>
 
@@ -1179,12 +1180,12 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                                         <input type="hidden" name="order_id" value="<?= $orderId ?>">
                                                         <input type="hidden" name="reorder_token" value="<?= htmlspecialchars($_SESSION["account_reorder_token"]) ?>">
                                                         <button type="submit" class="btn btn-primary btn-sm">
-                                                            <i class="bi bi-cart-plus"></i> Reorder
+                                                            <i class="bi bi-cart-plus"></i> <span data-translate="accountReorder">Reorder</span>
                                                         </button>
                                                     </form>
 
                                                     <a href="../cart.php" class="btn btn-outline-primary btn-sm">
-                                                        <i class="bi bi-bag"></i> View Cart
+                                                        <i class="bi bi-bag"></i> <span data-translate="accountViewCart">View Cart</span>
                                                     </a>
                                                 </div>
                                             </div>
@@ -1193,40 +1194,40 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                 </div>
                             <?php endif; ?>
                         <?php elseif ($activeTab === "loyalty"): ?>
-                            <h4 class="mb-4">Loyalty Program</h4>
+                            <h4 class="mb-4" data-translate="loyaltyProgramTitle">Loyalty Program</h4>
 
                             <div class="row g-3 mb-4">
                                 <div class="col-md-4">
                                     <div class="card border-0 shadow-sm rounded-4 h-100">
                                         <div class="card-body">
-                                            <div class="text-muted small text-uppercase">Current Balance</div>
+                                            <div class="text-muted small text-uppercase" data-translate="loyaltyCurrentBalance">Current Balance</div>
                                             <div class="fs-3 fw-semibold"><?= number_format($loyaltyBalance) ?> pts</div>
-                                            <div class="small text-muted">Approx. €<?= number_format($loyaltyBalanceValue, 2) ?> in redeemable value</div>
+                                            <div class="small text-muted"<?= app_translate_text_attrs('Approx. €' . number_format($loyaltyBalanceValue, 2) . ' in redeemable value', 'Περίπου €' . number_format($loyaltyBalanceValue, 2) . ' σε αξία εξαργύρωσης') ?>>Approx. €<?= number_format($loyaltyBalanceValue, 2) ?> in redeemable value</div>
                                         </div>
                                     </div>
                                 </div>
                                 <div class="col-md-4">
                                     <div class="card border-0 shadow-sm rounded-4 h-100">
                                         <div class="card-body">
-                                            <div class="text-muted small text-uppercase">Earn Rule</div>
-                                            <div class="fs-5 fw-semibold"><?= number_format($loyaltyEarnRate) ?> point per €1</div>
-                                            <div class="small text-muted">Points are awarded after successful orders.</div>
+                                            <div class="text-muted small text-uppercase" data-translate="loyaltyEarnRule">Earn Rule</div>
+                                            <div class="fs-5 fw-semibold"<?= app_translate_text_attrs(number_format($loyaltyEarnRate) . ' point per €1', number_format($loyaltyEarnRate) . ' πόντος ανά €1') ?>><?= number_format($loyaltyEarnRate) ?> point per €1</div>
+                                            <div class="small text-muted" data-translate="loyaltyEarnHelp">Points are awarded after successful orders.</div>
                                         </div>
                                     </div>
                                 </div>
                                 <div class="col-md-4">
                                     <div class="card border-0 shadow-sm rounded-4 h-100">
                                         <div class="card-body">
-                                            <div class="text-muted small text-uppercase">Redeem Rule</div>
-                                            <div class="fs-5 fw-semibold"><?= number_format($loyaltyRedeemRate) ?> points = €1 off</div>
-                                            <div class="small text-muted">Redemption applies at checkout before shipping.</div>
+                                            <div class="text-muted small text-uppercase" data-translate="loyaltyRedeemRule">Redeem Rule</div>
+                                            <div class="fs-5 fw-semibold"<?= app_translate_text_attrs(number_format($loyaltyRedeemRate) . ' points = €1 off', number_format($loyaltyRedeemRate) . ' πόντοι = €1 έκπτωση') ?>><?= number_format($loyaltyRedeemRate) ?> points = €1 off</div>
+                                            <div class="small text-muted" data-translate="loyaltyRedeemHelp">Redemption applies at checkout before shipping.</div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
                             <?php if (empty($loyaltyHistory)): ?>
-                                <p class="text-muted mb-0">
+                                <p class="text-muted mb-0" data-translate="loyaltyNoActivity">
                                     You do not have any loyalty activity yet. Once you complete an eligible purchase, your points history will appear here.
                                 </p>
                             <?php else: ?>
@@ -1236,11 +1237,11 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                             <table class="table align-middle mb-0">
                                                 <thead>
                                                     <tr>
-                                                        <th>Date</th>
-                                                        <th>Activity</th>
-                                                        <th>Order</th>
-                                                        <th>Points</th>
-                                                        <th>Balance</th>
+                                                        <th data-translate="loyaltyDate">Date</th>
+                                                        <th data-translate="loyaltyActivity">Activity</th>
+                                                        <th data-translate="loyaltyOrder">Order</th>
+                                                        <th data-translate="loyaltyPoints">Points</th>
+                                                        <th data-translate="loyaltyBalance">Balance</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -1259,14 +1260,23 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                                         <tr>
                                                             <td><?= htmlspecialchars(formatDateTime($entry["createdAt"] ?? null)) ?></td>
                                                             <td>
-                                                                <div class="fw-medium"><?= htmlspecialchars(formatLoyaltyRuleLabel($entry["ruleApplied"] ?? "")) ?></div>
+                                                                <?php
+                                                                $ruleApplied = strtolower(trim((string)($entry["ruleApplied"] ?? "")));
+                                                                $ruleEn = formatLoyaltyRuleLabel($entry["ruleApplied"] ?? "");
+                                                                $ruleEl = $ruleApplied === 'earn_purchase'
+                                                                    ? 'Πόντοι από αγορά'
+                                                                    : ($ruleApplied === 'redeem_checkout'
+                                                                        ? 'Πόντοι που εξαργυρώθηκαν στο checkout'
+                                                                        : ($ruleApplied === '' ? 'Δραστηριότητα επιβράβευσης' : $ruleEn));
+                                                                ?>
+                                                                <div class="fw-medium"<?= app_translate_text_attrs($ruleEn, $ruleEl) ?>><?= htmlspecialchars($ruleEn) ?></div>
                                                                 <?php if ($voucherValue > 0): ?>
-                                                                    <div class="small text-muted">Discount used: €<?= number_format($voucherValue, 2) ?></div>
+                                                                    <div class="small text-muted"<?= app_translate_text_attrs('Discount used: €' . number_format($voucherValue, 2), 'Έκπτωση που χρησιμοποιήθηκε: €' . number_format($voucherValue, 2)) ?>>Discount used: €<?= number_format($voucherValue, 2) ?></div>
                                                                 <?php endif; ?>
                                                             </td>
-                                                            <td><?= htmlspecialchars($orderLabel) ?></td>
+                                                            <td<?= str_starts_with($orderLabel, 'Order #') ? app_translate_text_attrs($orderLabel, 'Παραγγελία #' . preg_replace('/\D+/', '', $orderLabel)) : '' ?>><?= htmlspecialchars($orderLabel) ?></td>
                                                             <td class="<?= $pointsClass ?> fw-semibold"><?= $pointsPrefix . number_format($pointsDelta) ?></td>
-                                                            <td><?= number_format($balanceAfterRow) ?> pts</td>
+                                                            <td<?= app_translate_text_attrs(number_format($balanceAfterRow) . ' pts', number_format($balanceAfterRow) . ' πόντοι') ?>><?= number_format($balanceAfterRow) ?> pts</td>
                                                         </tr>
                                                     <?php endforeach; ?>
                                                 </tbody>
@@ -1348,7 +1358,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                                         <!-- Edit button (opens modal) -->
                                                         <button type="button"
                                                                 class="btn btn-outline-secondary btn-sm edit-address-btn"
-                                                                title="Edit address"
+                                                                title="Edit address"<?= app_translate_title_attrs('Edit address', 'Επεξεργασία διεύθυνσης') ?>
                                                                 data-id="<?= (int)$addr["id"] ?>"
                                                                 data-label="<?= htmlspecialchars($addr["label"] ?? "", ENT_QUOTES) ?>"
                                                                 data-country="<?= htmlspecialchars($addr["country"] ?? "", ENT_QUOTES) ?>"
@@ -1471,7 +1481,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
             <div class="modal-header">
                 <h5 class="modal-title" data-translate="avatarModalTitle">Change Profile Picture</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"
-                        aria-label="Close"></button>
+                        aria-label="Close"<?= app_translate_aria_attrs('Close', 'Κλείσιμο') ?>></button>
             </div>
             <div class="modal-body">
                 <div class="mb-3">
@@ -1510,7 +1520,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
             <div class="modal-header">
                 <h5 class="modal-title" data-translate="addressModalTitle">Add New Address</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"
-                        aria-label="Close"></button>
+                        aria-label="Close"<?= app_translate_aria_attrs('Close', 'Κλείσιμο') ?>></button>
             </div>
             <div class="modal-body">
                 <div class="mb-3 d-flex flex-column align-items-start">
@@ -1539,12 +1549,11 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                     <input type="text" name="postcode" class="form-control" required>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">
-                        Address label (optional)
-                    </label>
+                    <label class="form-label" data-translate="accountAddressLabelOptional">Address label (optional)</label>
                     <input type="text" name="address_label" class="form-control"
+                           data-translate-placeholder="accountAddressLabelPlaceholder"
                            placeholder="Apartment, Home, Business, etc.">
-                    <small class="text-muted">
+                    <small class="text-muted" data-translate="accountAddressLabelHelp">
                         Optional - leave blank if you don't want a label.
                     </small>
                 </div>
@@ -1582,13 +1591,13 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
             <input type="hidden" name="action" value="edit_address">
             <input type="hidden" name="address_id" id="edit_address_id">
             <div class="modal-header">
-                <h5 class="modal-title">Edit Address</h5>
+                <h5 class="modal-title" data-translate="accountEditAddressTitle">Edit Address</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"
-                        aria-label="Close"></button>
+                        aria-label="Close"<?= app_translate_aria_attrs('Close', 'Κλείσιμο') ?>></button>
             </div>
             <div class="modal-body">
                 <div class="mb-3">
-                    <label class="form-label" for="edit_address_country">Country</label>
+                    <label class="form-label" for="edit_address_country" data-translate="addressCountryLabel">Country</label>
                     <input type="text"
                            name="country"
                            id="edit_address_country"
@@ -1596,27 +1605,28 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                            required>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label" for="edit_address_city">City</label>
+                    <label class="form-label" for="edit_address_city" data-translate="addressCityLabel">City</label>
                     <input type="text" name="city" id="edit_address_city" class="form-control" required>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label" for="edit_address_address">Address</label>
+                    <label class="form-label" for="edit_address_address" data-translate="addressAddressLabel">Address</label>
                     <input type="text" name="address" id="edit_address_address" class="form-control" required>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label" for="edit_address_postcode">Postal Code</label>
+                    <label class="form-label" for="edit_address_postcode" data-translate="addressPostcodeLabel">Postal Code</label>
                     <input type="text" name="postcode" id="edit_address_postcode" class="form-control" required>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label" for="edit_address_label">Address label (optional)</label>
+                    <label class="form-label" for="edit_address_label" data-translate="accountAddressLabelOptional">Address label (optional)</label>
                     <input type="text" name="address_label" id="edit_address_label"
                            class="form-control"
+                           data-translate-placeholder="accountAddressLabelPlaceholder"
                            placeholder="Apartment, Home, Business, etc.">
                 </div>
                 <div class="form-check mb-2">
                     <input class="form-check-input" type="checkbox" name="make_default"
                            id="edit_make_default">
-                    <label class="form-check-label" for="edit_make_default">
+                    <label class="form-check-label" for="edit_make_default" data-translate="addressMakeDefault">
                         Set as default shipping address
                     </label>
                 </div>
@@ -1629,7 +1639,8 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                     Cancel
                 </button>
                 <button type="submit"
-                        class="btn btn-primary">
+                        class="btn btn-primary"
+                        data-translate="settingsSaveChanges">
                     Save Changes
                 </button>
             </div>

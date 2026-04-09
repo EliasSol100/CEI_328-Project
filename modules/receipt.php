@@ -1,12 +1,15 @@
 <?php
 session_start();
 require_once __DIR__ . "/../authentication/database.php";
+require_once __DIR__ . "/../include/product_option_helpers.php";
 
 if (!isset($conn) || !($conn instanceof mysqli)) {
     http_response_code(500);
     echo "Database connection error.";
     exit;
 }
+
+app_product_options_ensure_schema($conn);
 
 function ensureOrderShippingSchema(mysqli $conn): void {
     static $checked = false;
@@ -232,6 +235,7 @@ $itemsSql = "
         oi.giftWrapping,
         oi.giftBagFlag,
         oi.giftMessage,
+        oi.customizationNote,
         p.sku,
         p.nameEN,
         p.nameGR,
@@ -527,6 +531,9 @@ $shippingAddressText = !empty($shippingAddressParts) ? implode(", ", $shippingAd
                     }
                     if (!empty($item["giftMessage"])) {
                         $addonParts[] = "Message: " . (string)$item["giftMessage"];
+                    }
+                    if (!empty($item["customizationNote"])) {
+                        $addonParts[] = "Custom request: " . (string)$item["customizationNote"];
                     }
                     ?>
                     <tr>

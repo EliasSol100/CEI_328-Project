@@ -16,19 +16,31 @@
     top: 92px;
 }
 
-.main-image-wrap {
-    border-radius: 24px;
+#product-carousel {
+    border-radius: 26px;
     overflow: hidden;
     border: 1px solid #ebdfed;
     background: linear-gradient(180deg, #fff 0%, #fdfbff 100%);
-    box-shadow: 0 8px 24px rgba(62, 21, 77, 0.07);
+    box-shadow: 0 14px 30px rgba(62, 21, 77, 0.08);
 }
 
+#product-carousel .carousel-inner {
+    background:
+        radial-gradient(circle at top left, rgba(255, 255, 255, 0.92), rgba(248, 243, 255, 0.9)),
+        linear-gradient(180deg, #fff 0%, #fcf8ff 100%);
+}
+
+#product-carousel .carousel-item {
+    min-height: 560px;
+}
+
+.product-carousel-image,
 .main-image-wrap img {
     width: 100%;
-    height: 640px;
-    object-fit: cover;
+    height: 560px;
+    object-fit: contain;
     display: block;
+    padding: 16px;
 }
 
 .thumbs-wrap {
@@ -110,6 +122,14 @@
     line-height: 1.12;
 }
 
+.option-label {
+    margin: 8px 0 10px;
+    color: #2d2142;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
 .size-row {
     display: flex;
     flex-wrap: wrap;
@@ -141,40 +161,62 @@
 }
 
 .color-row {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 12px;
     margin: 0 0 18px;
 }
 
-.color-dot {
-    width: 50px;
-    height: 50px;
-    border-radius: 999px;
-    border: 3px solid #d7cde8;
+.color-chip-btn {
+    border: 1.5px solid #e2d6f2;
+    border-radius: 16px;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
     cursor: pointer;
-    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    background: #fff;
+    color: #3c2d56;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+    text-align: left;
 }
 
-.color-dot:hover {
+.color-chip-btn:hover {
     transform: translateY(-2px);
+    border-color: #bf9bec;
+    box-shadow: 0 8px 18px rgba(135, 86, 206, 0.12);
 }
 
-.color-dot.active {
+.color-chip-btn.active {
     border-color: #9227f5;
-    box-shadow: 0 0 0 4px rgba(146, 39, 245, 0.15);
+    background: #fcf8ff;
+    box-shadow: 0 0 0 3px rgba(146, 39, 245, 0.12);
 }
 
-.color-dot.is-out {
-    opacity: 0.45;
-    filter: grayscale(0.5);
+.color-chip-btn.is-unavailable {
+    opacity: 0.5;
+    filter: grayscale(0.25);
     border-style: dashed;
 }
 
+.color-chip-swatch {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    flex: 0 0 24px;
+    box-shadow: 0 0 0 1px rgba(46, 28, 73, 0.14), inset 0 0 0 2px rgba(255, 255, 255, 0.7);
+}
+
+.color-chip-name {
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.2;
+}
+
 .color-stock {
-    min-height: 18px;
-    margin: 0 2px 6px;
-    font-size: 12px;
+    min-height: 20px;
+    margin: 2px 2px 8px;
+    font-size: 13px;
     font-weight: 600;
     color: #5a476f;
 }
@@ -281,6 +323,32 @@
     margin: 10px 2px 0;
     font-size: 13px;
     color: #6e6188;
+}
+
+.custom-request-box {
+    background: linear-gradient(180deg, #fbf7ff 0%, #f4ecff 100%);
+}
+
+.custom-request-hint {
+    margin-bottom: 14px;
+}
+
+.custom-request-input {
+    width: 100%;
+    min-height: 44px;
+    border: 1px solid #d8c7ef;
+    border-radius: 12px;
+    padding: 11px 13px;
+    font: inherit;
+    color: #37284d;
+    background: #fff;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.custom-request-input:focus {
+    outline: none;
+    border-color: #9d57ec;
+    box-shadow: 0 0 0 3px rgba(157, 87, 236, 0.12);
 }
 
 .action-row {
@@ -668,12 +736,14 @@
         position: static;
     }
 
+    .product-carousel-image,
     .main-image-wrap img {
-        height: 560px;
+        height: 520px;
     }
 }
 
 @media (max-width: 900px) {
+    .product-carousel-image,
     .main-image-wrap img {
         height: 440px;
     }
@@ -698,8 +768,10 @@
         width: 94%;
     }
 
+    .product-carousel-image,
     .main-image-wrap img {
         height: 320px;
+        padding: 10px;
     }
 
     .section-title,

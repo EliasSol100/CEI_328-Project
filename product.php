@@ -3,7 +3,15 @@ session_start();
 require_once __DIR__ . "/authentication/database.php";
 require_once __DIR__ . "/authentication/get_config.php";
 require_once __DIR__ . "/include/security.php";
+require_once __DIR__ . "/include/product_option_helpers.php";
+require_once __DIR__ . "/include/translation_helpers.php";
 require_once __DIR__ . "/include/made_to_order_access.php";
+if (!defined('CUSTOM_ORDERS_DIRECT')) {
+    define('CUSTOM_ORDERS_DIRECT', true);
+}
+require_once __DIR__ . "/modules/custom_orders.php";
+
+app_product_options_ensure_schema($conn);
 
 $systemTitle = getSystemConfig("site_title") ?: "Creations by Athina";
 
@@ -24,6 +32,33 @@ function ensurePromotionCouponColumn(mysqli $conn): void {
     if (!$exists) {
         $conn->query("ALTER TABLE promotions ADD COLUMN couponCode VARCHAR(64) NULL AFTER promotionName");
     }
+}
+
+function productPageCanQueryCustomOrderPhoto(mysqli $conn): bool
+{
+    static $ready = null;
+    if ($ready !== null) {
+        return $ready;
+    }
+
+    $tableCheck = $conn->query("SHOW TABLES LIKE 'custom_orders'");
+    if (!$tableCheck || $tableCheck->num_rows === 0) {
+        $ready = false;
+        return $ready;
+    }
+
+    $requiredColumns = ['sourceProductID', 'photoReferencePath'];
+    foreach ($requiredColumns as $column) {
+        $safeColumn = $conn->real_escape_string($column);
+        $columnCheck = $conn->query("SHOW COLUMNS FROM custom_orders LIKE '{$safeColumn}'");
+        if (!$columnCheck || $columnCheck->num_rows === 0) {
+            $ready = false;
+            return $ready;
+        }
+    }
+
+    $ready = true;
+    return $ready;
 }
 
 function normalizeCouponCode(string $code): string {
@@ -138,6 +173,7 @@ function ensureProductSalesOverridesSchema(mysqli $conn): void {
 
 ensureProductSalesOverridesSchema($conn);
 ensureMadeToOrderProductSchema($conn);
+ensureCustomOrdersTable($conn);
 
 $productId = (int)($_GET["id"] ?? 0);
 if ($productId <= 0) {
@@ -386,6 +422,8 @@ $product = null;
 $productStmt = $conn->prepare(
     "SELECT p.productID, p.sku, p.nameEN, p.nameGR, p.descriptionEN, p.descriptionGR,
             p.basePrice, p.inventory, p.cartStatus, p.hasVariants, p.category,
+            p.customColorFields, p.customColorLabel1, p.customColorLabel2,
+            p.customColorLabel1GR, p.customColorLabel2GR, p.customColorHelpText, p.customColorHelpTextGR,
             CASE
                 WHEN pso.productID IS NULL THEN COALESCE(os.total_qty, 0)
                 ELSE pso.manual_total_sales + GREATEST(
@@ -455,7 +493,13 @@ if (isset($_GET['coupon_preview']) && (string)$_GET['coupon_preview'] === '1') {
     header('Content-Type: application/json; charset=utf-8');
     try {
         $couponCode = normalizeCouponCode((string)($_POST['coupon_code'] ?? ''));
-        $preview = evaluateProductCoupon($conn, $baseProductPrice, $productCategory, $couponCode);
+        $selectedPrice = isset($_POST['selected_price']) && is_numeric($_POST['selected_price'])
+            ? (float)$_POST['selected_price']
+            : $baseProductPrice;
+        if ($selectedPrice < 0) {
+            $selectedPrice = $baseProductPrice;
+        }
+        $preview = evaluateProductCoupon($conn, $selectedPrice, $productCategory, $couponCode);
         echo json_encode($preview, JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
         http_response_code(500);
@@ -487,7 +531,7 @@ if ($photoStmt) {
 // Custom-order checkout products can reuse the uploaded reference image directly
 // from the custom order record, so the private product still has a visible image
 // even when we do not duplicate the file into the normal photos table.
-if (empty($photos)) {
+if (empty($photos) && productPageCanQueryCustomOrderPhoto($conn)) {
     $customPhotoStmt = $conn->prepare("
         SELECT photoReferencePath
         FROM custom_orders
@@ -521,22 +565,40 @@ if (empty($photos)) {
 
 /* ── Per-colour product photos ── */
 $colorPhotos = []; // [colorID => [photoPath, ...]]
+$productColorChoices = [];
 $cpStmt = $conn->prepare(
-    "SELECT colorID, photoPath FROM product_color_photos WHERE productID = ? ORDER BY sortOrder ASC"
+    "SELECT pcp.colorID, pcp.photoPath, c.colorName
+     FROM product_color_photos pcp
+     JOIN colors c ON c.colorID = pcp.colorID
+     WHERE pcp.productID = ? AND c.isActive = 1
+     ORDER BY pcp.sortOrder ASC, pcp.id ASC"
 );
 if ($cpStmt) {
     $cpStmt->bind_param("i", $productId);
     $cpStmt->execute();
     $cpRes = $cpStmt->get_result();
     while ($cpRes && ($row = $cpRes->fetch_assoc())) {
-        $colorPhotos[(int)$row['colorID']][] = $row['photoPath'];
+        $colorId = (int)($row['colorID'] ?? 0);
+        $photoPath = trim((string)($row['photoPath'] ?? ''));
+        $colorName = trim((string)($row['colorName'] ?? ''));
+        if ($colorId <= 0 || $photoPath === '') {
+            continue;
+        }
+        $colorPhotos[$colorId][] = $photoPath;
+        if (!isset($productColorChoices[$colorId])) {
+            $productColorChoices[$colorId] = [
+                'id' => $colorId,
+                'name' => $colorName !== '' ? $colorName : ('Color ' . $colorId),
+                'photoPath' => $photoPath,
+            ];
+        }
     }
     $cpStmt->close();
 }
 
 $variations = [];
 $variationStmt = $conn->prepare(
-    "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID,
+    "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, pv.price,
             c.colorName,
             COALESCE(vs.quantityAvailable, p.inventory, 0) AS stock,
             cyt.photoPath
@@ -564,11 +626,35 @@ if ($variationStmt) {
             "yarnType" => trim((string)($row["yarnType"] ?? "")),
             "colorID" => isset($row["colorID"]) ? (int)$row["colorID"] : null,
             "colorName" => trim((string)($row["colorName"] ?? "")),
+            "price" => isset($row["price"]) ? (float)$row["price"] : null,
             "stock" => (int)($row["stock"] ?? 0),
             "photoPath" => $row["photoPath"] ?? null,
         ];
     }
     $variationStmt->close();
+}
+
+$variationPhotos = [];
+$variationPhotoStmt = $conn->prepare(
+    "SELECT variationID, photoPath
+     FROM product_variation_photos
+     WHERE variationID IN (
+         SELECT variationID FROM product_variations WHERE productID = ?
+     )
+     ORDER BY sortOrder ASC, variationPhotoID ASC"
+);
+if ($variationPhotoStmt) {
+    $variationPhotoStmt->bind_param("i", $productId);
+    $variationPhotoStmt->execute();
+    $variationPhotoRes = $variationPhotoStmt->get_result();
+    while ($variationPhotoRes && ($row = $variationPhotoRes->fetch_assoc())) {
+        $variationId = (int)($row["variationID"] ?? 0);
+        $photoPath = trim((string)($row["photoPath"] ?? ""));
+        if ($variationId > 0 && $photoPath !== "") {
+            $variationPhotos[$variationId][] = $photoPath;
+        }
+    }
+    $variationPhotoStmt->close();
 }
 
 $colorHexMap = [
@@ -582,15 +668,40 @@ $colorHexMap = [
     "yellow" => "#efe3a4",
     "blue" => "#afc9f2",
     "pink" => "#f5c7d8",
+    "selected colour" => "#ece6f6",
+    "selected colourway" => "#ece6f6",
+    "snow white" => "#f4f3fb",
+    "blush pink" => "#ffdbe5",
+    "peach sorbet" => "#ffca9a",
+    "seafoam" => "#bce7da",
+    "lavender pop" => "#c8aaf8",
+    "sunshine yellow" => "#f8ea75",
+    "honey blend" => "#dda157",
+    "bluebell" => "#cad7ff",
+    "sugar pink" => "#f5dce8",
+    "lavender mist" => "#d6c9ff",
+    "deep plum" => "#5b2a63",
+    "berry plum" => "#99566a",
+    "soft lilac" => "#d9dcfb",
+    "forest sage" => "#7f9d88",
+    "sky mist" => "#dce8ff",
+    "lavender cloud" => "#d7c5ff",
+    "mint frost" => "#d6f0ea",
+    "warm oatmeal" => "#ccb594",
 ];
 
 $uniqueColors = [];
 $uniqueSizes = [];
+$variationPrices = [];
 
 foreach ($variations as $variation) {
     $sizeLabel = trim((string)($variation["size"] ?? ""));
     if ($sizeLabel !== "" && !in_array($sizeLabel, $uniqueSizes, true)) {
         $uniqueSizes[] = $sizeLabel;
+    }
+
+    if (isset($variation["price"]) && $variation["price"] !== null) {
+        $variationPrices[] = (float)$variation["price"];
     }
 
     $colorId = (int)($variation["colorID"] ?? 0);
@@ -607,7 +718,31 @@ foreach ($variations as $variation) {
     ];
 }
 
+foreach ($productColorChoices as $colorId => $colorChoice) {
+    if (isset($uniqueColors[$colorId])) {
+        continue;
+    }
+    $colorName = trim((string)($colorChoice['name'] ?? ''));
+    $colorKey = strtolower($colorName);
+    $uniqueColors[$colorId] = [
+        "id" => $colorId,
+        "name" => $colorName !== "" ? $colorName : ("Color " . $colorId),
+        "hex" => $colorHexMap[$colorKey] ?? "#ece6f6",
+        "photoPath" => $colorChoice["photoPath"] ?? null,
+    ];
+}
+
 $uniqueColors = array_values($uniqueColors);
+$hasVariationPriceRange = count(array_unique(array_map(static fn($price): string => number_format((float)$price, 2, '.', ''), $variationPrices))) > 1;
+$variationMinPrice = !empty($variationPrices) ? min($variationPrices) : $baseProductPrice;
+$variationMaxPrice = !empty($variationPrices) ? max($variationPrices) : $baseProductPrice;
+$customColorFields = (int)($product["customColorFields"] ?? 0);
+$customColorLabel1 = trim((string)($product["customColorLabel1"] ?? ""));
+$customColorLabel2 = trim((string)($product["customColorLabel2"] ?? ""));
+$customColorHelp = trim((string)($product["customColorHelpText"] ?? ""));
+$customColorLabel1Gr = trim((string)($product["customColorLabel1GR"] ?? ""));
+$customColorLabel2Gr = trim((string)($product["customColorLabel2GR"] ?? ""));
+$customColorHelpGr = trim((string)($product["customColorHelpTextGR"] ?? ""));
 
 $reviews = [];
 $reviewStmt = $conn->prepare(
@@ -749,7 +884,7 @@ if ($storedCouponCode !== '') {
     </style>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
 </head>
-<body class="site-page">
+<body class="site-page"<?= app_translate_page_title_attrs((string)$product["nameEN"] . ' - ' . $systemTitle, (string)(($product["nameGR"] ?: $product["nameEN"]) . ' - ' . $systemTitle)) ?>>
 <?php
 $activePage = "shop";
 include __DIR__ . "/include/header.php";
@@ -762,7 +897,7 @@ include __DIR__ . "/include/header.php";
                 <div class="carousel-inner" id="product-carousel-inner">
                     <?php foreach ($photos as $idx => $src): ?>
                     <div class="carousel-item <?= $idx === 0 ? 'active' : '' ?>">
-                        <img src="<?= htmlspecialchars($src) ?>" class="d-block w-100" style="object-fit:cover;border-radius:16px;max-height:480px" alt="<?= htmlspecialchars((string)$product['nameEN']) ?>">
+                        <img src="<?= htmlspecialchars($src) ?>" class="product-carousel-image d-block w-100" alt="<?= htmlspecialchars((string)$product['nameEN']) ?>">
                     </div>
                     <?php endforeach; ?>
                 </div>
@@ -776,7 +911,7 @@ include __DIR__ . "/include/header.php";
         </section>
 
         <section class="product-details">
-            <h1><?= htmlspecialchars((string)$product["nameEN"]) ?></h1>
+            <h1 data-product-name data-name-en="<?= htmlspecialchars((string)$product["nameEN"], ENT_QUOTES, 'UTF-8') ?>" data-name-el="<?= htmlspecialchars((string)($product["nameGR"] ?: $product["nameEN"]), ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars((string)$product["nameEN"]) ?></h1>
 
             <div class="rating-row">
                 <?php
@@ -785,27 +920,36 @@ include __DIR__ . "/include/header.php";
                 ?>
                     <i class="<?= $i <= $filled ? "fas" : "far" ?> fa-star"></i>
                 <?php endfor; ?>
-                <span><?= number_format((float)$product["avgRating"], 1) ?> (<?= (int)$product["reviewCount"] ?> reviews)</span>
+                <span<?= app_translate_text_attrs(number_format((float)$product["avgRating"], 1) . ' (' . (int)$product["reviewCount"] . ' reviews)', number_format((float)$product["avgRating"], 1) . ' (' . (int)$product["reviewCount"] . ' αξιολογήσεις)') ?>><?= number_format((float)$product["avgRating"], 1) ?> (<?= (int)$product["reviewCount"] ?> reviews)</span>
             </div>
             <div class="shop-review-count" style="margin: -4px 0 12px; display:block;">
-                <?= (int)($product["totalSales"] ?? 0) ?> sold
+                <span<?= app_translate_text_attrs((int)($product["totalSales"] ?? 0) . ' sold', (int)($product["totalSales"] ?? 0) . ' πωλήθηκαν') ?>><?= (int)($product["totalSales"] ?? 0) ?> sold</span>
             </div>
 
-            <div class="price-row <?= !empty($initialCouponEvaluation['valid']) ? 'is-discounted' : '' ?>" id="price-row" data-base-price="<?= htmlspecialchars(number_format($baseProductPrice, 2, '.', '')) ?>">
+            <div class="price-row <?= !empty($initialCouponEvaluation['valid']) ? 'is-discounted' : '' ?>" id="price-row"
+                 data-base-price="<?= htmlspecialchars(number_format($baseProductPrice, 2, '.', '')) ?>"
+                 data-range-min="<?= htmlspecialchars(number_format($variationMinPrice, 2, '.', '')) ?>"
+                 data-range-max="<?= htmlspecialchars(number_format($variationMaxPrice, 2, '.', '')) ?>"
+                 data-has-range="<?= $hasVariationPriceRange ? '1' : '0' ?>">
                 <span class="price-original" id="price-original">&euro;<?= number_format($baseProductPrice, 2) ?></span>
-                <span class="price-current" id="price-current">&euro;<?= number_format(!empty($initialCouponEvaluation['valid']) ? (float)$initialCouponEvaluation['discounted_price'] : $baseProductPrice, 2) ?></span>
+                <span class="price-current" id="price-current">
+                    <?php if ($hasVariationPriceRange): ?>
+                        &euro;<?= number_format($variationMinPrice, 2) ?> - &euro;<?= number_format($variationMaxPrice, 2) ?>
+                    <?php else: ?>
+                        &euro;<?= number_format(!empty($initialCouponEvaluation['valid']) ? (float)$initialCouponEvaluation['discounted_price'] : $baseProductPrice, 2) ?>
+                    <?php endif; ?>
+                </span>
             </div>
 
-            <p class="desc-text">
-                <?= nl2br(htmlspecialchars((string)($product["descriptionEN"] ?: "Handmade item by Creations by Athina."))) ?>
-            </p>
+            <p class="desc-text"<?= app_translate_html_attrs(nl2br(htmlspecialchars((string)($product["descriptionEN"] ?: "Handmade item by Creations by Athina."))), nl2br(htmlspecialchars((string)($product["descriptionGR"] ?: $product["descriptionEN"] ?: "Χειροποίητο προϊόν από το Creations by Athina.")))) ?>><?= nl2br(htmlspecialchars((string)($product["descriptionEN"] ?: "Handmade item by Creations by Athina."))) ?></p>
 
             <?php if (!empty($uniqueSizes)): ?>
+                <div class="option-label" data-translate="productSizeLabel">Size</div>
                 <div class="size-row" id="size-row">
-                    <?php foreach ($uniqueSizes as $idx => $sizeLabel): ?>
+                    <?php foreach ($uniqueSizes as $sizeLabel): ?>
                         <button
                             type="button"
-                            class="size-chip <?= $idx === 0 ? "active" : "" ?>"
+                            class="size-chip"
                             data-size="<?= htmlspecialchars($sizeLabel) ?>">
                             <?= htmlspecialchars($sizeLabel) ?>
                         </button>
@@ -814,21 +958,52 @@ include __DIR__ . "/include/header.php";
             <?php endif; ?>
 
             <?php if (!empty($uniqueColors)): ?>
-                <div class="color-row" id="color-row" style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">
-                  <label style="font-size:13px;font-weight:600;color:#374151;margin:0">Colour</label>
-                  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                    <select id="color-select"
-                            style="min-width:200px;padding:8px 12px;border:1px solid #d6c7ea;border-radius:8px;font-size:14px;color:#4b3569;background:#fff;cursor:pointer">
-                      <option value="">— Select colour —</option>
-                      <?php foreach ($uniqueColors as $color): ?>
-                      <option value="<?= (int)$color["id"] ?>"
-                              data-color-name="<?= htmlspecialchars($color["name"]) ?>"
-                              data-photo="<?= htmlspecialchars($color["photoPath"] ?? "") ?>">
-                        <?= htmlspecialchars($color["name"]) ?>
-                      </option>
-                      <?php endforeach; ?>
-                    </select>
-                  </div>
+                <div class="option-label" data-translate="productColorLabel">Colour</div>
+                <div class="color-row" id="color-row">
+                    <?php foreach ($uniqueColors as $color): ?>
+                        <button
+                            type="button"
+                            class="color-chip-btn"
+                            data-color-id="<?= (int)$color["id"] ?>"
+                            data-color-name="<?= htmlspecialchars($color["name"], ENT_QUOTES, 'UTF-8') ?>"
+                            title="<?= htmlspecialchars($color["name"]) ?>">
+                            <span class="color-chip-swatch" style="background: <?= htmlspecialchars((string)$color["hex"]) ?>;"></span>
+                            <span class="color-chip-name"><?= htmlspecialchars((string)$color["name"]) ?></span>
+                        </button>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($customColorFields > 0): ?>
+                <div class="gift-box custom-request-box">
+                    <h3 data-translate="productCustomisationTitle">Custom Colour Request</h3>
+                    <?php if ($customColorHelp !== ''): ?>
+                        <p class="gift-hint custom-request-hint"<?= $customColorHelpGr !== '' ? app_translate_text_attrs($customColorHelp, $customColorHelpGr) : '' ?>><?= htmlspecialchars($customColorHelp) ?></p>
+                    <?php endif; ?>
+
+                    <label class="gift-note-label" for="custom-colour-field-1"<?= $customColorLabel1Gr !== '' ? app_translate_text_attrs($customColorLabel1 !== '' ? $customColorLabel1 : 'Colour 1', $customColorLabel1Gr) : '' ?>>
+                        <?= htmlspecialchars($customColorLabel1 !== '' ? $customColorLabel1 : 'Colour 1') ?>
+                    </label>
+                    <input
+                        type="text"
+                        id="custom-colour-field-1"
+                        maxlength="120"
+                        class="custom-request-input"
+                        <?= $customColorLabel1Gr !== '' ? app_translate_placeholder_attrs($customColorLabel1 !== '' ? $customColorLabel1 : 'Colour 1', $customColorLabel1Gr) : '' ?>
+                        placeholder="<?= htmlspecialchars($customColorLabel1 !== '' ? $customColorLabel1 : 'Colour 1') ?>">
+
+                    <?php if ($customColorFields > 1): ?>
+                        <label class="gift-note-label" for="custom-colour-field-2"<?= $customColorLabel2Gr !== '' ? app_translate_text_attrs($customColorLabel2 !== '' ? $customColorLabel2 : 'Colour 2', $customColorLabel2Gr) : '' ?>>
+                            <?= htmlspecialchars($customColorLabel2 !== '' ? $customColorLabel2 : 'Colour 2') ?>
+                        </label>
+                        <input
+                            type="text"
+                            id="custom-colour-field-2"
+                            maxlength="120"
+                            class="custom-request-input"
+                            <?= $customColorLabel2Gr !== '' ? app_translate_placeholder_attrs($customColorLabel2 !== '' ? $customColorLabel2 : 'Colour 2', $customColorLabel2Gr) : '' ?>
+                            placeholder="<?= htmlspecialchars($customColorLabel2 !== '' ? $customColorLabel2 : 'Colour 2') ?>">
+                    <?php endif; ?>
                 </div>
             <?php endif; ?>
 
@@ -836,57 +1011,57 @@ include __DIR__ . "/include/header.php";
             <div class="variant-status" id="variant-status"></div>
 
             <div class="qty-row">
-                <button type="button" class="qty-btn" id="qty-minus" aria-label="Decrease quantity">-</button>
+                <button type="button" class="qty-btn" id="qty-minus" aria-label="Decrease quantity"<?= app_translate_aria_attrs('Decrease quantity', 'Μείωση ποσότητας') ?>>-</button>
                 <span id="qty-value">1</span>
-                <button type="button" class="qty-btn" id="qty-plus" aria-label="Increase quantity">+</button>
+                <button type="button" class="qty-btn" id="qty-plus" aria-label="Increase quantity"<?= app_translate_aria_attrs('Increase quantity', 'Αύξηση ποσότητας') ?>>+</button>
             </div>
 
             <div class="gift-box">
-                <h3>Gift Options</h3>
-                <label><span>Gift Wrapping (+&euro;2)</span><input type="checkbox" id="gift-wrap"></label>
-                <label><span>Gift Bag (+&euro;1.5)</span><input type="checkbox" id="gift-bag"></label>
-                <label class="gift-note-label">Gift Note</label>
-                <textarea id="gift-note" rows="3" placeholder="Add a personal message..."></textarea>
-                <p class="gift-hint">Selected gift options and message will appear in Cart, Checkout and Receipt.</p>
+                <h3 data-translate="productGiftOptions">Gift Options</h3>
+                <label><span data-translate="productGiftWrapping">Gift Wrapping (+&euro;2)</span><input type="checkbox" id="gift-wrap"></label>
+                <label><span data-translate="productGiftBag">Gift Bag (+&euro;1.5)</span><input type="checkbox" id="gift-bag"></label>
+                <label class="gift-note-label" data-translate="productGiftNote">Gift Note</label>
+                <textarea id="gift-note" rows="3" data-translate-placeholder="productGiftNotePlaceholder" placeholder="Add a personal message..."></textarea>
+                <p class="gift-hint" data-translate="productGiftHint">Selected gift options and message will appear in Cart, Checkout and Receipt.</p>
             </div>
 
             <div class="gift-box" style="margin-top:12px;">
-                <h3>Coupon Code</h3>
-                <input type="text" id="coupon-code" value="<?= htmlspecialchars($storedCouponCode) ?>" placeholder="Enter coupon code (optional)" style="width:100%;min-height:42px;border:1px solid #d8cceb;border-radius:10px;padding:10px 12px;">
+                <h3 data-translate="couponCode">Coupon Code</h3>
+                <input type="text" id="coupon-code" value="<?= htmlspecialchars($storedCouponCode) ?>" data-translate-placeholder="productCouponPlaceholder" placeholder="Enter coupon code (optional)" style="width:100%;min-height:42px;border:1px solid #d8cceb;border-radius:10px;padding:10px 12px;">
                 <div style="display:flex;gap:8px;margin-top:8px;">
-                    <button type="button" id="coupon-apply-btn" style="border:1px solid #8f54d9;background:#8f54d9;color:#fff;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;">Apply</button>
-                    <button type="button" id="coupon-remove-btn" style="border:1px solid #d6c7ea;background:#fff;color:#4b3569;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;">Remove</button>
+                    <button type="button" id="coupon-apply-btn" data-translate="apply" style="border:1px solid #8f54d9;background:#8f54d9;color:#fff;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;">Apply</button>
+                    <button type="button" id="coupon-remove-btn" data-translate="remove" style="border:1px solid #d6c7ea;background:#fff;color:#4b3569;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;">Remove</button>
                 </div>
                 <p class="gift-hint" id="coupon-feedback" data-is-error="<?= $couponFeedbackIsError ? '1' : '0' ?>"><?= htmlspecialchars($couponFeedbackText) ?></p>
             </div>
 
             <div class="action-row">
                 <button type="button" class="add-cart-btn" id="add-cart-btn">
-                    <i class="fas fa-cart-plus"></i> Add to Cart
+                    <i class="fas fa-cart-plus"></i> <span data-translate="addToCart">Add to Cart</span>
                 </button>
                 <form method="post" class="wishlist-form">
                     <?= app_csrf_input() ?>
                     <input type="hidden" name="action" value="toggle_wishlist_item">
                     <input type="hidden" name="product_id" value="<?= (int)$product["productID"] ?>">
-                    <button type="submit" class="shop-fav <?= $isWishlisted ? "is-active" : "" ?>" title="<?= $isWishlisted ? "Remove from wishlist" : "Add to wishlist" ?>">
+                    <button type="submit" class="shop-fav <?= $isWishlisted ? "is-active" : "" ?>" title="<?= $isWishlisted ? "Remove from wishlist" : "Add to wishlist" ?>"<?= app_translate_title_attrs($isWishlisted ? 'Remove from wishlist' : 'Add to wishlist', $isWishlisted ? 'Αφαίρεση από τη λίστα επιθυμιών' : 'Προσθήκη στη λίστα επιθυμιών') ?>>
                         <i class="<?= $isWishlisted ? "fas" : "far" ?> fa-heart"></i>
                     </button>
                 </form>
             </div>
 
             <div class="meta-list">
-                <div><span>Category:</span><strong><?= htmlspecialchars((string)($product["category"] ?: "-")) ?></strong></div>
+                <div><span data-translate="productCategoryLabel">Category:</span><strong><?= htmlspecialchars((string)($product["category"] ?: "-")) ?></strong></div>
                 <div>
-                    <span>Availability:</span>
+                    <span data-translate="productAvailabilityLabel">Availability:</span>
                     <strong class="<?= ((int)$product["inventory"] > 0 || (string)$product["cartStatus"] === "made_to_order") ? "in-stock" : "out-stock" ?>">
                         <?php if ((string)$product["cartStatus"] === "made_to_order"): ?>
-                            Made to Order
+                            <span data-translate="madeToOrder">Made to Order</span>
                         <?php elseif ((string)$product["cartStatus"] === "low_stock" || ((int)$product["inventory"] > 0 && (int)$product["inventory"] <= 3)): ?>
-                            Only <?= (int)$product["inventory"] ?> left
+                            <span<?= app_translate_text_attrs('Only ' . (int)$product["inventory"] . ' left', 'Μόνο ' . (int)$product["inventory"] . ' έμειναν') ?>>Only <?= (int)$product["inventory"] ?> left</span>
                         <?php elseif ((int)$product["inventory"] > 0): ?>
-                            In Stock
+                            <span data-translate="inStock">In Stock</span>
                         <?php else: ?>
-                            Out of Stock
+                            <span data-translate="outOfStock">Out of Stock</span>
                         <?php endif; ?>
                     </strong>
                 </div>
@@ -896,13 +1071,13 @@ include __DIR__ . "/include/header.php";
 
     <section class="reviews-section" id="customer-reviews">
         <div class="reviews-head">
-            <h2>Customer Reviews</h2>
+            <h2 data-translate="productCustomerReviews">Customer Reviews</h2>
             <?php if ($userId > 0 && $canWriteReview): ?>
-                <button type="button" class="write-review-btn" id="write-review-btn">Write a Review</button>
+                <button type="button" class="write-review-btn" id="write-review-btn" data-translate="productWriteReview">Write a Review</button>
             <?php elseif ($userId > 0): ?>
-                <span class="write-review-btn is-disabled">Available After Delivery</span>
+                <span class="write-review-btn is-disabled" data-translate="productAvailableAfterDelivery">Available After Delivery</span>
             <?php else: ?>
-                <a href="authentication/login.php" class="write-review-btn">Sign In to Review</a>
+                <a href="authentication/login.php" class="write-review-btn" data-translate="productSignInToReview">Sign In to Review</a>
             <?php endif; ?>
         </div>
 
@@ -913,7 +1088,7 @@ include __DIR__ . "/include/header.php";
             <div class="review-alert error"><?= htmlspecialchars(implode(" ", $reviewErrors)) ?></div>
         <?php endif; ?>
         <?php if ($userId > 0 && !$canWriteReview): ?>
-            <div class="review-alert info">
+            <div class="review-alert info" data-translate="productReviewUnlockInfo">
                 Review opens only after your order is delivered and payment is confirmed.
             </div>
         <?php endif; ?>
@@ -922,9 +1097,9 @@ include __DIR__ . "/include/header.php";
             <form method="post" class="review-form <?= $openReviewForm ? "is-open" : "" ?>" id="write-review-form">
                 <?= app_csrf_input() ?>
                 <input type="hidden" name="action" value="submit_review">
-                <div class="review-form-title">Share your experience</div>
+                <div class="review-form-title" data-translate="productShareExperience">Share your experience</div>
 
-                <label class="review-label">Rating</label>
+                <label class="review-label" data-translate="productRatingLabel">Rating</label>
                 <div class="review-rating-input" id="review-rating-input">
                     <?php for ($i = 1; $i <= 5; $i++): ?>
                         <label class="review-star-option <?= $i <= $defaultReviewRating ? "is-on" : "" ?>">
@@ -934,23 +1109,24 @@ include __DIR__ . "/include/header.php";
                     <?php endfor; ?>
                 </div>
 
-                <label class="review-label" for="review_text">Review</label>
+                <label class="review-label" for="review_text" data-translate="productReviewLabel">Review</label>
                 <textarea
                     id="review_text"
                     name="review_text"
                     rows="4"
                     maxlength="1200"
+                    data-translate-placeholder="productReviewPlaceholder"
                     placeholder="Write your review here..."><?= htmlspecialchars($reviewInput["review_text"]) ?></textarea>
 
                 <div class="review-form-actions">
-                    <button type="submit" class="submit-review-btn">Submit Review</button>
+                    <button type="submit" class="submit-review-btn" data-translate="productSubmitReview">Submit Review</button>
                 </div>
             </form>
         <?php endif; ?>
 
         <div class="reviews-list">
             <?php if (empty($reviews)): ?>
-                <div class="review-empty">No reviews yet. Be the first one to review this product.</div>
+                <div class="review-empty" data-translate="productNoReviews">No reviews yet. Be the first one to review this product.</div>
             <?php else: ?>
                 <?php foreach ($reviews as $review): ?>
                     <article class="review-card">
@@ -958,7 +1134,7 @@ include __DIR__ . "/include/header.php";
                             <div class="review-author-wrap">
                                 <strong><?= htmlspecialchars($review["reviewerName"]) ?></strong>
                                 <?php if ($review["isVerifiedPurchase"]): ?>
-                                    <span class="verified-pill">Verified</span>
+                                    <span class="verified-pill" data-translate="productVerified">Verified</span>
                                 <?php endif; ?>
                             </div>
                             <time datetime="<?= htmlspecialchars((string)date("c", strtotime($review["timestamp"]))) ?>">
@@ -970,7 +1146,7 @@ include __DIR__ . "/include/header.php";
                                 <i class="<?= $i <= (int)$review["rating"] ? "fas" : "far" ?> fa-star"></i>
                             <?php endfor; ?>
                         </div>
-                        <p><?= nl2br(htmlspecialchars($review["text"] !== "" ? $review["text"] : "No comment provided.")) ?></p>
+                        <p<?= $review["text"] === "" ? app_translate_text_attrs('No comment provided.', 'Δεν δόθηκε σχόλιο.') : '' ?>><?= nl2br(htmlspecialchars($review["text"] !== "" ? $review["text"] : "No comment provided.")) ?></p>
 
                         <?php if ($review["adminReplyText"] !== ""): ?>
                             <div class="review-admin-reply">
@@ -988,18 +1164,18 @@ include __DIR__ . "/include/header.php";
 
                         <?php if ($isAdmin): ?>
                             <div class="review-admin-actions">
-                                <form method="post" onsubmit="return confirm('Remove this review?');">
+                                <form method="post" onsubmit="return confirm(window.appTranslate ? window.appTranslate('productRemoveReviewConfirm') : 'Remove this review?');">
                                     <?= app_csrf_input() ?>
                                     <input type="hidden" name="action" value="admin_delete_review">
                                     <input type="hidden" name="review_id" value="<?= (int)$review["id"] ?>">
-                                    <button type="submit" class="submit-review-btn review-admin-danger">Delete Review</button>
+                                    <button type="submit" class="submit-review-btn review-admin-danger" data-translate="productDeleteReview">Delete Review</button>
                                 </form>
                                 <?php if ($review["adminReplyText"] !== ""): ?>
-                                    <form method="post" onsubmit="return confirm('Remove this admin reply?');">
+                                    <form method="post" onsubmit="return confirm(window.appTranslate ? window.appTranslate('productRemoveReplyConfirm') : 'Remove this admin reply?');">
                                         <?= app_csrf_input() ?>
                                         <input type="hidden" name="action" value="admin_delete_reply">
                                         <input type="hidden" name="review_id" value="<?= (int)$review["id"] ?>">
-                                        <button type="submit" class="submit-review-btn review-admin-light">Remove Reply</button>
+                                        <button type="submit" class="submit-review-btn review-admin-light" data-translate="productRemoveReply">Remove Reply</button>
                                     </form>
                                 <?php endif; ?>
                             </div>
@@ -1007,15 +1183,16 @@ include __DIR__ . "/include/header.php";
                                 <?= app_csrf_input() ?>
                                 <input type="hidden" name="action" value="admin_reply_review">
                                 <input type="hidden" name="review_id" value="<?= (int)$review["id"] ?>">
-                                <label class="review-label" for="admin_reply_<?= (int)$review["id"] ?>">Admin Reply</label>
+                                <label class="review-label" for="admin_reply_<?= (int)$review["id"] ?>" data-translate="productAdminReply">Admin Reply</label>
                                 <textarea
                                     id="admin_reply_<?= (int)$review["id"] ?>"
                                     name="admin_reply_text"
                                     rows="3"
                                     maxlength="2500"
+                                    data-translate-placeholder="productAdminReplyPlaceholder"
                                     placeholder="Write an admin response..."><?= htmlspecialchars($review["adminReplyText"]) ?></textarea>
                                 <div class="review-form-actions">
-                                    <button type="submit" class="submit-review-btn">Save Reply</button>
+                                    <button type="submit" class="submit-review-btn" data-translate="productSaveReply">Save Reply</button>
                                 </div>
                             </form>
                         <?php endif; ?>
@@ -1038,29 +1215,11 @@ include __DIR__ . "/include/header.php";
 
     var qty = 1;
     var selectedColorId = null;
+    var selectedColorName = "";
     var selectedSize = null;
 
     var colorPhotos   = <?= json_encode($colorPhotos, JSON_UNESCAPED_UNICODE) ?>;
     var defaultPhotos = <?= json_encode($photos,      JSON_UNESCAPED_UNICODE) ?>;
-
-    function pcpSwapImages(colorId) {
-        var imgs = (colorId && colorPhotos[colorId] && colorPhotos[colorId].length)
-            ? colorPhotos[colorId]
-            : defaultPhotos;
-        var inner = document.getElementById('product-carousel-inner');
-        if (!inner) return;
-        inner.innerHTML = '';
-        imgs.forEach(function(src, idx) {
-            var div = document.createElement('div');
-            div.className = 'carousel-item' + (idx === 0 ? ' active' : '');
-            div.innerHTML = '<img src="' + src + '" class="d-block w-100" style="object-fit:cover;border-radius:16px;max-height:480px" alt="Product image">';
-            inner.appendChild(div);
-        });
-        var el = document.getElementById('product-carousel');
-        if (el && window.bootstrap) {
-            bootstrap.Carousel.getOrCreateInstance(el).to(0);
-        }
-    }
 
     var qtyOut = document.getElementById("qty-value");
     var qtyMinus = document.getElementById("qty-minus");
@@ -1110,13 +1269,26 @@ include __DIR__ . "/include/header.php";
     var variationUsesColor = hasSelectableVariations && variations.some(function (item) {
         return Number(item.colorID || 0) > 0;
     });
+    var hasPresetColorChoices = false;
+    var variationPhotos = <?= json_encode($variationPhotos, JSON_UNESCAPED_UNICODE) ?>;
 
     var sizeChips = Array.prototype.slice.call(document.querySelectorAll(".size-chip"));
-    var colorSelect = document.getElementById("color-select");
+    var colorChips = Array.prototype.slice.call(document.querySelectorAll(".color-chip-btn"));
+    var customField1Input = document.getElementById("custom-colour-field-1");
+    var customField2Input = document.getElementById("custom-colour-field-2");
     var colorStockEl = document.getElementById("color-stock");
     var variantStatus = document.getElementById("variant-status");
     var addCartBtn = document.getElementById("add-cart-btn");
     var colorStockMap = {};
+    var priceRow = document.getElementById("price-row");
+    var priceCurrent = document.getElementById("price-current");
+    var priceOriginal = document.getElementById("price-original");
+    var basePrice = Number(priceRow ? priceRow.getAttribute("data-base-price") : 0);
+    var rangeMinPrice = Number(priceRow ? priceRow.getAttribute("data-range-min") : basePrice);
+    var rangeMaxPrice = Number(priceRow ? priceRow.getAttribute("data-range-max") : basePrice);
+    var hasPriceRange = priceRow ? priceRow.getAttribute("data-has-range") === "1" : false;
+    var currentBasePrice = hasPriceRange ? rangeMinPrice : basePrice;
+    var validationStarted = false;
 
     if (hasSelectableVariations) {
         variations.forEach(function (item) {
@@ -1129,39 +1301,45 @@ include __DIR__ . "/include/header.php";
         });
     }
 
-    function updateColorSelect() {
-        if (!colorSelect) return;
-        for (var i = 1; i < colorSelect.options.length; i++) {
-            var opt = colorSelect.options[i];
-            var colorId = parseInt(opt.value) || 0;
-            if (!hasSelectableVariations || !variationUsesColor) {
-                opt.disabled = false;
-                opt.text = opt.dataset.colorName
-                    ? (colorId + " \u2014 " + opt.dataset.colorName)
-                    : opt.text;
-            } else {
-                var stock = Number(colorStockMap[colorId] || 0);
-                if (stock <= 0) {
-                    opt.disabled = true;
-                    opt.text = (opt.dataset.colorName || "Color") + " (Out of stock)";
-                } else {
-                    opt.disabled = false;
-                    opt.text = opt.dataset.colorName || "Color";
-                }
+    function formatMoney(value) {
+        return "\u20AC" + Number(value || 0).toFixed(2);
+    }
+
+    hasPresetColorChoices = colorChips.length > 0;
+
+    function updateColorChips() {
+        colorChips.forEach(function (chip) {
+            var colorId = parseInt(chip.getAttribute("data-color-id") || "0", 10) || 0;
+            var isUnavailable = false;
+            if (variationUsesColor && cartStatus !== "made_to_order") {
+                isUnavailable = Number(colorStockMap[colorId] || 0) <= 0;
             }
-        }
+            chip.disabled = isUnavailable;
+            chip.classList.toggle("is-unavailable", isUnavailable);
+            chip.classList.toggle("active", Number(selectedColorId || 0) === colorId);
+        });
     }
 
     function updateColorStockDisplay() {
         if (!colorStockEl) return;
-        colorStockEl.classList.remove("is-error", "is-warning");
+        colorStockEl.classList.remove("is-error", "is-success");
         if (!selectedColorId) {
             colorStockEl.textContent = "";
             return;
         }
-        var selOpt = colorSelect ? colorSelect.options[colorSelect.selectedIndex] : null;
-        var name = selOpt ? (selOpt.dataset.colorName || "") : "";
-        colorStockEl.textContent = name;
+        var name = selectedColorName || "";
+        colorStockEl.textContent = name ? t("productSelectedColour", { name: name }) : "";
+    }
+
+    function renderRangePrice(minPrice, maxPrice) {
+        if (!priceRow || !priceCurrent) {
+            return;
+        }
+        priceRow.classList.remove("is-discounted");
+        if (priceOriginal) {
+            priceOriginal.textContent = formatMoney(minPrice);
+        }
+        priceCurrent.textContent = formatMoney(minPrice) + " - " + formatMoney(maxPrice);
     }
 
     function findSelectedVariation() {
@@ -1169,37 +1347,20 @@ include __DIR__ . "/include/header.php";
             return null;
         }
 
-        var sizeFilterEnabled = variationUsesSize && !!selectedSize;
-        var colorFilterEnabled = variationUsesColor && !!selectedColorId;
+        var requireSizeSelection = variationUsesSize && sizeChips.length > 0;
+        var requireColorSelection = variationUsesColor && hasPresetColorChoices;
+        if (requireSizeSelection && !selectedSize) {
+            return null;
+        }
+        if (requireColorSelection && !selectedColorId) {
+            return null;
+        }
 
-        var exact = variations.find(function (item) {
-            var sizeOk = !sizeFilterEnabled || normalize(item.size) === normalize(selectedSize);
-            var colorOk = !colorFilterEnabled || Number(item.colorID || 0) === Number(selectedColorId || 0);
+        return variations.find(function (item) {
+            var sizeOk = !requireSizeSelection || normalize(item.size) === normalize(selectedSize);
+            var colorOk = !requireColorSelection || Number(item.colorID || 0) === Number(selectedColorId || 0);
             return sizeOk && colorOk;
-        });
-        if (exact) {
-            return exact;
-        }
-
-        if (sizeFilterEnabled) {
-            var bySize = variations.find(function (item) {
-                return normalize(item.size) === normalize(selectedSize);
-            });
-            if (bySize) {
-                return bySize;
-            }
-        }
-
-        if (colorFilterEnabled) {
-            var byColor = variations.find(function (item) {
-                return Number(item.colorID || 0) === Number(selectedColorId || 0);
-            });
-            if (byColor) {
-                return byColor;
-            }
-        }
-
-        return variations[0] || null;
+        }) || null;
     }
 
     function setVariantStatus(text, isError) {
@@ -1214,63 +1375,172 @@ include __DIR__ . "/include/header.php";
         variantStatus.classList.add(isError ? "is-error" : "is-success");
     }
 
-    function updateAddToCartState() {
+    function renderPrice(discountedPrice, hasDiscount, originalPrice) {
+        if (!priceRow || !priceCurrent) {
+            return;
+        }
+        var original = typeof originalPrice === "number" && !isNaN(originalPrice) ? originalPrice : currentBasePrice;
+        if (hasDiscount) {
+            priceRow.classList.add("is-discounted");
+            priceCurrent.textContent = formatMoney(discountedPrice);
+            if (priceOriginal) {
+                priceOriginal.textContent = formatMoney(original);
+            }
+            return;
+        }
+        priceRow.classList.remove("is-discounted");
+        priceCurrent.textContent = formatMoney(original);
+    }
+
+    function swapImagesForSelection(selectedVariation) {
+        var variationIdKey = selectedVariation && selectedVariation.variationID
+            ? String(selectedVariation.variationID)
+            : "";
+        var imgs = [];
+        if (selectedColorId && colorPhotos[selectedColorId] && colorPhotos[selectedColorId].length) {
+            imgs = colorPhotos[selectedColorId];
+        } else if (variationIdKey && variationPhotos[variationIdKey] && variationPhotos[variationIdKey].length) {
+            imgs = variationPhotos[variationIdKey];
+        } else {
+            imgs = defaultPhotos;
+        }
+
+        var inner = document.getElementById('product-carousel-inner');
+        if (!inner) return;
+        inner.innerHTML = '';
+        imgs.forEach(function(src, idx) {
+            var div = document.createElement('div');
+            div.className = 'carousel-item' + (idx === 0 ? ' active' : '');
+            div.innerHTML = '<img src="' + src + '" class="product-carousel-image d-block w-100" alt="Product image">';
+            inner.appendChild(div);
+        });
+        var el = document.getElementById('product-carousel');
+        if (el && window.bootstrap) {
+            bootstrap.Carousel.getOrCreateInstance(el).to(0);
+        }
+    }
+
+    function customFieldsComplete() {
+        if (customField1Input && String(customField1Input.value || "").trim() === "") {
+            return false;
+        }
+        if (customField2Input && String(customField2Input.value || "").trim() === "") {
+            return false;
+        }
+        return true;
+    }
+
+    function refreshDisplayedPrice(selectedVariation) {
+        if (selectedVariation && selectedVariation.price !== null && selectedVariation.price !== undefined && selectedVariation.price !== "") {
+            currentBasePrice = Number(selectedVariation.price || 0);
+        } else if (hasPriceRange) {
+            currentBasePrice = rangeMinPrice;
+            renderRangePrice(rangeMinPrice, rangeMaxPrice);
+            return;
+        } else {
+            currentBasePrice = basePrice;
+        }
+
+        if (appliedCouponCode) {
+            validateCouponForProduct(appliedCouponCode).then(function (preview) {
+                if (preview && preview.valid) {
+                    renderPrice(Number(preview.discounted_price || currentBasePrice), true, currentBasePrice);
+                    return;
+                }
+                renderPrice(currentBasePrice, false, currentBasePrice);
+            });
+            return;
+        }
+
+        renderPrice(currentBasePrice, false, currentBasePrice);
+    }
+
+    function updateAddToCartState(showValidation) {
         var available = true;
         var selectedVariation = findSelectedVariation();
         var requireSizeSelection = variationUsesSize && sizeChips.length > 0;
-        var requireColorSelection = variationUsesColor && colorSelect !== null;
-        var requireExact = (requireSizeSelection || requireColorSelection);
+        var requirePresetColorChoice = hasPresetColorChoices;
+        var requireVariationColorChoice = variationUsesColor && requirePresetColorChoice;
+        var requireCustomRequest = !!customField1Input || !!customField2Input;
+        var missingSelectionMessage = "";
+        var statusText = "";
+        var statusIsError = false;
 
         if (hasSelectableVariations) {
-            if (requireColorSelection && selectedColorId && cartStatus !== "made_to_order") {
+            if (requireVariationColorChoice && selectedColorId && cartStatus !== "made_to_order") {
                 var colorStock = Number(colorStockMap[selectedColorId] || 0);
                 if (colorStock <= 0) {
                     available = false;
-                    setVariantStatus("Selected color is out of stock.", true);
+                    statusText = t("productSelectedColorOutOfStock");
+                    statusIsError = true;
                 }
             }
-            if (selectedVariation) {
-                var sizeExact = !requireSizeSelection || (!!selectedSize && normalize(selectedVariation.size) === normalize(selectedSize));
-                var colorExact = !requireColorSelection || (!!selectedColorId && Number(selectedVariation.colorID || 0) === Number(selectedColorId || 0));
-                if (requireExact && (!sizeExact || !colorExact)) {
-                    available = false;
-                    setVariantStatus("Please select a valid size and color.", true);
-                }
 
-                if (available) {
-                    var stock = Number(selectedVariation.stock || 0);
-                    if (cartStatus !== "made_to_order" && stock <= 0) {
-                        available = false;
-                        setVariantStatus("Selected variation is out of stock.", true);
-                    } else if (cartStatus === "made_to_order") {
-                        setVariantStatus("Made to order.", false);
-                    } else {
-                        setVariantStatus("In stock", false);
-                    }
-                }
-            } else if (requireExact) {
+            if (available && requireSizeSelection && !selectedSize) {
                 available = false;
-                setVariantStatus("Please select a valid size and color.", true);
+                missingSelectionMessage = t("productSelectSizeFirst");
+            } else if (available && requireVariationColorChoice && !selectedColorId) {
+                available = false;
+                missingSelectionMessage = t("productSelectColorFirst");
+            } else if (available && !selectedVariation && (requireSizeSelection || requireVariationColorChoice)) {
+                available = false;
+                missingSelectionMessage = t("productSelectValidSizeColor");
+            } else if (selectedVariation) {
+                var stock = Number(selectedVariation.stock || 0);
+                if (cartStatus !== "made_to_order" && stock <= 0) {
+                    available = false;
+                    statusText = t("productSelectedVariationOutOfStock");
+                    statusIsError = true;
+                } else if (cartStatus === "made_to_order") {
+                    statusText = t("madeToOrder");
+                } else {
+                    statusText = t("inStock");
+                }
             }
         } else {
             if (cartStatus !== "made_to_order" && Number(productInventory) <= 0) {
                 available = false;
-                setVariantStatus("Out of stock.", true);
+                statusText = t("outOfStock");
+                statusIsError = true;
             } else if (cartStatus === "made_to_order") {
-                setVariantStatus("Made to order.", false);
-            } else {
-                setVariantStatus("In stock", false);
+                statusText = t("madeToOrder");
+            } else if (!requirePresetColorChoice || selectedColorId) {
+                statusText = t("inStock");
             }
         }
+
+        if (available && requirePresetColorChoice && !selectedColorId) {
+            available = false;
+            missingSelectionMessage = t("productSelectColorFirst");
+        }
+
+        if (available && requireCustomRequest && !customFieldsComplete()) {
+            available = false;
+            missingSelectionMessage = t(customField2Input ? "productCompleteCustomColours" : "productEnterCustomColour");
+        }
+
+        if (!available && missingSelectionMessage !== "" && showValidation) {
+            statusText = missingSelectionMessage;
+            statusIsError = true;
+        } else if (!available && missingSelectionMessage !== "" && !showValidation) {
+            statusText = "";
+            statusIsError = false;
+        }
+
+        setVariantStatus(statusText, statusIsError);
 
         if (addCartBtn) {
             addCartBtn.disabled = !available;
         }
+        updateColorChips();
         updateColorStockDisplay();
+        refreshDisplayedPrice(selectedVariation);
+        swapImagesForSelection(selectedVariation);
         clampQtyToStock();
         return {
             available: available,
-            selectedVariation: selectedVariation
+            selectedVariation: selectedVariation,
+            message: statusText || missingSelectionMessage
         };
     }
 
@@ -1281,31 +1551,35 @@ include __DIR__ . "/include/header.php";
             });
             chip.classList.add("active");
             selectedSize = (chip.getAttribute("data-size") || "").trim() || null;
-            updateAddToCartState();
+            updateAddToCartState(validationStarted);
         });
     });
-    if (sizeChips.length) {
-        sizeChips[0].click();
+
+    if (colorChips.length) {
+        colorChips.forEach(function (chip) {
+            chip.addEventListener("click", function () {
+                if (chip.disabled) {
+                    return;
+                }
+                selectedColorId = parseInt(chip.getAttribute("data-color-id") || "0", 10) || null;
+                selectedColorName = chip.getAttribute("data-color-name") || "";
+                updateColorStockDisplay();
+                updateAddToCartState(validationStarted);
+            });
+        });
+        updateColorChips();
     }
 
-    if (colorSelect) {
-        colorSelect.addEventListener("change", function () {
-            selectedColorId = parseInt(colorSelect.value) || null;
-            updateColorStockDisplay();
-            updateAddToCartState();
-            pcpSwapImages(selectedColorId);
-        });
-        updateColorSelect();
-        // Auto-select first available option
-        for (var i = 1; i < colorSelect.options.length; i++) {
-            if (!colorSelect.options[i].disabled) {
-                colorSelect.selectedIndex = i;
-                colorSelect.dispatchEvent(new Event("change"));
-                break;
-            }
+    [customField1Input, customField2Input].forEach(function (input) {
+        if (!input) {
+            return;
         }
-    }
-    updateAddToCartState();
+        input.addEventListener("input", function () {
+            updateAddToCartState(validationStarted);
+        });
+    });
+
+    updateAddToCartState(false);
 
     function updateCartBadge(count) {
         var icon = document.querySelector("a.cart-icon");
@@ -1346,14 +1620,29 @@ include __DIR__ . "/include/header.php";
     var couponApplyBtn = document.getElementById("coupon-apply-btn");
     var couponRemoveBtn = document.getElementById("coupon-remove-btn");
     var couponFeedback = document.getElementById("coupon-feedback");
-    var priceRow = document.getElementById("price-row");
-    var priceCurrent = document.getElementById("price-current");
-    var priceOriginal = document.getElementById("price-original");
-    var basePrice = Number(priceRow ? priceRow.getAttribute("data-base-price") : 0);
     var appliedCouponCode = <?= json_encode(!empty($initialCouponEvaluation['valid']) ? $storedCouponCode : "") ?>;
+    var fallbackTranslations = {
+        productEnterCustomColour: "Please share your preferred colour before adding this item to cart.",
+        productCompleteCustomColours: "Please complete each colour preference before continuing.",
+        productSelectSizeFirst: "Please choose a size to continue.",
+        productSelectValidSizeColor: "Please select a valid size and colour combination.",
+        productSelectColorFirst: "Please choose a colour to continue.",
+        productSelectedColour: "Selected colour: {name}",
+        inStock: "In stock",
+        outOfStock: "Out of stock",
+        madeToOrder: "Made to order",
+        productSelectedColorOutOfStock: "This colour is currently out of stock.",
+        productSelectedVariationOutOfStock: "This selection is currently out of stock."
+    };
 
-    function formatMoney(value) {
-        return "\u20AC" + Number(value || 0).toFixed(2);
+    function t(key, params) {
+        if (window.appTranslate) {
+            return window.appTranslate(key, params || {});
+        }
+        var template = fallbackTranslations[key] || key;
+        return template.replace(/\{(\w+)\}/g, function (_, token) {
+            return params && Object.prototype.hasOwnProperty.call(params, token) ? String(params[token]) : "";
+        });
     }
 
     function normalizeCouponInput() {
@@ -1372,22 +1661,6 @@ include __DIR__ . "/include/header.php";
         }
     }
 
-    function renderPrice(discountedPrice, hasDiscount) {
-        if (!priceRow || !priceCurrent) {
-            return;
-        }
-        if (hasDiscount) {
-            priceRow.classList.add("is-discounted");
-            priceCurrent.textContent = formatMoney(discountedPrice);
-            if (priceOriginal) {
-                priceOriginal.textContent = formatMoney(basePrice);
-            }
-            return;
-        }
-        priceRow.classList.remove("is-discounted");
-        priceCurrent.textContent = formatMoney(basePrice);
-    }
-
     function parseJsonResponse(response) {
         return response.text().then(function (raw) {
             var clean = String(raw || "").replace(/^\uFEFF+/, "").trim();
@@ -1400,7 +1673,7 @@ include __DIR__ . "/include/header.php";
                 return {
                     success: false,
                     valid: false,
-                    message: "Unexpected server response while validating coupon."
+                    message: t("productCouponResponseError")
                 };
             }
         });
@@ -1434,6 +1707,7 @@ include __DIR__ . "/include/header.php";
     function validateCouponForProduct(code) {
         var body = new URLSearchParams();
         body.set("coupon_code", code || "");
+        body.set("selected_price", String(currentBasePrice || basePrice));
         return fetch("product.php?id=" + encodeURIComponent(String(productId)) + "&coupon_preview=1", {
             method: "POST",
             headers: {
@@ -1446,7 +1720,7 @@ include __DIR__ . "/include/header.php";
             .catch(function () {
                 return {
                     valid: false,
-                    message: "Network error while validating coupon."
+                    message: t("productCouponNetworkError")
                 };
             });
     }
@@ -1457,36 +1731,36 @@ include __DIR__ . "/include/header.php";
         }
         var couponCode = normalizeCouponInput();
         if (!couponCode) {
-            renderPrice(basePrice, false);
+            refreshDisplayedPrice(findSelectedVariation());
             appliedCouponCode = "";
-            setCouponFeedback("Enter a coupon code first.", true);
-            showToast("Enter a coupon code first.", true);
+            setCouponFeedback(t("productEnterCouponFirst"), true);
+            showToast(t("productEnterCouponFirst"), true);
             persistCoupon("remove_coupon");
             return;
         }
 
         validateCouponForProduct(couponCode).then(function (preview) {
             if (!preview || !preview.valid) {
-                renderPrice(basePrice, false);
+                refreshDisplayedPrice(findSelectedVariation());
                 appliedCouponCode = "";
-                setCouponFeedback((preview && preview.message) || "Invalid or expired coupon code.", true);
-                showToast((preview && preview.message) || "Invalid or expired coupon code.", true);
+                setCouponFeedback((preview && preview.message) || t("productInvalidCoupon"), true);
+                showToast((preview && preview.message) || t("productInvalidCoupon"), true);
                 persistCoupon("remove_coupon");
                 return;
             }
 
             persistCoupon("set_coupon", couponCode).then(function (saved) {
                 if (!saved) {
-                    setCouponFeedback("Coupon is valid, but could not be saved. Please try again.", true);
-                    showToast("Could not save coupon.", true);
+                    setCouponFeedback(t("productCouponSaveFailed"), true);
+                    showToast(t("productCouldNotSaveCoupon"), true);
                     return;
                 }
                 appliedCouponCode = couponCode;
-                renderPrice(Number(preview.discounted_price || basePrice), true);
+                renderPrice(Number(preview.discounted_price || currentBasePrice), true, currentBasePrice);
                 var amount = Number(preview.discount_amount || 0).toFixed(2);
                 var promoName = String(preview.promotion_name || couponCode);
-                setCouponFeedback("Valid coupon applied: " + promoName + " (-" + formatMoney(amount) + ")", false);
-                showToast("Coupon applied successfully.");
+                setCouponFeedback(t("productValidCouponApplied", { name: promoName, amount: amount }), false);
+                showToast(t("productCouponAppliedSuccess"));
             });
         });
     }
@@ -1496,9 +1770,9 @@ include __DIR__ . "/include/header.php";
             couponInput.value = "";
         }
         appliedCouponCode = "";
-        renderPrice(basePrice, false);
-        setCouponFeedback("Coupon removed.", false);
-        showToast("Coupon removed.");
+        refreshDisplayedPrice(findSelectedVariation());
+        setCouponFeedback(t("productCouponRemoved"), false);
+        showToast(t("productCouponRemoved"));
         persistCoupon("remove_coupon");
     }
 
@@ -1519,14 +1793,20 @@ include __DIR__ . "/include/header.php";
 
     if (addCartBtn) {
         addCartBtn.addEventListener("click", function () {
-            var state = updateAddToCartState();
+            validationStarted = true;
+            var state = updateAddToCartState(true);
             if (!state.available) {
-                showToast("Please select an available option.", true);
+                showToast(state.message || t("productSelectAvailableOption"), true);
                 return;
             }
             if (hasSelectableVariations && (!state.selectedVariation || !state.selectedVariation.variationID)) {
-                showToast("Please select a valid size and color.", true);
+                showToast(t("productSelectValidSizeColor"), true);
                 return;
+            }
+
+            var customizationField1 = customField1Input ? String(customField1Input.value || "").trim() : "";
+            if (!customizationField1 && selectedColorName) {
+                customizationField1 = selectedColorName;
             }
 
             var payload = {
@@ -1536,6 +1816,10 @@ include __DIR__ . "/include/header.php";
                     gift_wrapping: !!(document.getElementById("gift-wrap") && document.getElementById("gift-wrap").checked),
                     gift_bag: !!(document.getElementById("gift-bag") && document.getElementById("gift-bag").checked),
                     message: (document.getElementById("gift-note") && document.getElementById("gift-note").value || "").trim()
+                },
+                customization: {
+                    field1: customizationField1,
+                    field2: customField2Input ? String(customField2Input.value || "").trim() : ""
                 }
             };
             if (appliedCouponCode) {
@@ -1573,13 +1857,13 @@ include __DIR__ . "/include/header.php";
                     if (data && data.success) {
                         var count = data.cart && data.cart.totals ? data.cart.totals.items_count : 0;
                         updateCartBadge(Number(count) || 0);
-                        showToast(data.notice || "Added to cart.");
+                        showToast(data.notice || t("addedToCart"));
                     } else {
-                        showToast((data && data.message) || "Could not add to cart.", true);
+                        showToast((data && data.message) || t("couldNotAddToCart"), true);
                     }
                 })
                 .catch(function () {
-                    showToast("Network error.", true);
+                    showToast(t("networkError"), true);
                 });
         });
     }

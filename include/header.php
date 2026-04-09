@@ -5,6 +5,7 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 require_once __DIR__ . '/security.php';
 require_once __DIR__ . '/homepage_customization.php';
+require_once __DIR__ . '/translation_helpers.php';
 
 $isLoggedIn = isset($_SESSION["user"]);
 $wishlistCount = 0;
@@ -61,7 +62,7 @@ if ($isLoggedIn && !$initials) {
 
             <div class="utility-icons">
                 <!-- Language selector -->
-                <div class="language-selector" role="button" tabindex="0" aria-label="Toggle language">
+                <div class="language-selector" role="button" tabindex="0"<?= app_translate_aria_attrs('Toggle language', 'Αλλαγή γλώσσας') ?><?= app_translate_title_attrs('Toggle language', 'Αλλαγή γλώσσας') ?>>
                     <i class="fas fa-globe"></i>
                     <span>EN</span>
                 </div>
@@ -77,7 +78,7 @@ if ($isLoggedIn && !$initials) {
                     <a href="<?php echo $rootPrefix; ?>modules/admin/dashboard.php"
                        class="utility-icon admin-icon"
                        aria-label="Admin Dashboard"
-                       title="Admin Dashboard">
+                       title="Admin Dashboard"<?= app_translate_aria_attrs('Admin Dashboard', 'Πίνακας διαχείρισης') ?><?= app_translate_title_attrs('Admin Dashboard', 'Πίνακας διαχείρισης') ?>>
                         <i class="fas fa-shield-halved"></i>
                         <span class="admin-label">Admin</span>
                     </a>
@@ -96,7 +97,7 @@ if ($isLoggedIn && !$initials) {
                             <!-- My Account (works from both root and /profile/) -->
                             <a href="<?php echo $rootPrefix; ?>profile/account.php" class="dropdown-item">
                                 <i class="fas fa-user"></i>
-                                <span>My Account</span>
+                                <span data-translate="headerMyAccount">My Account</span>
                             </a>
 
                             <form method="post"
@@ -107,7 +108,7 @@ if ($isLoggedIn && !$initials) {
                                 <button type="submit"
                                         style="all:unset;display:flex;align-items:center;gap:10px;cursor:pointer;width:100%;">
                                     <i class="fas fa-right-from-bracket"></i>
-                                    <span>Logout</span>
+                                    <span data-translate="headerLogout">Logout</span>
                                 </button>
                             </form>
                         </div>
@@ -117,14 +118,14 @@ if ($isLoggedIn && !$initials) {
                     <a href="<?php echo $rootPrefix; ?>authentication/login.php"
                        class="utility-icon auth-icon"
                        aria-label="Register or Login"
-                       title="Login / Register">
+                       title="Login / Register"<?= app_translate_aria_attrs('Register or Login', 'Σύνδεση / Εγγραφή') ?><?= app_translate_title_attrs('Login / Register', 'Σύνδεση / Εγγραφή') ?>>
                         <i class="fas fa-user-plus"></i>
                     </a>
                 <?php endif; ?>
 
                 <!-- Cart icon -->
                 <?php $cartCount = (int)($_SESSION["cart"]["totals"]["items_count"] ?? 0); ?>
-                <a href="<?php echo $rootPrefix; ?>cart.php" class="utility-icon cart-icon" aria-label="Shopping cart">
+                <a href="<?php echo $rootPrefix; ?>cart.php" class="utility-icon cart-icon" aria-label="Shopping cart"<?= app_translate_aria_attrs('Shopping cart', 'Καλάθι αγορών') ?>>
                     <i class="fas fa-shopping-cart"></i>
                     <?php if ($cartCount > 0): ?>
                         <span class="cart-count"><?= $cartCount > 99 ? '99+' : $cartCount ?></span>
@@ -132,7 +133,7 @@ if ($isLoggedIn && !$initials) {
                 </a>
 
                 <!-- Wishlist icon -->
-                <a href="<?php echo $rootPrefix; ?>wishlist.php" class="utility-icon wishlist-icon" aria-label="Wishlist">
+                <a href="<?php echo $rootPrefix; ?>wishlist.php" class="utility-icon wishlist-icon" aria-label="Wishlist"<?= app_translate_aria_attrs('Wishlist', 'Λίστα επιθυμιών') ?>>
                     <i class="fas fa-heart"></i>
                     <?php if ($wishlistCount > 0): ?>
                         <span class="wishlist-count"><?= $wishlistCount ?></span>
