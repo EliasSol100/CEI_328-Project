@@ -394,7 +394,7 @@ INSERT INTO `payments` (`paymentID`, `orderID`, `provider`, `transactionID`, `pa
 
 CREATE TABLE `photos` (
   `imageID` int(11) NOT NULL,
-  `photo` blob NOT NULL,
+  `photo` mediumblob NOT NULL,
   `productID` int(11) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 

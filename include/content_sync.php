@@ -183,6 +183,48 @@ if (!function_exists('app_content_sync_columns_for_table')) {
     }
 }
 
+if (!function_exists('app_content_sync_photo_storage_type')) {
+    function app_content_sync_photo_storage_type(mysqli $conn): string
+    {
+        static $cachedType = null;
+        if (is_string($cachedType)) {
+            return $cachedType;
+        }
+
+        $cachedType = '';
+        if (!app_content_sync_table_exists($conn, 'photos')) {
+            return $cachedType;
+        }
+
+        $result = mysqli_query(
+            $conn,
+            "SELECT DATA_TYPE
+             FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = 'photos'
+               AND COLUMN_NAME = 'photo'
+             LIMIT 1"
+        );
+        $row = $result ? mysqli_fetch_assoc($result) : null;
+        if ($result) {
+            mysqli_free_result($result);
+        }
+
+        $cachedType = strtolower((string)($row['DATA_TYPE'] ?? ''));
+        return $cachedType;
+    }
+}
+
+if (!function_exists('app_content_sync_ensure_photo_storage_schema')) {
+    function app_content_sync_ensure_photo_storage_schema(mysqli $conn): void
+    {
+        $type = app_content_sync_photo_storage_type($conn);
+        if ($type === 'blob' || $type === 'tinyblob') {
+            mysqli_query($conn, "ALTER TABLE photos MODIFY COLUMN photo MEDIUMBLOB NOT NULL");
+        }
+    }
+}
+
 if (!function_exists('app_content_sync_database_readiness')) {
     function app_content_sync_database_readiness(mysqli $conn): array
     {
@@ -302,6 +344,20 @@ if (!function_exists('app_content_sync_database_readiness')) {
                     $missingRequired[] = 'photos.' . $column;
                 }
             }
+
+            $photoStorageType = app_content_sync_photo_storage_type($conn);
+            $supportsLargePhotos = in_array($photoStorageType, ['mediumblob', 'longblob'], true);
+            $checks[] = [
+                'label' => 'Photos.photo storage',
+                'status' => $supportsLargePhotos ? 'ok' : 'warning',
+                'detail' => $supportsLargePhotos
+                    ? 'Ready for larger synced product photos.'
+                    : 'Using ' . ($photoStorageType !== '' ? strtoupper($photoStorageType) : 'an unknown type') . '. The sync tools can upgrade this automatically to MEDIUMBLOB.',
+                'scope' => 'autofix',
+            ];
+            if (!$supportsLargePhotos) {
+                $missingAutoFix[] = 'photos.photo_storage';
+            }
         }
 
         if (app_content_sync_table_exists($conn, 'colors')) {
@@ -404,6 +460,7 @@ if (!function_exists('app_content_sync_ensure_catalog_schema')) {
     {
         app_homepage_ensure_schema($conn);
         app_product_options_ensure_schema($conn);
+        app_content_sync_ensure_photo_storage_schema($conn);
 
         if (function_exists('ensureMadeToOrderProductSchema')) {
             ensureMadeToOrderProductSchema($conn);
@@ -1175,7 +1232,9 @@ if (!function_exists('app_content_sync_insert_blob_photo')) {
             throw new RuntimeException('Could not prepare the synced product photo insert.');
         }
 
-        mysqli_stmt_bind_param($stmt, 'si', $photoData, $productId);
+        $blobPlaceholder = null;
+        mysqli_stmt_bind_param($stmt, 'bi', $blobPlaceholder, $productId);
+        mysqli_stmt_send_long_data($stmt, 0, $photoData);
         if (!mysqli_stmt_execute($stmt)) {
             mysqli_stmt_close($stmt);
             throw new RuntimeException('Could not insert a synced product photo.');
