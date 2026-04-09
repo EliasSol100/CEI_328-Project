@@ -193,6 +193,7 @@ if (!function_exists('app_content_sync_database_readiness')) {
         $requiredTables = [
             'products' => 'Products table',
             'photos' => 'Product photos table',
+            'colors' => 'Colors table',
             'product_color_photos' => 'Product color photos table',
             'product_variations' => 'Product variations table',
             'variation_stock' => 'Variation stock table',
@@ -299,6 +300,24 @@ if (!function_exists('app_content_sync_database_readiness')) {
                 ];
                 if (!$exists) {
                     $missingRequired[] = 'photos.' . $column;
+                }
+            }
+        }
+
+        if (app_content_sync_table_exists($conn, 'colors')) {
+            $colorColumns = array_fill_keys(app_content_sync_columns_for_table($conn, 'colors'), true);
+            foreach (['colorID', 'colorName', 'globalInventoryAvailable', 'isActive'] as $column) {
+                $exists = isset($colorColumns[$column]);
+                $checks[] = [
+                    'label' => 'Colors.' . $column,
+                    'status' => $exists ? 'ok' : 'error',
+                    'detail' => $exists
+                        ? 'Column is available.'
+                        : 'Missing required column for color-aware shop sync imports.',
+                    'scope' => 'required',
+                ];
+                if (!$exists) {
+                    $missingRequired[] = 'colors.' . $column;
                 }
             }
         }
@@ -650,6 +669,7 @@ if (!function_exists('app_content_sync_export_shop')) {
         }
 
         $products = [];
+        $usedColorIds = [];
         $warnings = [];
         $result = mysqli_query($conn, "SELECT {$columnsSql} FROM products ORDER BY productID ASC");
         if ($result) {
@@ -688,10 +708,11 @@ if (!function_exists('app_content_sync_export_shop')) {
                 $colorPhotoPayloads = [];
                 $colorStmt = mysqli_prepare(
                     $conn,
-                    "SELECT colorID, photoPath, sortOrder
-                     FROM product_color_photos
-                     WHERE productID = ?
-                     ORDER BY sortOrder ASC, id ASC"
+                    "SELECT pcp.colorID, pcp.photoPath, pcp.sortOrder, c.colorName
+                     FROM product_color_photos pcp
+                     LEFT JOIN colors c ON c.colorID = pcp.colorID
+                     WHERE pcp.productID = ?
+                     ORDER BY pcp.sortOrder ASC, pcp.id ASC"
                 );
                 if ($colorStmt) {
                     mysqli_stmt_bind_param($colorStmt, 'i', $productId);
@@ -706,11 +727,17 @@ if (!function_exists('app_content_sync_export_shop')) {
 
                         $colorPhotoPayloads[] = [
                             'colorID' => (int)($colorRow['colorID'] ?? 0),
+                            'colorName' => trim((string)($colorRow['colorName'] ?? '')),
                             'sortOrder' => (int)($colorRow['sortOrder'] ?? 0),
                             'photoPath' => $photoPath,
                             'mime_type' => $filePayload['mime_type'] ?? '',
                             'content_base64' => $filePayload['content_base64'] ?? '',
                         ];
+
+                        $colorId = (int)($colorRow['colorID'] ?? 0);
+                        if ($colorId > 0) {
+                            $usedColorIds[$colorId] = true;
+                        }
                     }
                     mysqli_stmt_close($colorStmt);
                 }
@@ -719,9 +746,11 @@ if (!function_exists('app_content_sync_export_shop')) {
                 $variationStmt = mysqli_prepare(
                     $conn,
                     "SELECT pv.variationID, pv.size, pv.yarnType, pv.colorID, pv.price,
+                            c.colorName,
                             COALESCE(vs.quantityAvailable, 0) AS stock,
                             COALESCE(vs.lowStockThreshold, 1) AS lowStockThreshold
                      FROM product_variations pv
+                     LEFT JOIN colors c ON c.colorID = pv.colorID
                      LEFT JOIN variation_stock vs ON vs.variationID = pv.variationID
                      WHERE pv.productID = ?
                      ORDER BY pv.variationID ASC"
@@ -766,11 +795,17 @@ if (!function_exists('app_content_sync_export_shop')) {
                             'size' => (string)($variationRow['size'] ?? ''),
                             'yarnType' => (string)($variationRow['yarnType'] ?? ''),
                             'colorID' => isset($variationRow['colorID']) ? (int)$variationRow['colorID'] : null,
+                            'colorName' => trim((string)($variationRow['colorName'] ?? '')),
                             'price' => isset($variationRow['price']) ? (float)$variationRow['price'] : null,
                             'stock' => (int)($variationRow['stock'] ?? 0),
                             'lowStockThreshold' => (int)($variationRow['lowStockThreshold'] ?? 1),
                             'photos' => $variationPhotoPayloads,
                         ];
+
+                        $colorId = isset($variationRow['colorID']) ? (int)$variationRow['colorID'] : 0;
+                        if ($colorId > 0) {
+                            $usedColorIds[$colorId] = true;
+                        }
                     }
                     mysqli_stmt_close($variationStmt);
                 }
@@ -787,8 +822,33 @@ if (!function_exists('app_content_sync_export_shop')) {
             mysqli_free_result($result);
         }
 
+        $colorPayloads = [];
+        if (!empty($usedColorIds)) {
+            $colorIdsSql = implode(',', array_map('intval', array_keys($usedColorIds)));
+            $colorRes = mysqli_query(
+                $conn,
+                "SELECT colorID, colorName, globalInventoryAvailable, isActive
+                 FROM colors
+                 WHERE colorID IN ({$colorIdsSql})
+                 ORDER BY colorName ASC, colorID ASC"
+            );
+            if ($colorRes) {
+                while ($colorRow = mysqli_fetch_assoc($colorRes)) {
+                    $colorPayloads[] = [
+                        'source_color_id' => (int)($colorRow['colorID'] ?? 0),
+                        'colorID' => (int)($colorRow['colorID'] ?? 0),
+                        'colorName' => trim((string)($colorRow['colorName'] ?? '')),
+                        'globalInventoryAvailable' => (int)($colorRow['globalInventoryAvailable'] ?? 0),
+                        'isActive' => (int)($colorRow['isActive'] ?? 1),
+                    ];
+                }
+                mysqli_free_result($colorRes);
+            }
+        }
+
         return [
             'data' => [
+                'colors' => $colorPayloads,
                 'products' => $products,
             ],
             'warnings' => $warnings,
@@ -972,6 +1032,7 @@ if (!function_exists('app_content_sync_import_homepage')) {
         }
 
         $allowedConfig = array_fill_keys(app_content_sync_supported_homepage_keys(), true);
+        $assetConfigKeys = array_fill_keys(app_content_sync_homepage_asset_keys(), true);
         $savedConfig = 0;
 
         foreach ($config as $key => $value) {
@@ -981,7 +1042,12 @@ if (!function_exists('app_content_sync_import_homepage')) {
             }
 
             $stringValue = is_string($value) ? $value : ($value === null ? '' : (string)$value);
-            if ($stringValue !== '' && !app_homepage_is_remote_asset($stringValue) && !app_homepage_asset_exists($stringValue)) {
+            if (
+                isset($assetConfigKeys[$key]) &&
+                $stringValue !== '' &&
+                !app_homepage_is_remote_asset($stringValue) &&
+                !app_homepage_asset_exists($stringValue)
+            ) {
                 $warnings[] = 'Skipped homepage config "' . $key . '" because the asset was not restored: ' . $stringValue;
                 continue;
             }
@@ -1119,6 +1185,169 @@ if (!function_exists('app_content_sync_insert_blob_photo')) {
     }
 }
 
+if (!function_exists('app_content_sync_find_color_id_by_name')) {
+    function app_content_sync_find_color_id_by_name(mysqli $conn, string $colorName): int
+    {
+        $colorName = trim($colorName);
+        if ($colorName === '') {
+            return 0;
+        }
+
+        $stmt = mysqli_prepare($conn, "SELECT colorID FROM colors WHERE LOWER(colorName) = LOWER(?) LIMIT 1");
+        if (!$stmt) {
+            return 0;
+        }
+
+        mysqli_stmt_bind_param($stmt, 's', $colorName);
+        mysqli_stmt_execute($stmt);
+        $result = mysqli_stmt_get_result($stmt);
+        $row = $result ? mysqli_fetch_assoc($result) : null;
+        mysqli_stmt_close($stmt);
+
+        return $row ? (int)($row['colorID'] ?? 0) : 0;
+    }
+}
+
+if (!function_exists('app_content_sync_color_exists_by_id')) {
+    function app_content_sync_color_exists_by_id(mysqli $conn, int $colorId): bool
+    {
+        if ($colorId <= 0) {
+            return false;
+        }
+
+        $stmt = mysqli_prepare($conn, "SELECT colorID FROM colors WHERE colorID = ? LIMIT 1");
+        if (!$stmt) {
+            return false;
+        }
+
+        mysqli_stmt_bind_param($stmt, 'i', $colorId);
+        mysqli_stmt_execute($stmt);
+        $result = mysqli_stmt_get_result($stmt);
+        $exists = $result && mysqli_num_rows($result) > 0;
+        mysqli_stmt_close($stmt);
+
+        return $exists;
+    }
+}
+
+if (!function_exists('app_content_sync_next_color_id')) {
+    function app_content_sync_next_color_id(mysqli $conn): int
+    {
+        $result = mysqli_query($conn, "SELECT COALESCE(MAX(colorID), 0) + 1 AS nextId FROM colors");
+        if ($result && ($row = mysqli_fetch_assoc($result))) {
+            return max(1, (int)($row['nextId'] ?? 1));
+        }
+
+        return 1;
+    }
+}
+
+if (!function_exists('app_content_sync_ensure_color')) {
+    function app_content_sync_ensure_color(mysqli $conn, array $colorPayload, array &$colorIdMap = []): int
+    {
+        static $resolvedByName = [];
+
+        $sourceColorId = (int)($colorPayload['source_color_id'] ?? ($colorPayload['colorID'] ?? 0));
+        $colorName = trim((string)($colorPayload['colorName'] ?? ($colorPayload['name'] ?? '')));
+        $globalInventory = max(0, (int)($colorPayload['globalInventoryAvailable'] ?? 0));
+        $isActive = (int)($colorPayload['isActive'] ?? 1) > 0 ? 1 : 0;
+
+        if ($sourceColorId > 0 && isset($colorIdMap[$sourceColorId])) {
+            return (int)$colorIdMap[$sourceColorId];
+        }
+
+        $nameKey = $colorName !== '' ? strtolower($colorName) : '';
+        if ($nameKey !== '' && isset($resolvedByName[$nameKey])) {
+            $resolvedId = (int)$resolvedByName[$nameKey];
+            if ($sourceColorId > 0) {
+                $colorIdMap[$sourceColorId] = $resolvedId;
+            }
+            return $resolvedId;
+        }
+
+        if ($colorName !== '') {
+            $existingByName = app_content_sync_find_color_id_by_name($conn, $colorName);
+            if ($existingByName > 0) {
+                $resolvedByName[$nameKey] = $existingByName;
+                if ($sourceColorId > 0) {
+                    $colorIdMap[$sourceColorId] = $existingByName;
+                }
+                return $existingByName;
+            }
+        }
+
+        if ($sourceColorId > 0 && app_content_sync_color_exists_by_id($conn, $sourceColorId)) {
+            if ($colorName !== '') {
+                $updateStmt = mysqli_prepare(
+                    $conn,
+                    "UPDATE colors
+                     SET colorName = COALESCE(NULLIF(colorName, ''), ?),
+                         globalInventoryAvailable = GREATEST(globalInventoryAvailable, ?),
+                         isActive = GREATEST(isActive, ?)
+                     WHERE colorID = ?"
+                );
+                if ($updateStmt) {
+                    mysqli_stmt_bind_param($updateStmt, 'siii', $colorName, $globalInventory, $isActive, $sourceColorId);
+                    mysqli_stmt_execute($updateStmt);
+                    mysqli_stmt_close($updateStmt);
+                }
+            }
+
+            if ($nameKey !== '') {
+                $resolvedByName[$nameKey] = $sourceColorId;
+            }
+            $colorIdMap[$sourceColorId] = $sourceColorId;
+            return $sourceColorId;
+        }
+
+        $targetColorId = $sourceColorId > 0 ? $sourceColorId : app_content_sync_next_color_id($conn);
+        if ($targetColorId > 0 && app_content_sync_color_exists_by_id($conn, $targetColorId)) {
+            $targetColorId = app_content_sync_next_color_id($conn);
+        }
+
+        if ($colorName === '') {
+            $colorName = 'Imported Color ' . $targetColorId;
+            $nameKey = strtolower($colorName);
+        }
+
+        $insertStmt = mysqli_prepare(
+            $conn,
+            "INSERT INTO colors (colorID, colorName, globalInventoryAvailable, isActive)
+             VALUES (?, ?, ?, ?)"
+        );
+        if (!$insertStmt) {
+            throw new RuntimeException('Could not prepare the synced color insert.');
+        }
+
+        mysqli_stmt_bind_param($insertStmt, 'isii', $targetColorId, $colorName, $globalInventory, $isActive);
+        if (!mysqli_stmt_execute($insertStmt)) {
+            $insertError = mysqli_stmt_error($insertStmt);
+            mysqli_stmt_close($insertStmt);
+
+            $existingByName = $colorName !== '' ? app_content_sync_find_color_id_by_name($conn, $colorName) : 0;
+            if ($existingByName > 0) {
+                $resolvedByName[$nameKey] = $existingByName;
+                if ($sourceColorId > 0) {
+                    $colorIdMap[$sourceColorId] = $existingByName;
+                }
+                return $existingByName;
+            }
+
+            throw new RuntimeException('Could not insert a synced color: ' . $insertError);
+        }
+        mysqli_stmt_close($insertStmt);
+
+        if ($nameKey !== '') {
+            $resolvedByName[$nameKey] = $targetColorId;
+        }
+        if ($sourceColorId > 0) {
+            $colorIdMap[$sourceColorId] = $targetColorId;
+        }
+
+        return $targetColorId;
+    }
+}
+
 if (!function_exists('app_content_sync_insert_variation')) {
     function app_content_sync_insert_variation(mysqli $conn, int $productId, array $variationPayload): int
     {
@@ -1216,17 +1445,27 @@ if (!function_exists('app_content_sync_import_shop')) {
     {
         $messages = [];
         $warnings = [];
+        $colors = is_array($payload['colors'] ?? null) ? $payload['colors'] : [];
         $products = is_array($payload['products'] ?? null) ? $payload['products'] : [];
         $availableColumns = array_values(array_intersect(app_content_sync_allowed_product_columns(), app_content_sync_product_columns($conn)));
 
         mysqli_begin_transaction($conn);
 
         try {
+            $colorIdMap = [];
             $productCount = 0;
             $mainPhotoCount = 0;
             $colorPhotoCount = 0;
             $variationCount = 0;
             $variationPhotoCount = 0;
+
+            foreach ($colors as $colorPayload) {
+                try {
+                    app_content_sync_ensure_color($conn, (array)$colorPayload, $colorIdMap);
+                } catch (Throwable $e) {
+                    $warnings[] = 'Skipped a synced color definition: ' . $e->getMessage();
+                }
+            }
 
             foreach ($products as $productPayload) {
                 $fields = is_array($productPayload['fields'] ?? null) ? $productPayload['fields'] : [];
@@ -1341,7 +1580,7 @@ if (!function_exists('app_content_sync_import_shop')) {
 
                 $colorPhotos = is_array($productPayload['color_photos'] ?? null) ? $productPayload['color_photos'] : [];
                 foreach ($colorPhotos as $colorPhotoPayload) {
-                    $colorId = (int)($colorPhotoPayload['colorID'] ?? 0);
+                    $colorId = app_content_sync_ensure_color($conn, (array)$colorPhotoPayload, $colorIdMap);
                     $photoPath = str_replace('\\', '/', ltrim(trim((string)($colorPhotoPayload['photoPath'] ?? '')), '/\\'));
                     $sortOrder = (int)($colorPhotoPayload['sortOrder'] ?? 0);
                     $encoded = (string)($colorPhotoPayload['content_base64'] ?? '');
@@ -1384,11 +1623,16 @@ if (!function_exists('app_content_sync_import_shop')) {
 
                 $variations = is_array($productPayload['variations'] ?? null) ? $productPayload['variations'] : [];
                 foreach ($variations as $variationPayload) {
-                    $variationId = app_content_sync_insert_variation($conn, $productId, (array)$variationPayload);
+                    $resolvedVariationPayload = (array)$variationPayload;
+                    if (isset($resolvedVariationPayload['colorID']) && (int)$resolvedVariationPayload['colorID'] > 0) {
+                        $resolvedVariationPayload['colorID'] = app_content_sync_ensure_color($conn, $resolvedVariationPayload, $colorIdMap);
+                    }
+
+                    $variationId = app_content_sync_insert_variation($conn, $productId, $resolvedVariationPayload);
                     app_content_sync_insert_variation_stock($conn, $variationId, (array)$variationPayload);
                     $variationCount++;
 
-                    $variationPhotos = is_array($variationPayload['photos'] ?? null) ? $variationPayload['photos'] : [];
+                    $variationPhotos = is_array($resolvedVariationPayload['photos'] ?? null) ? $resolvedVariationPayload['photos'] : [];
                     foreach ($variationPhotos as $variationPhotoPayload) {
                         $photoPath = str_replace('\\', '/', ltrim(trim((string)($variationPhotoPayload['photoPath'] ?? '')), '/\\'));
                         $sortOrder = (int)($variationPhotoPayload['sortOrder'] ?? 0);
