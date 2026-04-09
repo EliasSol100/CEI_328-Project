@@ -1420,6 +1420,30 @@ include __DIR__ . "/include/header.php";
         }
     }
 
+    function syncCarouselAutoplay() {
+        var el = document.getElementById('product-carousel');
+        if (!el || !window.bootstrap) {
+            return;
+        }
+
+        var hasManualSelection = !!selectedSize || !!selectedColorId;
+        var carousel = bootstrap.Carousel.getOrCreateInstance(el);
+        if (hasManualSelection) {
+            el.setAttribute('data-bs-interval', 'false');
+            if (carousel._config) {
+                carousel._config.interval = false;
+            }
+            carousel.pause();
+            return;
+        }
+
+        el.setAttribute('data-bs-interval', '2000');
+        if (carousel._config) {
+            carousel._config.interval = 2000;
+        }
+        carousel.cycle();
+    }
+
     function customFieldsComplete() {
         if (customField1Input && String(customField1Input.value || "").trim() === "") {
             return false;
@@ -1536,6 +1560,7 @@ include __DIR__ . "/include/header.php";
         updateColorStockDisplay();
         refreshDisplayedPrice(selectedVariation);
         swapImagesForSelection(selectedVariation);
+        syncCarouselAutoplay();
         clampQtyToStock();
         return {
             available: available,

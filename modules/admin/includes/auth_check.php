@@ -23,6 +23,19 @@ if (isset($_SESSION['user']) && is_array($_SESSION['user'])) {
 // Normalise role for comparison
 $userRole = strtolower((string)$userRoleRaw);
 
+// Keep storefront session structure available even on older admin-only logins.
+if ($userId && (!isset($_SESSION['user']) || !is_array($_SESSION['user']))) {
+    $_SESSION['user'] = [
+        'id' => $userId,
+        'userID' => $userId,
+        'role' => $userRole,
+        'email' => $_SESSION['email'] ?? null,
+        'full_name' => $_SESSION['full_name'] ?? 'User',
+        'profile_complete' => $_SESSION['profile_complete'] ?? true,
+        'is_verified' => $_SESSION['is_verified'] ?? 1,
+    ];
+}
+
 // Which roles are allowed to access the admin module
 $allowedAdminRoles = ['admin', 'administrator', 'superadmin'];
 

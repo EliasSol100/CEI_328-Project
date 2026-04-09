@@ -1507,6 +1507,15 @@ if (!function_exists('app_content_sync_import_shop')) {
         $colors = is_array($payload['colors'] ?? null) ? $payload['colors'] : [];
         $products = is_array($payload['products'] ?? null) ? $payload['products'] : [];
         $availableColumns = array_values(array_intersect(app_content_sync_allowed_product_columns(), app_content_sync_product_columns($conn)));
+        $snapshotSkus = [];
+
+        foreach ($products as $productPayload) {
+            $fields = is_array($productPayload['fields'] ?? null) ? $productPayload['fields'] : [];
+            $snapshotSku = trim((string)($productPayload['sku'] ?? ($fields['sku'] ?? '')));
+            if ($snapshotSku !== '') {
+                $snapshotSkus[$snapshotSku] = true;
+            }
+        }
 
         mysqli_begin_transaction($conn);
 
@@ -1517,6 +1526,7 @@ if (!function_exists('app_content_sync_import_shop')) {
             $colorPhotoCount = 0;
             $variationCount = 0;
             $variationPhotoCount = 0;
+            $hiddenProductCount = 0;
 
             foreach ($colors as $colorPayload) {
                 try {
@@ -1716,8 +1726,41 @@ if (!function_exists('app_content_sync_import_shop')) {
                 }
             }
 
+            if (!empty($snapshotSkus)) {
+                $placeholders = implode(', ', array_fill(0, count($snapshotSkus), '?'));
+                $types = str_repeat('s', count($snapshotSkus));
+                $skuValues = array_values(array_keys($snapshotSkus));
+                $sql = "
+                    UPDATE products
+                    SET cartStatus = 'discontinued',
+                        isSellingFast = 0
+                    WHERE cartStatus IN ('active', 'low_stock', 'out_of_stock', 'made_to_order')
+                      AND sku NOT IN ({$placeholders})
+                ";
+                $stmt = mysqli_prepare($conn, $sql);
+                if (!$stmt) {
+                    throw new RuntimeException('Could not prepare the synced product cleanup query.');
+                }
+
+                $params = [];
+                $params[] = &$types;
+                foreach ($skuValues as $index => $value) {
+                    $params[] = &$skuValues[$index];
+                }
+                call_user_func_array([$stmt, 'bind_param'], $params);
+                if (!mysqli_stmt_execute($stmt)) {
+                    mysqli_stmt_close($stmt);
+                    throw new RuntimeException('Could not hide local products missing from the sync snapshot.');
+                }
+                $hiddenProductCount = mysqli_stmt_affected_rows($stmt);
+                mysqli_stmt_close($stmt);
+            }
+
             mysqli_commit($conn);
             $messages[] = 'Shop sync imported (' . $productCount . ' products, ' . $mainPhotoCount . ' main photos, ' . $colorPhotoCount . ' colour photos, ' . $variationCount . ' variations, ' . $variationPhotoCount . ' variation photos).';
+            if ($hiddenProductCount > 0) {
+                $messages[] = 'Hidden ' . $hiddenProductCount . ' local product(s) that were not part of the synced catalog snapshot.';
+            }
         } catch (Throwable $e) {
             mysqli_rollback($conn);
             throw $e;
