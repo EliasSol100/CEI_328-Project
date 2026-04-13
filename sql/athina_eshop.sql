@@ -659,6 +659,22 @@ CREATE TABLE `wishlist_items` (
   `addedAt` datetime NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- -------------------------------------------------------
+
+--
+-- Table structure for table 'product_sales_overrides'
+--
+
+CREATE TABLE `product_sales_overrides` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `productID` INT NOT NULL,
+  `manual_total_sales` INT NOT NULL DEFAULT 0,
+  `auto_sales_baseline` INT DEFAULT NULL,
+  UNIQUE KEY `unique_product` (`productID`),
+  FOREIGN KEY (`productID`) REFERENCES `products`(`productID`) ON DELETE CASCADE
+);
+
+
 --
 -- Indexes for dumped tables
 --
