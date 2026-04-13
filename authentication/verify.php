@@ -49,7 +49,7 @@ if (!empty($userRow["is_verified"]) && (int)$userRow["is_verified"] === 1) {
 // ------------------------------------
 // Helper: generate new code & expiry (email)
 // ------------------------------------
-function generateEmailVerificationCode(mysqli $conn, int $userId, string $email): bool
+function generateEmailVerificationCode(mysqli $conn, int $userId, string $email): array
 {
     // 6-digit random code
     $newCode   = (string) random_int(100000, 999999);
@@ -66,12 +66,16 @@ function generateEmailVerificationCode(mysqli $conn, int $userId, string $email)
     $stmt->close();
 
     if (!$ok) {
-        return false;
+        return [
+            'success' => false,
+            'message' => "We couldn't create a new verification code right now. Please try again later.",
+        ];
     }
 
     // Send via PHPMailer
     try {
         $mail = new PHPMailer(true);
+        $mail->SMTPDebug = 0;
         $mail->isSMTP();
         $mail->Host       = 'premium245.web-hosting.com';
         $mail->SMTPAuth   = true;
@@ -79,26 +83,97 @@ function generateEmailVerificationCode(mysqli $conn, int $userId, string $email)
         $mail->Password   = '!g3$~8tYju*D';
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port       = 587;
+        $mail->Timeout    = 20;
 
         $mail->SMTPOptions = [
             'ssl' => [
-                'verify_peer'       => false,
-                'verify_peer_name'  => false,
+                'verify_peer' => false,
+                'verify_peer_name' => false,
                 'allow_self_signed' => true,
-            ]
+            ],
         ];
 
         $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
         $mail->addAddress($email);
         $mail->isHTML(false);
-        $mail->Subject = 'Athina E-Shop Email Verification Code';
-        $mail->Body    = "Hello,\n\nYour verification code is: {$newCode}\n\nThis code is valid for 20 minutes.\n\nIf you did not request this, please ignore this email.";
+        $subject = 'Athina E-Shop Email Verification Code';
+        $body = "Hello,\n\nYour verification code is: {$newCode}\n\nThis code is valid for 20 minutes.\n\nIf you did not request this, please ignore this email.";
+        $mail->Subject = $subject;
+        $mail->Body    = $body;
 
         $mail->send();
-        return true;
-    } catch (Exception $e) {
+        return ['success' => true, 'message' => ''];
+    } catch (\Throwable $e) {
+        return [
+            'success' => false,
+            'message' => "We couldn't resend the verification code right now. Please try again later.",
+        ];
+    }
+}
+
+function emailVerificationHasActiveCode(array $userRow): bool
+{
+    $code = trim((string)($userRow["verification_code"] ?? ''));
+    if ($code === '') {
         return false;
     }
+
+    $expiresAt = trim((string)($userRow["verification_expires_at"] ?? ''));
+    if ($expiresAt === '') {
+        return false;
+    }
+
+    $expiresTs = strtotime($expiresAt);
+    return $expiresTs !== false && $expiresTs > time();
+}
+
+function reloadEmailVerificationUser(mysqli $conn, int $userId): ?array
+{
+    $stmt = $conn->prepare("SELECT *, userID AS id FROM users WHERE userID = ?");
+    if (!$stmt) {
+        return null;
+    }
+
+    $stmt->bind_param("i", $userId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $row = $res ? $res->fetch_assoc() : null;
+    $stmt->close();
+
+    return $row ?: null;
+}
+
+function ensureActiveEmailVerificationCode(mysqli $conn, int $userId, array &$userRow, bool $force = false): array
+{
+    if (!$force && emailVerificationHasActiveCode($userRow)) {
+        return ['success' => true, 'sent' => false, 'message' => ''];
+    }
+
+    $email = trim((string)($userRow["email"] ?? ''));
+    if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        return [
+            'success' => false,
+            'sent' => false,
+            'message' => "We couldn't find a valid email address for your account.",
+        ];
+    }
+
+    $result = generateEmailVerificationCode($conn, $userId, $email);
+    if (empty($result['success'])) {
+        $result['sent'] = false;
+        return $result;
+    }
+
+    $reloaded = reloadEmailVerificationUser($conn, $userId);
+    if ($reloaded) {
+        $userRow = $reloaded;
+    }
+
+    return [
+        'success' => true,
+        'sent' => true,
+        'message' => 'A verification code has been sent to your email. It will be valid for 20 minutes.',
+    ];
 }
 
 // ------------------------------------
@@ -107,28 +182,17 @@ function generateEmailVerificationCode(mysqli $conn, int $userId, string $email)
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     app_require_csrf(false, "Invalid request token. Please refresh and try again.");
 
-    // 2a. Switch to phone verification
-    if (isset($_POST["switch_to_phone"])) {
-        header("Location: verify_phone.php");
-        exit();
-    }
-
-    // 2b. Resend code by email
+    // 2a. Resend code by email
     if (isset($_POST["resend_code"])) {
         if ($userRow && !empty($userRow["email"])) {
-            if (generateEmailVerificationCode($conn, $userId, $userRow["email"])) {
-                $feedbackMessage = "A new verification code has been sent to your email. It will be valid for 20 minutes.";
+            $resend = ensureActiveEmailVerificationCode($conn, $userId, $userRow, true);
+            if (!empty($resend["success"])) {
+                $feedbackMessage = trim((string)($resend["message"] ?? '')) !== ''
+                    ? (string)$resend["message"]
+                    : "A new verification code has been sent to your email. It will be valid for 20 minutes.";
                 $feedbackClass   = "success";
-
-                // Reload user row so we have the fresh expiry time for the countdown
-                $stmt = $conn->prepare("SELECT *, userID AS id FROM users WHERE userID = ?");
-                $stmt->bind_param("i", $userId);
-                $stmt->execute();
-                $res      = $stmt->get_result();
-                $userRow  = $res->fetch_assoc();
-                $stmt->close();
             } else {
-                $feedbackMessage = "We couldn't resend the code at the moment. Please try again later.";
+                $feedbackMessage = (string)($resend["message"] ?? "We couldn't resend the code at the moment. Please try again later.");
                 $feedbackClass   = "danger";
             }
         } else {
@@ -225,6 +289,17 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     }
 }
 
+if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+    $ensure = ensureActiveEmailVerificationCode($conn, $userId, $userRow, false);
+    if (!empty($ensure["sent"])) {
+        $feedbackMessage = (string)$ensure["message"];
+        $feedbackClass = "success";
+    } elseif (empty($ensure["success"]) && trim((string)($ensure["message"] ?? '')) !== '') {
+        $feedbackMessage = (string)$ensure["message"];
+        $feedbackClass = "danger";
+    }
+}
+
 // ------------------------------------
 // 3. Ensure expiry exists for existing code (fallback) & compute remaining
 // ------------------------------------
@@ -266,7 +341,7 @@ if (!empty($userRow["verification_expires_at"])) {
             </div>
             <h3 class="mt-2">Email Verification</h3>
             <p class="wizard-subtitle mb-0">
-                Enter the 6-digit code we sent to your email.
+                Enter the 6-digit code we sent to your email to finish setting up your account.
             </p>
         </div>
 
@@ -313,13 +388,6 @@ if (!empty($userRow["verification_expires_at"])) {
                             class="btn w-100 mt-2 bg-white border text-dark"
                             formnovalidate>
                         Resend Code
-                    </button>
-
-                    <!-- Switch to Phone Verification -->
-                    <button type="submit" name="switch_to_phone"
-                            class="btn btn-link w-100 mt-2"
-                            formnovalidate>
-                        Prefer SMS instead? Verify via phone
                     </button>
                 </div>
 

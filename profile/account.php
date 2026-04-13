@@ -803,6 +803,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                 try {
                     $mail = new PHPMailer(true);
+                    $mail->SMTPDebug = 0;
                     $mail->isSMTP();
                     $mail->Host       = 'premium245.web-hosting.com';
                     $mail->SMTPAuth   = true;
@@ -810,6 +811,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $mail->Password   = '!g3$~8tYju*D';
                     $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
                     $mail->Port       = 587;
+                    $mail->Timeout    = 20;
+                    $mail->SMTPOptions = [
+                        'ssl' => [
+                            'verify_peer' => false,
+                            'verify_peer_name' => false,
+                            'allow_self_signed' => true,
+                        ],
+                    ];
 
                     $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
                     $mail->addAddress($user["email"], $user["full_name"]);

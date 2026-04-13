@@ -24,6 +24,42 @@ if (isset($_SESSION["user"])) {
 
 $errors = [];
 
+function parseProfileDobInput(string $value): ?string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return null;
+    }
+
+    foreach (['d/m/Y', 'Y-m-d'] as $format) {
+        $date = DateTime::createFromFormat('!' . $format, $value);
+        $lastErrors = DateTime::getLastErrors();
+        $hasErrors = is_array($lastErrors) && (($lastErrors['warning_count'] ?? 0) > 0 || ($lastErrors['error_count'] ?? 0) > 0);
+
+        if ($date instanceof DateTime && !$hasErrors && $date->format($format) === $value) {
+            return $date->format('Y-m-d');
+        }
+    }
+
+    return null;
+}
+
+function formatProfileDobInputValue(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return '';
+    }
+
+    $parsed = parseProfileDobInput($value);
+    if ($parsed === null) {
+        return $value;
+    }
+
+    $date = DateTime::createFromFormat('!Y-m-d', $parsed);
+    return $date instanceof DateTime ? $date->format('d/m/Y') : $value;
+}
+
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     app_require_csrf(false, "Invalid request token. Please refresh and try again.");
     // -----------------------------
@@ -38,7 +74,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $city            = trim($_POST["city"]             ?? '');
     $address         = trim($_POST["address"]          ?? '');
     $postcode        = trim($_POST["postcode"]         ?? '');
-    $dob             = $_POST["dob"]                   ?? '';
+    $dobInput        = trim($_POST["dob"]              ?? '');
+    $dob             = parseProfileDobInput($dobInput);
     $phone           = trim($_POST["phone"]            ?? '');
 
     // Full name must be 2–3 words
@@ -56,9 +93,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     if (
         empty($fullName) || empty($username) || empty($password) || empty($repeat_password) ||
         empty($country)  || empty($city)     || empty($address)  || empty($postcode) ||
-        empty($dob)      || empty($phone)
+        empty($dobInput) || empty($phone)
     ) {
         $errors[] = "All fields are required!";
+    }
+
+    if ($dobInput !== '' && $dob === null) {
+        $errors[] = "Date of birth must use DD/MM/YYYY format.";
     }
 
     // Phone format
@@ -245,7 +286,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             $stmt->close();
 
             if ($userRow) {
-                // Core session keys that select_verification_method.php depends on
+                // Core session keys used by the post-registration verification flow
                 $_SESSION["user_id"]   = $userRow["id"];
                 $_SESSION["email"]     = $userRow["email"];
                 $_SESSION["full_name"] = $userRow["full_name"];
@@ -262,7 +303,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                 $nextStep = ((int)($userRow["is_verified"] ?? 0) === 1)
                     ? consumeAuthRedirectTarget("../index.php")
-                    : "select_verification_method.php";
+                    : "verify.php";
                 header("Location: " . $nextStep);
                 echo '<script>window.location.href=' . json_encode($nextStep) . ';</script>';
                 exit();
@@ -366,11 +407,27 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                     <div class="form-group">
                         <label>Date of Birth</label>
-                        <input type="date" name="dob" class="form-control" id="dob"
-                               value="<?= htmlspecialchars($_POST['dob'] ?? '') ?>" required>
+                        <input type="text"
+                               name="dob"
+                               class="form-control"
+                               id="dob"
+                               placeholder="DD/MM/YYYY"
+                               inputmode="numeric"
+                               pattern="\d{2}/\d{2}/\d{4}"
+                               value="<?= htmlspecialchars(formatProfileDobInputValue($_POST['dob'] ?? '')) ?>"
+                               required>
                         <div id="dob-error" class="text-danger mt-1" style="display:none;">
-                            Please type your date of birth.
+                            Please type your date of birth as DD/MM/YYYY.
                         </div>
+                        <?php
+                        if (!empty($errors)) {
+                            foreach ($errors as $error) {
+                                if (str_contains($error, "Date of birth must use")) {
+                                    echo "<div class='text-danger mt-1'>" . htmlspecialchars($error) . "</div>";
+                                }
+                            }
+                        }
+                        ?>
                     </div>
                 </div>
 
@@ -470,6 +527,20 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     let usernameChecked = false;
 
     $(document).ready(function () {
+        function isValidDobInput(value) {
+            const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+            if (!match) {
+                return false;
+            }
+
+            const day = Number(match[1]);
+            const month = Number(match[2]) - 1;
+            const year = Number(match[3]);
+            const date = new Date(year, month, day);
+
+            return date.getFullYear() === year && date.getMonth() === month && date.getDate() === day;
+        }
+
         $("input[name='fullname']").on("input", function () {
             const nameParts = $(this).val().trim().split(/\s+/);
             if (nameParts.length >= 2 && nameParts.length <= 3) {
@@ -557,6 +628,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $("input[name='fullname']").removeClass("is-invalid");
                     $("#fullname-error").remove();
                 }
+
+                const dobVal = $("#dob").val().trim();
+                if (dobVal !== "" && !isValidDobInput(dobVal)) {
+                    $("#dob").addClass("is-invalid");
+                    $("#dob-error").text("Please use DD/MM/YYYY format.").show();
+                    valid = false;
+                }
             }
 
             if (valid && currentStep < totalSteps) {
@@ -603,7 +681,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         });
 
         $("#dob").on("input", function () {
-            if ($(this).val().trim() !== "") {
+            const value = $(this).val().trim();
+            if (value !== "" && isValidDobInput(value)) {
                 $(this).removeClass("is-invalid");
                 $("#dob-error").hide();
             }

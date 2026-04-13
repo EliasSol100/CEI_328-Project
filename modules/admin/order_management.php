@@ -297,7 +297,7 @@ function sendOrderStatusEmails(mysqli $conn, array $orderContext, string $status
         ['port' => 465, 'secure' => \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS],
     ];
 
-    $deliver = function (string $toEmail, string $toName, string $subjectText, string $bodyText) use ($transports): bool {
+    $deliver = function (string $toEmail, string $toName, string $subjectText, string $bodyText) use ($conn, $transports): bool {
         foreach ($transports as $transport) {
             $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
             try {
@@ -422,7 +422,7 @@ function sendOrderMetaUpdateEmails(mysqli $conn, array $orderContext, string $su
         ['port' => 465, 'secure' => \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS],
     ];
 
-    $deliver = function (string $toEmail, string $toName, string $subjectText, string $bodyText) use ($transports): bool {
+    $deliver = function (string $toEmail, string $toName, string $subjectText, string $bodyText) use ($conn, $transports): bool {
         foreach ($transports as $transport) {
             $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
             try {

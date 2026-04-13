@@ -666,7 +666,6 @@ function sendOrderConfirmationEmail(array $payload): array {
         "Best regards,\n" .
         "Athina E-Shop";
 
-    // Transport fallback: STARTTLS on 587, then SMTPS on 465.
     $transports = [
         ['port' => 587, 'secure' => \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS, 'label' => '587/STARTTLS'],
         ['port' => 465, 'secure' => \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS, 'label' => '465/SMTPS'],

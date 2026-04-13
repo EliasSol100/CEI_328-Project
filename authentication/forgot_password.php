@@ -97,15 +97,22 @@ if (isset($_POST["submit"])) {
                     $mail      = new PHPMailer(true);
 
                     try {
-                        // --- SMTP settings (update if needed) ---
-                        $mail->SMTPDebug  = 0; // set to 2 while debugging
+                        $mail->SMTPDebug  = 0;
                         $mail->isSMTP();
-                        $mail->Host       = 'premium245.web-hosting.com';  // your SMTP host
+                        $mail->Host       = 'premium245.web-hosting.com';
                         $mail->SMTPAuth   = true;
-                        $mail->Username   = 'admin@festival-web.com';      // your SMTP username
-                        $mail->Password   = '!g3$~8tYju*D';                // your SMTP password
+                        $mail->Username   = 'admin@festival-web.com';
+                        $mail->Password   = '!g3$~8tYju*D';
                         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
                         $mail->Port       = 587;
+                        $mail->Timeout    = 20;
+                        $mail->SMTPOptions = [
+                            'ssl' => [
+                                'verify_peer' => false,
+                                'verify_peer_name' => false,
+                                'allow_self_signed' => true,
+                            ],
+                        ];
 
                         // --- Recipients ---
                         $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');

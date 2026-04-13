@@ -15,7 +15,7 @@ if (isset($_SESSION["user"])) {
     if (!$profileComplete) {
         header("Location: complete_profile.php");
     } elseif (!$isVerified) {
-        header("Location: select_verification_method.php");
+        header("Location: verify.php");
     } else {
         header("Location: " . consumeAuthRedirectTarget("../index.php"));
     }
@@ -167,7 +167,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                             // Αν το email δεν είναι verified, πήγαινε στην επαλήθευση
                             if (!$isVerified) {
-                                header("Location: select_verification_method.php");
+                                header("Location: verify.php");
                                 exit();
                             }
 

@@ -323,6 +323,67 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
     <script>
         const _fpPageLoadTime = Date.now();
         let   _fpMouseMoved   = false;
+        const _fpStorageKey   = 'athina_registration_browser_id';
+
+        function _fpGenerateFallbackId() {
+            if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+                return 'browser-' + window.crypto.randomUUID();
+            }
+
+            if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+                const bytes = new Uint8Array(16);
+                window.crypto.getRandomValues(bytes);
+                return 'browser-' + Array.from(bytes, function (byte) {
+                    return byte.toString(16).padStart(2, '0');
+                }).join('');
+            }
+
+            return 'browser-' + String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+        }
+
+        function _fpGetOrCreateFallbackId() {
+            try {
+                const existing = window.localStorage.getItem(_fpStorageKey) || '';
+                if (/^[A-Za-z0-9-]{16,64}$/.test(existing)) {
+                    return existing;
+                }
+
+                const generated = _fpGenerateFallbackId().replace(/[^A-Za-z0-9-]/g, '').slice(0, 64);
+                window.localStorage.setItem(_fpStorageKey, generated);
+                return generated;
+            } catch (error) {
+                return _fpGenerateFallbackId().replace(/[^A-Za-z0-9-]/g, '').slice(0, 64);
+            }
+        }
+
+        function _fpSetVisitorId(value) {
+            const field = document.getElementById('fp_visitor_id');
+            if (!field) {
+                return;
+            }
+
+            const sanitized = String(value || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 64);
+            if (sanitized !== '') {
+                field.value = sanitized;
+            }
+        }
+
+        function _fpDetectHeadless() {
+            return (
+                navigator.webdriver === true ||
+                /HeadlessChrome/.test(navigator.userAgent) ||
+                (!window.chrome && /Chrome/.test(navigator.userAgent) && navigator.plugins.length === 0)
+            ) ? 1 : 0;
+        }
+
+        // Set a stable local fallback immediately so registration still works
+        // if FingerprintJS is blocked, slow, or unsupported.
+        _fpSetVisitorId(_fpGetOrCreateFallbackId());
+
+        const _fpHeadlessField = document.getElementById('fp_headless');
+        if (_fpHeadlessField) {
+            _fpHeadlessField.value = _fpDetectHeadless();
+        }
 
         document.addEventListener('mousemove', function () {
             _fpMouseMoved = true;
@@ -340,24 +401,17 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
             .then(FingerprintJS => FingerprintJS.load())
             .then(fp => fp.get())
             .then(result => {
-                document.getElementById('fp_visitor_id').value = result.visitorId;
-
-                // Detect headless browsers (Puppeteer, Selenium, etc.)
-                const isHeadless = (
-                    navigator.webdriver === true ||
-                    /HeadlessChrome/.test(navigator.userAgent) ||
-                    (!window.chrome && /Chrome/.test(navigator.userAgent) && navigator.plugins.length === 0)
-                ) ? 1 : 0;
-
-                document.getElementById('fp_headless').value = isHeadless;
+                _fpSetVisitorId(result.visitorId);
             })
             .catch(function () {
-                // FingerprintJS blocked (adblocker/network) — leave fp_visitor_id empty
-                // Backend will reject the empty fingerprint
+                // Keep the stable local fallback visitor id when FingerprintJS is blocked.
             });
 
         // On submit: record elapsed time and whether the user moved the mouse
         document.querySelector('.auth-email-form').addEventListener('submit', function () {
+            if (document.getElementById('fp_visitor_id').value === '') {
+                _fpSetVisitorId(_fpGetOrCreateFallbackId());
+            }
             document.getElementById('fp_timing_ms').value   = Date.now() - _fpPageLoadTime;
             document.getElementById('fp_mouse_moved').value = _fpMouseMoved ? 1 : 0;
         });
