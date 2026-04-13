@@ -744,6 +744,57 @@ $customColorLabel1Gr = trim((string)($product["customColorLabel1GR"] ?? ""));
 $customColorLabel2Gr = trim((string)($product["customColorLabel2GR"] ?? ""));
 $customColorHelpGr = trim((string)($product["customColorHelpTextGR"] ?? ""));
 
+/* ── Multi-colour scheme ── */
+// Ensure tables exist (safe to run on every page load — no-op if already created)
+$conn->query("CREATE TABLE IF NOT EXISTS product_color_scheme (
+    id INT AUTO_INCREMENT PRIMARY KEY, productID INT NOT NULL, num_colors TINYINT NOT NULL DEFAULT 2,
+    is_enabled TINYINT(1) NOT NULL DEFAULT 0, UNIQUE KEY unique_product (productID),
+    FOREIGN KEY (productID) REFERENCES products(productID) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+$conn->query("CREATE TABLE IF NOT EXISTS product_color_scheme_photos (
+    id INT AUTO_INCREMENT PRIMARY KEY, productID INT NOT NULL, photoPath VARCHAR(500) NOT NULL,
+    sort_order INT NOT NULL DEFAULT 0, FOREIGN KEY (productID) REFERENCES products(productID) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+$colorSchemeEnabled  = false;
+$colorSchemeNumColors = 2;
+$colorSchemePhotos   = [];
+$colorSchemeColors   = [];
+
+$csRow = null;
+$csStmt = $conn->prepare("SELECT num_colors, is_enabled FROM product_color_scheme WHERE productID = ? AND is_enabled = 1");
+if ($csStmt) {
+    $csStmt->bind_param('i', $productId);
+    $csStmt->execute();
+    $csRes = $csStmt->get_result();
+    $csRow = $csRes ? $csRes->fetch_assoc() : null;
+    $csStmt->close();
+}
+if ($csRow) {
+    $colorSchemeEnabled   = true;
+    $colorSchemeNumColors = (int)($csRow['num_colors'] ?? 2);
+
+    // Load diagram photos
+    $csPhotoStmt = $conn->prepare("SELECT id, photoPath FROM product_color_scheme_photos WHERE productID = ? ORDER BY sort_order ASC");
+    if ($csPhotoStmt) {
+        $csPhotoStmt->bind_param('i', $productId);
+        $csPhotoStmt->execute();
+        $csPhotoRes = $csPhotoStmt->get_result();
+        while ($csPhotoRes && ($csPhotoRow = $csPhotoRes->fetch_assoc())) {
+            $colorSchemePhotos[] = $csPhotoRow;
+        }
+        $csPhotoStmt->close();
+    }
+
+    // Load active colors for dropdowns
+    $csColorsRes = $conn->query("SELECT colorID, colorName FROM colors WHERE isActive = 1 ORDER BY colorName ASC");
+    if ($csColorsRes) {
+        while ($csColorRow = $csColorsRes->fetch_assoc()) {
+            $colorSchemeColors[] = $csColorRow;
+        }
+    }
+}
+
 $reviews = [];
 $reviewStmt = $conn->prepare(
     "SELECT r.reviewID, r.userID, r.rating, r.reviewText, r.timestamp,
@@ -1005,6 +1056,65 @@ include __DIR__ . "/include/header.php";
                             placeholder="<?= htmlspecialchars($customColorLabel2 !== '' ? $customColorLabel2 : 'Colour 2') ?>">
                     <?php endif; ?>
                 </div>
+            <?php endif; ?>
+
+            <?php if ($colorSchemeEnabled): ?>
+            <div class="gift-box custom-request-box" id="colour-scheme-box">
+                <h3 data-translate="productColourSelection">Colour Selection</h3>
+
+                <?php if (!empty($colorSchemePhotos)): ?>
+                <div id="cs-carousel" style="position:relative;margin-bottom:16px;border-radius:12px;overflow:hidden;background:#f3f4f6">
+                    <?php foreach ($colorSchemePhotos as $ci => $csPhoto): ?>
+                    <img
+                        src="<?= htmlspecialchars($csPhoto['photoPath']) ?>"
+                        class="cs-slide"
+                        data-index="<?= $ci ?>"
+                        style="width:100%;display:<?= $ci === 0 ? 'block' : 'none' ?>;border-radius:12px;object-fit:contain;max-height:320px">
+                    <?php endforeach; ?>
+                    <?php if (count($colorSchemePhotos) > 1): ?>
+                    <button type="button" onclick="csCarouselPrev()" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.45);color:#fff;border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;font-size:16px;line-height:1">&#8249;</button>
+                    <button type="button" onclick="csCarouselNext()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.45);color:#fff;border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;font-size:16px;line-height:1">&#8250;</button>
+                    <div id="cs-dots" style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);display:flex;gap:5px">
+                        <?php foreach ($colorSchemePhotos as $ci => $csPhoto): ?>
+                        <span class="cs-dot" data-index="<?= $ci ?>" onclick="csCarouselGo(<?= $ci ?>)" style="width:8px;height:8px;border-radius:50%;background:<?= $ci === 0 ? '#fff' : 'rgba(255,255,255,.5)' ?>;cursor:pointer;display:inline-block"></span>
+                        <?php endforeach; ?>
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
+
+                <div style="display:flex;flex-direction:column;gap:12px">
+                    <div>
+                        <label class="gift-note-label" for="cs-color-a" data-translate="colourSchemeA">Colour A</label>
+                        <select id="cs-color-a" class="custom-request-input" style="appearance:auto">
+                            <option value="">— Select Colour A —</option>
+                            <?php foreach ($colorSchemeColors as $csColor): ?>
+                            <option value="<?= (int)$csColor['colorID'] ?>"><?= htmlspecialchars($csColor['colorName']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="gift-note-label" for="cs-color-b" data-translate="colourSchemeB">Colour B</label>
+                        <select id="cs-color-b" class="custom-request-input" style="appearance:auto">
+                            <option value="">— Select Colour B —</option>
+                            <?php foreach ($colorSchemeColors as $csColor): ?>
+                            <option value="<?= (int)$csColor['colorID'] ?>"><?= htmlspecialchars($csColor['colorName']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <?php if ($colorSchemeNumColors >= 3): ?>
+                    <div>
+                        <label class="gift-note-label" for="cs-color-c" data-translate="colourSchemeC">Colour C</label>
+                        <select id="cs-color-c" class="custom-request-input" style="appearance:auto">
+                            <option value="">— Select Colour C —</option>
+                            <?php foreach ($colorSchemeColors as $csColor): ?>
+                            <option value="<?= (int)$csColor['colorID'] ?>"><?= htmlspecialchars($csColor['colorName']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <?php endif; ?>
+                </div>
+            </div>
             <?php endif; ?>
 
             <div class="color-stock" id="color-stock"></div>
@@ -1276,6 +1386,11 @@ include __DIR__ . "/include/header.php";
     var colorChips = Array.prototype.slice.call(document.querySelectorAll(".color-chip-btn"));
     var customField1Input = document.getElementById("custom-colour-field-1");
     var customField2Input = document.getElementById("custom-colour-field-2");
+    var csColorSchemeEnabled  = <?= $colorSchemeEnabled ? 'true' : 'false' ?>;
+    var csNumColors           = <?= (int)$colorSchemeNumColors ?>;
+    var csSelectA = document.getElementById("cs-color-a");
+    var csSelectB = document.getElementById("cs-color-b");
+    var csSelectC = document.getElementById("cs-color-c");
     var colorStockEl = document.getElementById("color-stock");
     var variantStatus = document.getElementById("variant-status");
     var addCartBtn = document.getElementById("add-cart-btn");
@@ -1834,6 +1949,15 @@ include __DIR__ . "/include/header.php";
                 customizationField1 = selectedColorName;
             }
 
+            if (csColorSchemeEnabled) {
+                var csA = csSelectA ? csSelectA.value : "";
+                var csB = csSelectB ? csSelectB.value : "";
+                var csC = csSelectC ? csSelectC.value : "";
+                if (!csA) { showToast(t("productSelectColourA") || "Please select Colour A.", true); return; }
+                if (!csB) { showToast(t("productSelectColourB") || "Please select Colour B.", true); return; }
+                if (csNumColors >= 3 && !csC) { showToast(t("productSelectColourC") || "Please select Colour C.", true); return; }
+            }
+
             var payload = {
                 product_id: productId,
                 quantity: qty,
@@ -1844,7 +1968,10 @@ include __DIR__ . "/include/header.php";
                 },
                 customization: {
                     field1: customizationField1,
-                    field2: customField2Input ? String(customField2Input.value || "").trim() : ""
+                    field2: customField2Input ? String(customField2Input.value || "").trim() : "",
+                    colorSchemeA: csColorSchemeEnabled && csSelectA ? csSelectA.options[csSelectA.selectedIndex]?.text || "" : "",
+                    colorSchemeB: csColorSchemeEnabled && csSelectB ? csSelectB.options[csSelectB.selectedIndex]?.text || "" : "",
+                    colorSchemeC: (csColorSchemeEnabled && csNumColors >= 3 && csSelectC) ? csSelectC.options[csSelectC.selectedIndex]?.text || "" : ""
                 }
             };
             if (appliedCouponCode) {
@@ -1925,6 +2052,25 @@ include __DIR__ . "/include/header.php";
         input.addEventListener("change", paintRatingSelection);
     });
     paintRatingSelection();
+})();
+
+/* ── Colour Scheme Carousel ── */
+(function() {
+    var slides = Array.prototype.slice.call(document.querySelectorAll('.cs-slide'));
+    var dots   = Array.prototype.slice.call(document.querySelectorAll('.cs-dot'));
+    var current = 0;
+    if (slides.length <= 1) return;
+
+    function goTo(idx) {
+        slides[current].style.display = 'none';
+        if (dots[current]) dots[current].style.background = 'rgba(255,255,255,.5)';
+        current = (idx + slides.length) % slides.length;
+        slides[current].style.display = 'block';
+        if (dots[current]) dots[current].style.background = '#fff';
+    }
+    window.csCarouselPrev = function() { goTo(current - 1); };
+    window.csCarouselNext = function() { goTo(current + 1); };
+    window.csCarouselGo   = function(idx) { goTo(idx); };
 })();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

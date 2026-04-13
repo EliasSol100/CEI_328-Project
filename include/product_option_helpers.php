@@ -84,6 +84,36 @@ if (!function_exists('app_product_options_has_custom_color_fields')) {
     }
 }
 
+if (!function_exists('app_product_options_pick_color_scheme_value')) {
+    function app_product_options_pick_color_scheme_value(array $source, string $slot): string
+    {
+        $slot = strtoupper(trim($slot));
+        $slotNumber = ['A' => '1', 'B' => '2', 'C' => '3'][$slot] ?? '';
+
+        $candidateKeys = [
+            'colorScheme' . $slot,
+            'color_scheme_' . $slot,
+            'colourScheme' . $slot,
+            'colour_scheme_' . $slot,
+        ];
+        if ($slotNumber !== '') {
+            $candidateKeys[] = 'colorScheme' . $slotNumber;
+            $candidateKeys[] = 'color_scheme_' . $slotNumber;
+            $candidateKeys[] = 'colourScheme' . $slotNumber;
+            $candidateKeys[] = 'colour_scheme_' . $slotNumber;
+        }
+
+        foreach ($candidateKeys as $key) {
+            if (!array_key_exists($key, $source)) {
+                continue;
+            }
+            return trim((string)$source[$key]);
+        }
+
+        return '';
+    }
+}
+
 if (!function_exists('app_product_options_build_customization_summary')) {
     function app_product_options_build_customization_summary(array $product, array $customization): string
     {
@@ -104,6 +134,14 @@ if (!function_exists('app_product_options_build_customization_summary')) {
             $label = $labels[$idx] !== '' ? $labels[$idx] : ('Custom option ' . ($idx + 1));
             $parts[] = $label . ': ' . $value;
         }
+
+        // Multi-colour scheme selections
+        $csA = app_product_options_pick_color_scheme_value($customization, 'A');
+        $csB = app_product_options_pick_color_scheme_value($customization, 'B');
+        $csC = app_product_options_pick_color_scheme_value($customization, 'C');
+        if ($csA !== '') $parts[] = 'Colour A: ' . $csA;
+        if ($csB !== '') $parts[] = 'Colour B: ' . $csB;
+        if ($csC !== '') $parts[] = 'Colour C: ' . $csC;
 
         return implode(' | ', $parts);
     }

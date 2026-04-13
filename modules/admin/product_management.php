@@ -880,6 +880,68 @@ $statusFilterOptions = [
         <div id="pcp-empty" style="display:none;font-size:13px;color:#9ca3af;padding:12px 0">No photos yet for this product &amp; colour combination.</div>
       </div>
 
+      <!-- ── Multi-Colour Selection ── -->
+      <div class="card" style="margin-top:24px">
+        <div class="card-title">Multi-Colour Selection</div>
+        <p class="text-sm text-muted" style="margin-bottom:20px">
+          Optional: let customers pick 2 or 3 yarn colours for this product (e.g. a striped bee with Colour A + Colour B).
+          Upload a diagram photo showing where each colour goes.
+        </p>
+
+        <div class="form-group" style="max-width:340px">
+          <label class="form-label">Product</label>
+          <select id="mcs-product" class="form-input" onchange="mcsLoadConfig()">
+            <option value="">— Select product —</option>
+            <?php foreach ($products as $p): ?>
+              <option value="<?= (int)$p['productID'] ?>"><?= htmlspecialchars($p['nameEN']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+
+        <div id="mcs-config-area" style="display:none">
+
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+            <input type="checkbox" id="mcs-enabled" onchange="mcsToggle()" style="width:16px;height:16px;cursor:pointer">
+            <label for="mcs-enabled" style="font-size:14px;font-weight:500;cursor:pointer">Enable multi-colour selection for this product</label>
+          </div>
+
+          <div id="mcs-options" style="display:none">
+            <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-bottom:20px">
+              <div class="form-group" style="flex:0 0 200px;margin-bottom:0">
+                <label class="form-label">Number of colours</label>
+                <select id="mcs-num-colors" class="form-input">
+                  <option value="2">2 Colours (A + B)</option>
+                  <option value="3">3 Colours (A + B + C)</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" onclick="mcsSaveConfig()" style="white-space:nowrap">
+                <i class="fas fa-save"></i> Save Config
+              </button>
+              <span id="mcs-save-msg" style="font-size:13px;color:#16a34a;display:none">Saved!</span>
+            </div>
+
+            <div style="margin-bottom:12px">
+              <label class="form-label">Diagram Photo(s)</label>
+              <p class="text-sm text-muted" style="margin-bottom:8px">
+                Upload a photo like the bee example — showing where Colour A, B (and C) appear on the product.
+                Multiple photos → carousel on the storefront.
+              </p>
+              <div style="display:flex;align-items:center;gap:12px">
+                <input type="file" id="mcs-file" class="form-input" accept="image/*" multiple style="flex:1">
+                <button class="btn btn-primary" onclick="mcsUpload()" style="white-space:nowrap">
+                  <i class="fas fa-upload"></i> Upload
+                </button>
+              </div>
+              <div id="mcs-upload-progress" style="margin-top:8px;font-size:13px;color:#6b7280"></div>
+            </div>
+
+            <div id="mcs-photos-grid" style="display:flex;flex-wrap:wrap;gap:12px"></div>
+            <div id="mcs-empty" style="display:none;font-size:13px;color:#9ca3af;padding:8px 0">No diagram photos uploaded yet.</div>
+          </div>
+
+        </div>
+      </div>
+
     </div>
   </main>
 </div>
@@ -1323,6 +1385,136 @@ function pcpDelete(id, btn) {
         btn.closest('div').remove();
         var grid = document.getElementById('pcp-photos-grid');
         if (!grid.children.length) document.getElementById('pcp-empty').style.display = 'block';
+      }
+    });
+}
+
+/* ── Multi-Colour Selection ── */
+var mcsAjax = 'ajax/color_scheme.php';
+var mcsBase = '<?= htmlspecialchars(productMgmtBuildProjectBasePath(), ENT_QUOTES) ?>/';
+
+function mcsLoadConfig() {
+  var pid = parseInt(document.getElementById('mcs-product').value) || 0;
+  var area = document.getElementById('mcs-config-area');
+  var opts = document.getElementById('mcs-options');
+  var grid = document.getElementById('mcs-photos-grid');
+  area.style.display = 'none';
+  opts.style.display = 'none';
+  grid.innerHTML = '';
+  document.getElementById('mcs-empty').style.display = 'none';
+  if (!pid) return;
+  fetch(mcsAjax + '?action=get_config&productID=' + pid)
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+      if (!data.ok) return;
+      area.style.display = 'block';
+      document.getElementById('mcs-enabled').checked = data.is_enabled;
+      document.getElementById('mcs-num-colors').value = data.num_colors || 2;
+      if (data.is_enabled) {
+        opts.style.display = 'block';
+        mcsLoadPhotos(pid);
+      }
+    });
+}
+
+function mcsToggle() {
+  var enabled = document.getElementById('mcs-enabled').checked;
+  document.getElementById('mcs-options').style.display = enabled ? 'block' : 'none';
+  if (enabled) {
+    var pid = parseInt(document.getElementById('mcs-product').value) || 0;
+    if (pid) mcsLoadPhotos(pid);
+  }
+}
+
+function mcsSaveConfig() {
+  var pid       = parseInt(document.getElementById('mcs-product').value) || 0;
+  var isEnabled = document.getElementById('mcs-enabled').checked ? 1 : 0;
+  var numColors = parseInt(document.getElementById('mcs-num-colors').value) || 2;
+  var msg       = document.getElementById('mcs-save-msg');
+  if (!pid) return;
+  var fd = new FormData();
+  fd.append('action',     'save_config');
+  fd.append('productID',  pid);
+  fd.append('is_enabled', isEnabled);
+  fd.append('num_colors', numColors);
+  fd.append('csrf_token', window.APP_CSRF_TOKEN || '');
+  fetch(mcsAjax, { method: 'POST', body: fd })
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        msg.style.display = 'inline';
+        setTimeout(function(){ msg.style.display = 'none'; }, 2500);
+      }
+    });
+}
+
+function mcsLoadPhotos(pid) {
+  var grid  = document.getElementById('mcs-photos-grid');
+  var empty = document.getElementById('mcs-empty');
+  grid.innerHTML = '';
+  empty.style.display = 'none';
+  fetch(mcsAjax + '?action=list_photos&productID=' + pid)
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+      if (!data.ok || !data.photos.length) {
+        empty.style.display = 'block';
+        return;
+      }
+      data.photos.forEach(function(ph){ mcsAddThumb(ph); });
+    });
+}
+
+function mcsAddThumb(ph) {
+  var grid = document.getElementById('mcs-photos-grid');
+  var wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative;width:120px;height:120px';
+  wrap.innerHTML =
+    '<img src="' + mcsBase + ph.photoPath + '" style="width:120px;height:120px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">' +
+    '<button onclick="mcsDeletePhoto(' + ph.id + ',this)" style="position:absolute;top:4px;right:4px;background:#dc2626;color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:12px;line-height:1" title="Delete"><i class="fas fa-times"></i></button>';
+  grid.appendChild(wrap);
+  document.getElementById('mcs-empty').style.display = 'none';
+}
+
+function mcsUpload() {
+  var pid   = parseInt(document.getElementById('mcs-product').value) || 0;
+  var files = document.getElementById('mcs-file').files;
+  var prog  = document.getElementById('mcs-upload-progress');
+  if (!pid || !files.length) return;
+  prog.textContent = 'Uploading...';
+  var remaining = files.length;
+  Array.from(files).forEach(function(file) {
+    var fd = new FormData();
+    fd.append('action',    'upload_photo');
+    fd.append('productID', pid);
+    fd.append('photo',     file);
+    fd.append('csrf_token', window.APP_CSRF_TOKEN || '');
+    fetch(mcsAjax, { method: 'POST', body: fd })
+      .then(function(r){ return r.json(); })
+      .then(function(data) {
+        if (data.ok) mcsAddThumb(data);
+        remaining--;
+        if (remaining === 0) {
+          prog.textContent = 'Done.';
+          document.getElementById('mcs-file').value = '';
+          setTimeout(function(){ prog.textContent = ''; }, 2000);
+        }
+      });
+  });
+}
+
+function mcsDeletePhoto(id, btn) {
+  if (!confirm('Delete this diagram photo?')) return;
+  var fd = new FormData();
+  fd.append('action',     'delete_photo');
+  fd.append('id',         id);
+  fd.append('csrf_token', window.APP_CSRF_TOKEN || '');
+  fetch(mcsAjax, { method: 'POST', body: fd })
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        btn.closest('div').remove();
+        var grid = document.getElementById('mcs-photos-grid');
+        if (!grid.children.length) document.getElementById('mcs-empty').style.display = 'block';
       }
     });
 }

@@ -239,11 +239,14 @@ try {
             'addonsCost' => round($addonsCost, 2),
         ],
         'customization' => [
-            'field1' => $customization['field1'],
-            'field2' => $customization['field2'],
-            'label1' => $customization['label1'],
-            'label2' => $customization['label2'],
-            'summary' => $customizationSummary,
+            'field1'       => $customization['field1'],
+            'field2'       => $customization['field2'],
+            'label1'       => $customization['label1'],
+            'label2'       => $customization['label2'],
+            'colorSchemeA' => $customization['colorSchemeA'],
+            'colorSchemeB' => $customization['colorSchemeB'],
+            'colorSchemeC' => $customization['colorSchemeC'],
+            'summary'      => $customizationSummary,
         ],
         'pricing' => [
             'unitTotal' => round($unitTotal, 2),
@@ -319,11 +322,21 @@ function normalizeCustomization($input, array $product): array {
     if (mb_strlen($field1) > 120) $field1 = mb_substr($field1, 0, 120);
     if (mb_strlen($field2) > 120) $field2 = mb_substr($field2, 0, 120);
 
+    $csA = app_product_options_pick_color_scheme_value($input, 'A');
+    $csB = app_product_options_pick_color_scheme_value($input, 'B');
+    $csC = app_product_options_pick_color_scheme_value($input, 'C');
+    if (mb_strlen($csA) > 120) $csA = mb_substr($csA, 0, 120);
+    if (mb_strlen($csB) > 120) $csB = mb_substr($csB, 0, 120);
+    if (mb_strlen($csC) > 120) $csC = mb_substr($csC, 0, 120);
+
     return [
-        'field1' => $field1,
-        'field2' => $field2,
-        'label1' => trim((string)($product['customColorLabel1'] ?? '')),
-        'label2' => trim((string)($product['customColorLabel2'] ?? '')),
+        'field1'        => $field1,
+        'field2'        => $field2,
+        'label1'        => trim((string)($product['customColorLabel1'] ?? '')),
+        'label2'        => trim((string)($product['customColorLabel2'] ?? '')),
+        'colorSchemeA'  => $csA,
+        'colorSchemeB'  => $csB,
+        'colorSchemeC'  => $csC,
     ];
 }
 function &getOrInitCart(): array {
@@ -338,6 +351,10 @@ function &getOrInitCart(): array {
     return $_SESSION['cart'];
 }
 function findExistingLineIndex(array $items, int $productId, ?array $variation, array $customization, array $addons): ?int {
+    $targetCsA = app_product_options_pick_color_scheme_value($customization, 'A');
+    $targetCsB = app_product_options_pick_color_scheme_value($customization, 'B');
+    $targetCsC = app_product_options_pick_color_scheme_value($customization, 'C');
+
     foreach ($items as $i => $item) {
         if ((int)($item['product']['id'] ?? 0) !== $productId) continue;
 
@@ -369,6 +386,9 @@ function findExistingLineIndex(array $items, int $productId, ?array $variation, 
         $existingCustomization = is_array($item['customization'] ?? null) ? $item['customization'] : [];
         if ((string)($existingCustomization['field1'] ?? '') !== (string)($customization['field1'] ?? '')) continue;
         if ((string)($existingCustomization['field2'] ?? '') !== (string)($customization['field2'] ?? '')) continue;
+        if (app_product_options_pick_color_scheme_value($existingCustomization, 'A') !== $targetCsA) continue;
+        if (app_product_options_pick_color_scheme_value($existingCustomization, 'B') !== $targetCsB) continue;
+        if (app_product_options_pick_color_scheme_value($existingCustomization, 'C') !== $targetCsC) continue;
 
         $ad = $item['addons'] ?? [];
         if ((bool)($ad['giftWrapping'] ?? false) !== (bool)$addons['gift_wrapping']) continue;
