@@ -1077,6 +1077,19 @@ ALTER TABLE `wishlists`
 ALTER TABLE `wishlist_items`
   ADD CONSTRAINT `fk_wishlist_items_products` FOREIGN KEY (`productID`) REFERENCES `products` (`productID`) ON DELETE CASCADE ON UPDATE CASCADE,
   ADD CONSTRAINT `fk_wishlist_items_wishlists` FOREIGN KEY (`wishlistID`) REFERENCES `wishlists` (`wishlistID`) ON DELETE CASCADE ON UPDATE CASCADE;
+--
+-- Table structure for table `product_sales_overrides`
+--
+CREATE TABLE IF NOT EXISTS `product_sales_overrides` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `productID` int(11) NOT NULL,
+  `manual_total_sales` int(11) NOT NULL DEFAULT 0,
+  `auto_sales_baseline` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_product` (`productID`),
+  CONSTRAINT `fk_pso_products` FOREIGN KEY (`productID`) REFERENCES `products` (`productID`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
