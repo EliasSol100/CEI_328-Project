@@ -6,6 +6,7 @@ define('INCLUDE_CHECK', true);
 
 // Correct relative path: go up one level from 'modules' to project root, then into 'authentication'
 require_once __DIR__ . '/../authentication/database.php';
+require_once __DIR__ . '/../include/security.php';
 require_once __DIR__ . '/../include/loyalty_program.php';
 require_once __DIR__ . '/../include/payment_gateway.php';
 require_once __DIR__ . '/../include/checkout_payment_helpers.php';
@@ -295,11 +296,6 @@ $defaultPaymentMethod = !empty($availablePaymentMethods['stripe'])
     ? 'stripe'
     : (!empty($availablePaymentMethods['paypal']) ? 'paypal' : '');
 
-// ----- CSRF TOKEN -----
-if (empty($_SESSION['csrf_token'])) {
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-}
-
 // ----- USER INFO -----
 $isLoggedIn = isset($_SESSION["user"]);
 $userId = $isLoggedIn ? (int)($_SESSION["user"]["id"] ?? $_SESSION["user"]["userID"] ?? 0) : 0;
@@ -528,9 +524,7 @@ $displayShippingCost = checkoutShippingCost(
 $displayTotal = max(0, ($cartTotal - $couponDiscount - $loyaltyDiscount) + $displayShippingCost);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
-        die('Invalid CSRF token');
-    }
+    app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
 
     $isCouponOnlyPost = ($couponAction !== '');
     $isLoyaltyOnlyPost = ($loyaltyAction !== '');
@@ -858,7 +852,7 @@ if (file_exists($headerPath)) {
                 <div class="guest-notice"><strong data-translate="checkoutGuestCheckout">Guest checkout</strong> - <a href="<?= $project ?>/authentication/login.php" data-translate="checkoutLogin">Login</a> <span data-translate="checkoutForFasterCheckout">for faster checkout.</span></div>
             <?php endif; ?>
             <form method="post">
-                <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
+                <?= app_csrf_input() ?>
 
                 <?php if (!$isLoggedIn): ?>
                 <fieldset>

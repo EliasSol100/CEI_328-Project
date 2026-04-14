@@ -242,7 +242,8 @@ unset($_SESSION['cart_notice']);
                             $addonBits = [];
                             if (!empty($item['addons']['giftWrapping'])) $addonBits[] = '<span' . app_translate_text_attrs('Gift Wrapping (+€2.00)', 'Συσκευασία δώρου (+€2.00)') . '>Gift Wrapping (+€2.00)</span>';
                             if (!empty($item['addons']['giftBagFlag'])) $addonBits[] = '<span' . app_translate_text_attrs('Gift Bag (+€1.50)', 'Τσάντα δώρου (+€1.50)') . '>Gift Bag (+€1.50)</span>';
-                            if (!empty($item['addons']['giftMessage'])) $addonBits[] = '<span' . app_translate_text_attrs('Note: ' . (string)$item['addons']['giftMessage'], 'Σημείωση: ' . (string)$item['addons']['giftMessage']) . '>Note: ' . (string)$item['addons']['giftMessage'] . '</span>';
+                            $giftMessage = trim((string)($item['addons']['giftMessage'] ?? ''));
+                            if ($giftMessage !== '') $addonBits[] = '<span>' . app_h('Note: ' . $giftMessage) . '</span>';
                         ?>
                         <?php if (!empty($addonBits)): ?>
                         <div class="cart-item-variant" style="margin-top:6px;">

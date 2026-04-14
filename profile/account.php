@@ -742,6 +742,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         if (!$firstName || !$lastName || !$username || !$emailNew || !$phoneNew) {
             $errorMessage = "All fields are required.";
             $activeTab = "settings";
+        } elseif (!app_is_valid_username($username)) {
+            $errorMessage = "Username must be 3-32 characters and use only letters, numbers, dots, underscores, or hyphens.";
+            $activeTab = "settings";
         } else {
             $fullNameNew = $firstName . " " . $lastName;
 

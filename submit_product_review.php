@@ -3,6 +3,7 @@ session_start();
 
 require_once __DIR__ . "/authentication/database.php";
 require_once __DIR__ . "/authentication/get_config.php";
+require_once __DIR__ . "/include/security.php";
 
 const GUEST_REVIEW_SECRET = "athina_guest_review_v1";
 
@@ -465,6 +466,7 @@ if ($selectedProduct && !isset($availableById[$selectedProductId])) {
 }
 
 if ($_SERVER["REQUEST_METHOD"] === "POST" && ($actorUserId > 0 || $isAdmin)) {
+    app_require_csrf(false, "Invalid request token. Please refresh and try again.");
     $postedToken = (string)($_POST["review_token"] ?? "");
     if (!hash_equals($reviewToken, $postedToken)) {
         $reviewErrors[] = "Invalid request token. Please refresh and try again.";
@@ -728,6 +730,7 @@ include __DIR__ . "/include/header.php";
                     <?php if ($canSubmitCurrentSelection): ?>
                         <div class="spr-review-actions">
                             <form method="post" onsubmit="return confirm('Delete this review?');">
+                                <?= app_csrf_input() ?>
                                 <input type="hidden" name="review_token" value="<?= htmlspecialchars($reviewToken) ?>">
                                 <input type="hidden" name="review_key" value="<?= htmlspecialchars($reviewKey) ?>">
                                 <input type="hidden" name="action" value="delete_review">
@@ -746,6 +749,7 @@ include __DIR__ . "/include/header.php";
 
             <?php if ($canSubmitCurrentSelection): ?>
                 <form method="post" id="spr-form" class="spr-form <?= $openReviewForm ? "" : "hidden" ?>">
+                    <?= app_csrf_input() ?>
                     <input type="hidden" name="review_token" value="<?= htmlspecialchars($reviewToken) ?>">
                     <input type="hidden" name="review_key" value="<?= htmlspecialchars($reviewKey) ?>">
                     <input type="hidden" name="action" value="save_review">

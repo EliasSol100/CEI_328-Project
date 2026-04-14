@@ -6,6 +6,26 @@ require_once __DIR__ . '/../../include/security.php';
 $current_page = 'content_management';
 $flash = '';
 
+function contentPageNormalizeSlug(string $value): string {
+    $value = strtolower(trim($value));
+    $value = preg_replace('/[^a-z0-9]+/', '-', $value);
+    $value = trim((string)$value, '-');
+    return $value;
+}
+
+function contentPageNormalizeLanguage(string $value): string {
+    $value = strtolower(trim($value));
+    if ($value === 'el') {
+        return 'gr';
+    }
+    return in_array($value, ['en', 'gr'], true) ? $value : 'en';
+}
+
+function contentPageNormalizeType(string $value): string {
+    $value = strtolower(trim($value));
+    return in_array($value, ['static', 'blog'], true) ? $value : 'static';
+}
+
 /* ── Handle POST ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
@@ -13,33 +33,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'add') {
         $title    = trim($_POST['pageTitle'] ?? '');
-        $slug     = trim($_POST['slug']      ?? '');
-        $lang     = $_POST['language']       ?? 'en';
-        $type     = $_POST['pageType']       ?? 'static';
+        $slug     = contentPageNormalizeSlug((string)($_POST['slug'] ?? ''));
+        $lang     = contentPageNormalizeLanguage((string)($_POST['language'] ?? 'en'));
+        $type     = contentPageNormalizeType((string)($_POST['pageType'] ?? 'static'));
         $content  = $_POST['content']        ?? '';
         $published= isset($_POST['isPublished']) ? 1 : 0;
-        if (empty($slug)) $slug = strtolower(str_replace(' ','-',$title));
-        $stmt = mysqli_prepare($conn,
-            "INSERT INTO content_pages (pageTitle, slug, language, pageType, content, isPublished)
-             VALUES (?,?,?,?,?,?)");
-        mysqli_stmt_bind_param($stmt, 'sssssi', $title, $slug, $lang, $type, $content, $published);
-        mysqli_stmt_execute($stmt);
-        $flash = 'ok:Page created.';
+        if ($title === '') {
+            $flash = 'err:Page title is required.';
+        } else {
+            if ($slug === '') {
+                $slug = contentPageNormalizeSlug($title);
+            }
+            if ($slug === '') {
+                $slug = 'page-' . time();
+            }
+            $stmt = mysqli_prepare($conn,
+                "INSERT INTO content_pages (pageTitle, slug, language, pageType, content, isPublished)
+                 VALUES (?,?,?,?,?,?)");
+            mysqli_stmt_bind_param($stmt, 'sssssi', $title, $slug, $lang, $type, $content, $published);
+            mysqli_stmt_execute($stmt);
+            $flash = 'ok:Page created.';
+        }
     }
 
     if ($action === 'edit') {
         $id      = (int)($_POST['pageID'] ?? 0);
         $title   = trim($_POST['pageTitle'] ?? '');
-        $lang    = $_POST['language']       ?? 'en';
-        $type    = $_POST['pageType']       ?? 'static';
+        $lang    = contentPageNormalizeLanguage((string)($_POST['language'] ?? 'en'));
+        $type    = contentPageNormalizeType((string)($_POST['pageType'] ?? 'static'));
         $content = $_POST['content']        ?? '';
         $published= isset($_POST['isPublished']) ? 1 : 0;
-        $stmt = mysqli_prepare($conn,
-            "UPDATE content_pages SET pageTitle=?, language=?, pageType=?, content=?, isPublished=?
-             WHERE pageID=?");
-        mysqli_stmt_bind_param($stmt, 'ssssii', $title, $lang, $type, $content, $published, $id);
-        mysqli_stmt_execute($stmt);
-        $flash = 'ok:Page updated.';
+        if ($title === '') {
+            $flash = 'err:Page title is required.';
+        } else {
+            $stmt = mysqli_prepare($conn,
+                "UPDATE content_pages SET pageTitle=?, language=?, pageType=?, content=?, isPublished=?
+                 WHERE pageID=?");
+            mysqli_stmt_bind_param($stmt, 'ssssii', $title, $lang, $type, $content, $published, $id);
+            mysqli_stmt_execute($stmt);
+            $flash = 'ok:Page updated.';
+        }
     }
 
     if ($action === 'delete') {
@@ -98,8 +131,8 @@ $typeLabel  = ['static'=>'Static Page','blog'=>'Blog Post'];
     <div class="content-body">
 
       <?php if ($flash): ?>
-        <?php [$type,$msg] = explode(':', $flash, 2); ?>
-        <div class="flash flash-<?= $type === 'ok' ? 'success' : 'error' ?>"><?= htmlspecialchars($msg) ?></div>
+        <?php [$type,$msg] = array_pad(explode(':', $flash, 2), 2, ''); ?>
+        <div class="flash flash-<?= $type === 'ok' ? 'success' : 'error' ?>"><?= app_h($msg) ?></div>
       <?php endif; ?>
 
       <!-- ── Content pages table ── -->
@@ -120,11 +153,11 @@ $typeLabel  = ['static'=>'Static Page','blog'=>'Blog Post'];
             <?php foreach ($pages as $page): ?>
             <tr>
               <td class="font-600"><?= htmlspecialchars($page['pageTitle']) ?></td>
-              <td class="text-muted"><?= $typeLabel[$page['pageType']] ?? $page['pageType'] ?></td>
+              <td class="text-muted"><?= app_h($typeLabel[$page['pageType']] ?? (string)$page['pageType']) ?></td>
               <td>
                 <span class="badge badge-muted" style="gap:5px">
                   <i class="fas fa-globe" style="font-size:10px"></i>
-                  <?= strtoupper($langLabel[$page['language']] ?? $page['language']) ?>
+                  <?= app_h(strtoupper((string)($langLabel[$page['language']] ?? (string)$page['language']))) ?>
                 </span>
               </td>
               <td>

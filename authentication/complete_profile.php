@@ -102,6 +102,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $errors[] = "Date of birth must use DD/MM/YYYY format.";
     }
 
+    if (!app_is_valid_username($username)) {
+        $errors[] = "Username must be 3-32 characters and use only letters, numbers, dots, underscores, or hyphens.";
+    }
+
     // Phone format
     if (!preg_match('/^\+?[0-9]{7,15}$/', $phone)) {
         $errors[] = "Phone number is not valid!";
@@ -723,6 +727,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         $("#username").on("blur", function () {
             const username = $(this).val().trim();
+            const csrfToken = $("input[name='csrf_token']").first().val() || "";
+            const usernamePattern = /^[A-Za-z0-9._-]{3,32}$/;
 
             if (username.length === 0) {
                 $("#username-status").text("Please enter a username.");
@@ -732,10 +738,22 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 return;
             }
 
-            $.post("check_username.php", { username }, function (response) {
+            if (!usernamePattern.test(username)) {
+                $("#username-status").text("Use 3-32 letters, numbers, dots, underscores, or hyphens.");
+                $("#username").addClass("is-invalid");
+                usernameValid = false;
+                usernameChecked = true;
+                return;
+            }
+
+            $.post("check_username.php", { username, csrf_token: csrfToken }, function (response) {
                 usernameChecked = true;
                 if (response === "taken") {
                     $("#username-status").text("This username already exists, please choose a different one.");
+                    $("#username").addClass("is-invalid");
+                    usernameValid = false;
+                } else if (response === "invalid") {
+                    $("#username-status").text("Use 3-32 letters, numbers, dots, underscores, or hyphens.");
                     $("#username").addClass("is-invalid");
                     usernameValid = false;
                 } else {
@@ -743,6 +761,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $("#username").removeClass("is-invalid");
                     usernameValid = true;
                 }
+            }).fail(function () {
+                usernameChecked = false;
+                usernameValid = false;
+                $("#username-status").text("We couldn't verify this username right now. Please try again.");
+                $("#username").addClass("is-invalid");
             });
         });
 

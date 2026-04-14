@@ -16,6 +16,96 @@ if (!function_exists('app_h')) {
     }
 }
 
+if (!function_exists('app_is_https_request')) {
+    function app_is_https_request(): bool
+    {
+        $forwardedProto = trim((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+        if ($forwardedProto !== '') {
+            $forwardedProto = strtolower(trim(explode(',', $forwardedProto)[0]));
+            if ($forwardedProto === 'https') {
+                return true;
+            }
+        }
+
+        return !empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off';
+    }
+}
+
+if (!function_exists('app_harden_session_cookie')) {
+    function app_harden_session_cookie(): void
+    {
+        if (headers_sent() || session_status() !== PHP_SESSION_ACTIVE) {
+            return;
+        }
+
+        $sessionName = session_name();
+        $sessionId = session_id();
+        if ($sessionName === '' || $sessionId === '') {
+            return;
+        }
+
+        $params = session_get_cookie_params();
+        $lifetime = (int)($params['lifetime'] ?? 0);
+        $expires = $lifetime > 0 ? (time() + $lifetime) : 0;
+        $path = (string)($params['path'] ?? '/');
+        if ($path === '') {
+            $path = '/';
+        }
+
+        $options = [
+            'expires' => $expires,
+            'path' => $path,
+            'domain' => (string)($params['domain'] ?? ''),
+            'secure' => app_is_https_request(),
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ];
+
+        if (PHP_VERSION_ID >= 70300) {
+            setcookie($sessionName, $sessionId, $options);
+            return;
+        }
+
+        $cookiePath = $options['path'] . '; samesite=' . $options['samesite'];
+        setcookie(
+            $sessionName,
+            $sessionId,
+            $options['expires'],
+            $cookiePath,
+            $options['domain'],
+            $options['secure'],
+            $options['httponly']
+        );
+    }
+}
+
+if (!function_exists('app_apply_security_headers')) {
+    function app_apply_security_headers(): void
+    {
+        if (headers_sent()) {
+            return;
+        }
+
+        if (function_exists('header_remove')) {
+            @header_remove('X-Powered-By');
+        }
+
+        header('X-Frame-Options: SAMEORIGIN');
+        header('X-Content-Type-Options: nosniff');
+        header('Referrer-Policy: strict-origin-when-cross-origin');
+        header('Permissions-Policy: camera=(), microphone=(), geolocation=(self)');
+        header('Cross-Origin-Opener-Policy: same-origin-allow-popups');
+        header("Content-Security-Policy: base-uri 'self'; frame-ancestors 'self'; object-src 'none'; form-action 'self' https://www.paypal.com https://www.sandbox.paypal.com; upgrade-insecure-requests");
+    }
+}
+
+if (!function_exists('app_is_valid_username')) {
+    function app_is_valid_username(string $username): bool
+    {
+        return (bool)preg_match('/^[A-Za-z0-9._-]{3,32}$/', trim($username));
+    }
+}
+
 if (!function_exists('app_csrf_token')) {
     function app_csrf_token(): string
     {

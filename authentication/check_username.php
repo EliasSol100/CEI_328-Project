@@ -1,11 +1,24 @@
 <?php
 session_start();
 require_once __DIR__ . "/database.php";
+require_once __DIR__ . "/../include/security.php";
 
 header("Content-Type: text/plain; charset=UTF-8");
 
+if (($_SERVER["REQUEST_METHOD"] ?? "GET") !== "POST") {
+    http_response_code(405);
+    echo "invalid";
+    exit();
+}
+
+if (!app_verify_csrf()) {
+    http_response_code(403);
+    echo "forbidden";
+    exit();
+}
+
 $username = trim($_POST["username"] ?? "");
-if ($username === "") {
+if (!app_is_valid_username($username)) {
     echo "invalid";
     exit();
 }

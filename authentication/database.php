@@ -1,6 +1,7 @@
 <?php
 // Enable detailed error reporting
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+require_once dirname(__DIR__) . '/include/security.php';
 
 if (!function_exists('app_load_env_file')) {
     function app_load_env_file(string $filePath): void
@@ -130,6 +131,8 @@ if (!function_exists('app_url')) {
 
 // Shared hosting usually does not inject .env into getenv(), so load it manually when present.
 app_load_env_file(dirname(__DIR__) . '/.env');
+app_apply_security_headers();
+app_harden_session_cookie();
 
 $hostName = app_env_value('DB_HOST', '127.0.0.1') ?? '127.0.0.1';
 $dbUser = app_env_value('DB_USER', 'root') ?? 'root';
