@@ -114,6 +114,8 @@ header.header .mobile-nav-toggle {
     width: 42px;
     height: 42px;
     padding: 0;
+    font-size: 0;
+    line-height: 0;
     border: 1px solid rgba(106, 13, 173, 0.12);
     border-radius: 12px;
     background: #fff;
@@ -121,6 +123,8 @@ header.header .mobile-nav-toggle {
     align-items: center;
     justify-content: center;
     cursor: pointer;
+    flex-shrink: 0;
+    overflow: hidden;
     transition: background-color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
 }
 
@@ -146,7 +150,9 @@ header.header .mobile-nav-icon::after {
 }
 
 header.header .mobile-nav-icon {
+    display: inline-block;
     position: relative;
+    flex: 0 0 18px;
 }
 
 header.header .mobile-nav-icon::before,

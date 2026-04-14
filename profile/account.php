@@ -1003,9 +1003,9 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
           href="https://cdnjs.cloudflare.com/ajax/libs/country-select-js/2.1.0/css/countrySelect.min.css" />
 
     <!-- Storefront global styles -->
-    <link rel="stylesheet" href="../assets/styling/styles.css">
-    <link rel="stylesheet" href="../assets/styling/header.css">
-    <link rel="stylesheet" href="../assets/styling/account.css">
+    <link rel="stylesheet" href="../assets/styling/styles.css?v=<?= (int)@filemtime(__DIR__ . '/../assets/styling/styles.css') ?>">
+    <link rel="stylesheet" href="../assets/styling/header.css?v=<?= (int)@filemtime(__DIR__ . '/../assets/styling/header.css') ?>">
+    <link rel="stylesheet" href="../assets/styling/account.css?v=<?= (int)@filemtime(__DIR__ . '/../assets/styling/account.css') ?>">
 
     <!-- Translations -->
     <script src="../assets/js/translations.js" defer></script>

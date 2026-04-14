@@ -278,13 +278,27 @@ try {
 /* ===== Helpers ===== */
 
 function readRequestPayload(): array {
-    $ct = $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '';
-    if (stripos($ct, 'application/json') !== false) {
-        $raw = file_get_contents('php://input');
-        $data = json_decode($raw ?: '[]', true);
-        return is_array($data) ? $data : [];
+    if (!empty($_POST) && is_array($_POST)) {
+        return $_POST;
     }
-    return $_POST ?? [];
+
+    $raw = file_get_contents('php://input');
+    if (is_string($raw)) {
+        $trimmed = trim($raw);
+        if ($trimmed !== '') {
+            $data = json_decode($trimmed, true);
+            if (is_array($data)) {
+                return $data;
+            }
+
+            parse_str($trimmed, $parsed);
+            if (is_array($parsed) && !empty($parsed)) {
+                return $parsed;
+            }
+        }
+    }
+
+    return [];
 }
 function toInt($v): ?int {
     if ($v === null || $v === '') return null;

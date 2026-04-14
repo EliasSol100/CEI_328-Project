@@ -110,18 +110,20 @@
                 body: new FormData(form),
                 headers: {
                     "X-Requested-With": "XMLHttpRequest",
-                    "Accept": "application/json"
+                    "Accept": "application/json",
+                    "X-CSRF-Token": window.APP_CSRF_TOKEN || ""
                 },
                 credentials: "same-origin"
             });
 
-            if (!response.ok) {
-                throw new Error("Wishlist request failed (" + response.status + ").");
-            }
-
             const raw = await response.text();
             const cleaned = raw.replace(/^\uFEFF+/, "").trim();
             const data = cleaned ? JSON.parse(cleaned) : null;
+
+            if (!response.ok) {
+                throw new Error((data && data.message) || ("Wishlist request failed (" + response.status + ")."));
+            }
+
             if (!data || !data.success) {
                 throw new Error((data && data.message) || "Could not update wishlist.");
             }

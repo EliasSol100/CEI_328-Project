@@ -576,8 +576,8 @@ if ($vpRes) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Creations by Athina - Shop</title>
-    <link rel="stylesheet" href="assets/styling/styles.css">
-    <link rel="stylesheet" href="assets/styling/header.css?v=5">
+    <link rel="stylesheet" href="assets/styling/styles.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/styles.css') ?>">
+    <link rel="stylesheet" href="assets/styling/header.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/header.css') ?>">
     <link rel="stylesheet" href="assets/styling/shopstyle.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/shopstyle.css') ?>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
@@ -948,7 +948,7 @@ if ($vpRes) {
     })();
     </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="assets/js/wishlist-live.js" defer></script>
+    <script src="assets/js/wishlist-live.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/wishlist-live.js') ?>" defer></script>
     <script>
     document.querySelectorAll('.shop-product-card.is-clickable').forEach(card => {
         const productUrl = card.dataset.productUrl;
@@ -1014,16 +1014,18 @@ if ($vpRes) {
     }
 
     function addToCart(productId, variationId) {
-        const body = { product_id: productId, quantity: 1 };
-        if (variationId) body.variation_id = variationId;
+        const body = new URLSearchParams();
+        body.set('product_id', String(productId));
+        body.set('quantity', '1');
+        if (variationId) body.set('variation_id', String(variationId));
 
         return fetch('cart_api.php', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
                 'X-CSRF-Token': window.APP_CSRF_TOKEN || ''
             },
-            body: JSON.stringify(body)
+            body: body.toString()
         })
         .then(parseJsonResponse)
         .then(data => {

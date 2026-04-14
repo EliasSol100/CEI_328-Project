@@ -22,9 +22,9 @@ $instagramUrl = 'https://www.instagram.com/creations.by.athina/';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Creations by Athina - Custom Order</title>
-    <link rel="stylesheet" href="assets/styling/styles.css">
-    <link rel="stylesheet" href="assets/styling/header.css?v=5">
-    <link rel="stylesheet" href="assets/styling/custom_order.css?v=3">
+    <link rel="stylesheet" href="assets/styling/styles.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/styles.css') ?>">
+    <link rel="stylesheet" href="assets/styling/header.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/header.css') ?>">
+    <link rel="stylesheet" href="assets/styling/custom_order.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/custom_order.css') ?>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/translations.js') ?>" defer></script>
     <script src="assets/js/custom_order_translations.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/custom_order_translations.js') ?>" defer></script>

@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 session_start();
 require_once __DIR__ . "/authentication/database.php";
 require_once __DIR__ . "/authentication/get_config.php";
@@ -903,12 +903,12 @@ if ($storedCouponCode !== '') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= htmlspecialchars((string)$product["nameEN"]) ?> - <?= htmlspecialchars($systemTitle) ?></title>
-    <link rel="stylesheet" href="assets/styling/styles.css">
-    <link rel="stylesheet" href="assets/styling/header.css">
-    <link rel="stylesheet" href="assets/styling/product_details.css">
+    <link rel="stylesheet" href="assets/styling/styles.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/styles.css') ?>">
+    <link rel="stylesheet" href="assets/styling/header.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/header.css') ?>">
+    <link rel="stylesheet" href="assets/styling/product_details.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/product_details.css') ?>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . "/assets/js/translations.js") ?>" defer></script>
-    <script src="assets/js/wishlist-live.js" defer></script>
+    <script src="assets/js/wishlist-live.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/wishlist-live.js') ?>" defer></script>
     <style>
         .price-row {
             display: flex;
@@ -1837,6 +1837,36 @@ include __DIR__ . "/include/header.php";
         });
     }
 
+    function appendUrlEncodedValue(params, key, value) {
+        if (value === null || typeof value === "undefined") {
+            return;
+        }
+
+        if (Array.isArray(value)) {
+            value.forEach(function (item) {
+                appendUrlEncodedValue(params, key + "[]", item);
+            });
+            return;
+        }
+
+        if (typeof value === "object") {
+            Object.keys(value).forEach(function (childKey) {
+                appendUrlEncodedValue(params, key + "[" + childKey + "]", value[childKey]);
+            });
+            return;
+        }
+
+        params.append(key, String(value));
+    }
+
+    function buildUrlEncodedPayload(payload) {
+        var params = new URLSearchParams();
+        Object.keys(payload || {}).forEach(function (key) {
+            appendUrlEncodedValue(params, key, payload[key]);
+        });
+        return params.toString();
+    }
+
     function persistCoupon(action, code) {
         var payload = { action: action || "remove_coupon" };
         if (action === "set_coupon") {
@@ -1845,10 +1875,10 @@ include __DIR__ . "/include/header.php";
         return fetch("cart_api.php", {
             method: "POST",
             headers: {
-                "Content-Type": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                 "X-CSRF-Token": window.APP_CSRF_TOKEN || ""
             },
-            body: JSON.stringify(payload)
+            body: buildUrlEncodedPayload(payload)
         })
             .then(parseJsonResponse)
             .then(function (data) {
@@ -2015,10 +2045,10 @@ include __DIR__ . "/include/header.php";
             fetch("cart_api.php", {
                 method: "POST",
                 headers: {
-                    "Content-Type": "application/json",
+                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                     "X-CSRF-Token": window.APP_CSRF_TOKEN || ""
                 },
-                body: JSON.stringify(payload)
+                body: buildUrlEncodedPayload(payload)
             })
                 .then(parseJsonResponse)
                 .then(function (data) {

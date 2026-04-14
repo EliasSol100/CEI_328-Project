@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 error_reporting(E_ALL);
 ini_set('display_errors', '0');
 session_start();
@@ -124,8 +124,8 @@ function isOrderReviewEligible(mysqli $conn, int $orderId): bool {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Order Confirmed - <?= htmlspecialchars($system_title) ?></title>
-    <link rel="stylesheet" href="<?= $project ?>/assets/styling/styles.css">
-    <link rel="stylesheet" href="<?= $project ?>/assets/styling/header.css">
+    <link rel="stylesheet" href="<?= $project ?>/assets/styling/styles.css?v=<?= (int)@filemtime(__DIR__ . '/../assets/styling/styles.css') ?>">
+    <link rel="stylesheet" href="<?= $project ?>/assets/styling/header.css?v=<?= (int)@filemtime(__DIR__ . '/../assets/styling/header.css') ?>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         .success-container { max-width: 800px; margin: 60px auto; padding: 0 20px; }

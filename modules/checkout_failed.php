@@ -33,8 +33,8 @@ if (file_exists($configPath)) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Checkout Failed - <?= htmlspecialchars($system_title) ?></title>
-    <link rel="stylesheet" href="<?= $project ?>/assets/styling/styles.css">
-    <link rel="stylesheet" href="<?= $project ?>/assets/styling/header.css">
+    <link rel="stylesheet" href="<?= $project ?>/assets/styling/styles.css?v=<?= (int)@filemtime(__DIR__ . '/../assets/styling/styles.css') ?>">
+    <link rel="stylesheet" href="<?= $project ?>/assets/styling/header.css?v=<?= (int)@filemtime(__DIR__ . '/../assets/styling/header.css') ?>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="<?= $project ?>/assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/translations.js') ?>" defer></script>
     <style>

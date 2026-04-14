@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 session_start();
 require_once "authentication/database.php";
 require_once "include/security.php";
@@ -49,12 +49,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     app_require_csrf(false, "Invalid request token. Please refresh and try again.");
     $action = $_POST["action"] ?? "";
 
-    if ($action === "remove_wishlist_key") {
-        $key = $_POST["product_key"] ?? "";
+    if ($action === "remove_session_wishlist_item") {
+        $wishlistValue = trim((string)($_POST["wishlist_value"] ?? ""));
         if (isset($_SESSION["wishlist"]) && is_array($_SESSION["wishlist"])) {
             $_SESSION["wishlist"] = array_values(array_filter(
                 $_SESSION["wishlist"],
-                fn($v) => $v !== $key
+                fn($v) => (string)$v !== $wishlistValue
             ));
             $message = "Item removed from wishlist.";
         }
@@ -99,14 +99,46 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 $sessionItems = [];
 $sessionKeys = isset($_SESSION["wishlist"]) && is_array($_SESSION["wishlist"]) ? array_unique($_SESSION["wishlist"]) : [];
+$sessionProductIds = [];
 foreach ($sessionKeys as $key) {
     if (isset($sessionCatalog[$key])) {
         $sessionItems[] = [
+            "wishlistValue" => (string)$key,
             "key" => $key,
             "name" => $sessionCatalog[$key]["name"],
             "price" => $sessionCatalog[$key]["price"],
             "image" => $sessionCatalog[$key]["image"] ?? "",
         ];
+        continue;
+    }
+
+    if (is_numeric((string)$key) && (int)$key > 0) {
+        $sessionProductIds[] = (int)$key;
+    }
+}
+
+if (!empty($sessionProductIds)) {
+    $sessionProductIds = array_values(array_unique($sessionProductIds));
+    $idList = implode(",", array_map("intval", $sessionProductIds));
+    $sql = "
+        SELECT p.productID, p.nameEN, p.basePrice, MIN(ph.imageID) AS imageID
+        FROM products p
+        LEFT JOIN photos ph ON ph.productID = p.productID
+        WHERE p.productID IN ({$idList})
+        GROUP BY p.productID, p.nameEN, p.basePrice
+        ORDER BY p.productID DESC
+    ";
+    $res = $conn->query($sql);
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $sessionItems[] = [
+                "wishlistValue" => (string)((int)$row["productID"]),
+                "productID" => (int)$row["productID"],
+                "name" => (string)$row["nameEN"],
+                "price" => (float)$row["basePrice"],
+                "imageID" => isset($row["imageID"]) ? (int)$row["imageID"] : 0,
+            ];
+        }
     }
 }
 
@@ -146,9 +178,9 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Wishlist</title>
-    <link rel="stylesheet" href="assets/styling/styles.css">
-    <link rel="stylesheet" href="assets/styling/header.css?v=5">
-    <link rel="stylesheet" href="assets/styling/wishlist.css">
+    <link rel="stylesheet" href="assets/styling/styles.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/styles.css') ?>">
+    <link rel="stylesheet" href="assets/styling/header.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/header.css') ?>">
+    <link rel="stylesheet" href="assets/styling/wishlist.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/wishlist.css') ?>">
     <script src="assets/js/translations.js" defer></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -173,12 +205,20 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
                 <p class="wishlist-empty" data-translate="wishlistPageEmpty">Your wishlist is empty.</p>
             <?php else: ?>
                 <ul class="wishlist-list">
-                                        <?php foreach ($sessionItems as $item): ?>
+                    <?php foreach ($sessionItems as $item): ?>
                         <li>
                             <div class="wishlist-item-main">
-                                <img class="wishlist-thumb"
-                                     src="<?= htmlspecialchars($item["image"]) ?>"
-                                     alt="<?= htmlspecialchars($item["name"]) ?>">
+                                <?php if (!empty($item["image"])): ?>
+                                    <img class="wishlist-thumb"
+                                         src="<?= htmlspecialchars($item["image"]) ?>"
+                                         alt="<?= htmlspecialchars($item["name"]) ?>">
+                                <?php elseif (!empty($item["imageID"])): ?>
+                                    <img class="wishlist-thumb"
+                                         src="modules/admin/ajax/product_image.php?id=<?= (int)$item["imageID"] ?>"
+                                         alt="<?= htmlspecialchars($item["name"]) ?>">
+                                <?php else: ?>
+                                    <div class="wishlist-thumb placeholder"><i class="fas fa-image"></i></div>
+                                <?php endif; ?>
                                 <div class="wishlist-item-info">
                                     <strong<?= app_translate_text_attrs((string)$item["name"], (string)$item["name"]) ?>><?= htmlspecialchars($item["name"]) ?></strong>
                                     <span>&euro;<?= number_format((float)$item["price"], 0) ?></span>
@@ -186,8 +226,8 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
                             </div>
                             <form method="post" action="wishlist.php">
                                 <?= app_csrf_input() ?>
-                                <input type="hidden" name="action" value="remove_wishlist_key">
-                                <input type="hidden" name="product_key" value="<?= htmlspecialchars($item["key"]) ?>">
+                                <input type="hidden" name="action" value="remove_session_wishlist_item">
+                                <input type="hidden" name="wishlist_value" value="<?= htmlspecialchars((string)$item["wishlistValue"]) ?>">
                                 <button type="submit" aria-label="Remove item"<?= app_translate_aria_attrs('Remove item', 'Αφαίρεση προϊόντος') ?>><i class="fas fa-trash"></i></button>
                             </form>
                         </li>
