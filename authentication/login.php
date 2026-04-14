@@ -24,6 +24,8 @@ if (isset($_SESSION["user"])) {
 
 $googleState = app_oauth_state('google');
 $facebookState = app_oauth_state('facebook');
+$googleRedirectUri = app_url('/authentication/google_callback.php');
+$facebookRedirectUri = app_url('/authentication/facebook_callback.php');
 $_SESSION['oauth_origin_google'] = 'login';
 $_SESSION['oauth_origin_facebook'] = 'login';
 
@@ -229,7 +231,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         document.getElementById('google-signin-btn').addEventListener('click', function () {
             const params = new URLSearchParams({
                 client_id: '901502356414-324b839ks2vas27hoq8hq0448qa6a0oj.apps.googleusercontent.com',
-                redirect_uri: 'http://localhost/ATHINA-ESHOP/authentication/google_callback.php',
+                redirect_uri: <?= json_encode($googleRedirectUri, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
                 response_type: 'code',
                 scope: 'email profile',
                 access_type: 'online',
@@ -245,7 +247,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         document.getElementById('facebook-signin-btn').addEventListener('click', function () {
             const params = new URLSearchParams({
                 client_id: '924345056652857',
-                redirect_uri: 'http://localhost/ATHINA-ESHOP/authentication/facebook_callback.php',
+                redirect_uri: <?= json_encode($facebookRedirectUri, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
                 response_type: 'code',
                 auth_type: 'rerequest',
                 state: <?= json_encode($facebookState, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>

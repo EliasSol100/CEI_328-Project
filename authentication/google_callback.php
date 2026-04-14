@@ -8,13 +8,12 @@ require_once "database.php";
 require_once __DIR__ . "/../include/security.php";
 
 /*
- * IMPORTANT (localhost):
  * Make sure this redirect URI is also configured in your Google Cloud console
- * and matches the one you use in registration.php.
+ * and matches the current domain for this deployment.
  */
 $clientID     = '901502356414-324b839ks2vas27hoq8hq0448qa6a0oj.apps.googleusercontent.com';
 $clientSecret = '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';
-$redirectUri  = 'http://localhost/ATHINA-ESHOP/authentication/google_callback.php';
+$redirectUri  = app_url('/authentication/google_callback.php');
 $redirectPage = (($_SESSION['oauth_origin_google'] ?? 'registration') === 'login') ? 'login.php' : 'registration.php';
 unset($_SESSION['oauth_origin_google']);
 

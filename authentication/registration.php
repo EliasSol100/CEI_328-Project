@@ -8,6 +8,8 @@ require_once "database.php";
 
 $googleState = app_oauth_state('google');
 $facebookState = app_oauth_state('facebook');
+$googleRedirectUri = app_url('/authentication/google_callback.php');
+$facebookRedirectUri = app_url('/authentication/facebook_callback.php');
 $_SESSION['oauth_origin_google'] = 'registration';
 $_SESSION['oauth_origin_facebook'] = 'registration';
 
@@ -251,7 +253,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
         // Παράμετροι για το Google OAuth2 request
         const params = new URLSearchParams({
             client_id: '901502356414-324b839ks2vas27hoq8hq0448qa6a0oj.apps.googleusercontent.com', // ID εφαρμογής από Google Console
-            redirect_uri: 'http://localhost/ATHINA-ESHOP/authentication/google_callback.php',       // Σελίδα που θα λάβει την απάντηση
+            redirect_uri: <?= json_encode($googleRedirectUri, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,       // Σελίδα που θα λάβει την απάντηση
             response_type: 'code',           // Ζητάμε authorization code (όχι token απευθείας)
             scope: 'email profile',          // Θέλουμε πρόσβαση σε email και βασικό προφίλ
             access_type: 'online',           // Δεν χρειαζόμαστε offline access
@@ -271,7 +273,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
         // Παράμετροι για το Facebook OAuth2 request
         const params = new URLSearchParams({
             client_id: '924345056652857',    // ID εφαρμογής από Facebook Developers
-            redirect_uri: 'http://localhost/ATHINA-ESHOP/authentication/facebook_callback.php', // Σελίδα που θα λάβει την απάντηση
+            redirect_uri: <?= json_encode($facebookRedirectUri, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>, // Σελίδα που θα λάβει την απάντηση
             response_type: 'code',           // Ζητάμε authorization code
             auth_type: 'rerequest'           // Ξαναζητάμε δικαιώματα αν τα είχε αρνηθεί παλιά
         });
@@ -291,7 +293,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
         const params = new URLSearchParams({
             state: <?= json_encode($googleState, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
             client_id: '901502356414-324b839ks2vas27hoq8hq0448qa6a0oj.apps.googleusercontent.com',
-            redirect_uri: 'http://localhost/ATHINA-ESHOP/authentication/google_callback.php',
+            redirect_uri: <?= json_encode($googleRedirectUri, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
             response_type: 'code',
             scope: 'email profile',
             access_type: 'online',
@@ -309,7 +311,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
         const params = new URLSearchParams({
             state: <?= json_encode($facebookState, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
             client_id: '924345056652857',
-            redirect_uri: 'http://localhost/ATHINA-ESHOP/authentication/facebook_callback.php',
+            redirect_uri: <?= json_encode($facebookRedirectUri, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
             response_type: 'code',
             auth_type: 'rerequest'
         });

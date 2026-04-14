@@ -1,0 +1,9 @@
+RewriteEngine On
+
+# Keep internal project files off the public internet on the shared host.
+RewriteRule (^|/)\.(?!well-known/) - [F,L]
+RewriteRule ^(?:sql|docker|scripts|tmp)(?:/|$) - [F,L,NC]
+
+<FilesMatch "^(?:\.env|Dockerfile|docker-compose\.yml|\.dockerignore|\.gitattributes|\.gitignore)$">
+    Require all denied
+</FilesMatch>

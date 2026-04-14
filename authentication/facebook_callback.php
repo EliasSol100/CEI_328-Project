@@ -8,13 +8,12 @@ require_once "database.php";
 require_once __DIR__ . "/../include/security.php";
 
 /*
- * Facebook OAuth config (localhost)
- * Make sure the redirect URI below is added in your Facebook app:
- * http://localhost/ATHINA-ESHOP/authentication/facebook_callback.php
+ * Make sure the redirect URI below is added in your Facebook app
+ * and matches the current domain for this deployment.
  */
 $appId        = '924345056652857';
 $appSecret    = '961389e18dd6d117327fb0ad668e8d0e';
-$redirectUri  = 'http://localhost/ATHINA-ESHOP/authentication/facebook_callback.php';
+$redirectUri  = app_url('/authentication/facebook_callback.php');
 $redirectPage = (($_SESSION['oauth_origin_facebook'] ?? 'registration') === 'login') ? 'login.php' : 'registration.php';
 unset($_SESSION['oauth_origin_facebook']);
 
