@@ -3,15 +3,18 @@ session_start();
 require_once __DIR__ . "/../include/security.php";
 require_once "database.php";
 
+$loginError = '';
+$loginInputValue = trim((string)($_POST["login_input"] ?? ''));
+
 if (isset($_GET['redirect'])) {
     rememberAuthRedirectTarget((string)$_GET['redirect']);
 }
 
-// Αν ο χρήστης είναι ήδη logged in, δεν χρειάζεται να ξαναμπεί — πήγαινε στο index
 if (isset($_SESSION["user"])) {
     $currentUser = $_SESSION["user"];
     $profileComplete = !empty($currentUser["profile_complete"]);
     $isVerified = !empty($currentUser["is_verified"]);
+
     if (!$profileComplete) {
         header("Location: complete_profile.php");
     } elseif (!$isVerified) {
@@ -29,8 +32,92 @@ $facebookRedirectUri = app_url('/authentication/facebook_callback.php');
 $_SESSION['oauth_origin_google'] = 'login';
 $_SESSION['oauth_origin_facebook'] = 'login';
 
-if ($_SERVER["REQUEST_METHOD"] === "POST") {
+if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["login"])) {
     app_require_csrf(false, "Invalid request token. Please refresh and try again.");
+
+    $password = (string)($_POST["password"] ?? '');
+
+    if ($loginInputValue === '' || $password === '') {
+        $loginError = "Please enter both your email/username and password.";
+    } else {
+        $sql = "SELECT *, userID AS id FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) LIMIT 1";
+        $stmt = mysqli_stmt_init($conn);
+
+        if (!mysqli_stmt_prepare($stmt, $sql)) {
+            $loginError = "Something went wrong. Please try again.";
+        } else {
+            mysqli_stmt_bind_param($stmt, "ss", $loginInputValue, $loginInputValue);
+            mysqli_stmt_execute($stmt);
+            $result = mysqli_stmt_get_result($stmt);
+            $user = $result ? mysqli_fetch_assoc($result) : null;
+            mysqli_stmt_close($stmt);
+
+            if (!$user) {
+                $loginError = "Email or username not found.";
+            } elseif (!password_verify($password, (string)($user["password"] ?? ''))) {
+                $loginError = "Incorrect password.";
+            } else {
+                session_regenerate_id(true);
+
+                $prevLogin = null;
+                $getLogin = $conn->prepare("SELECT last_login FROM users WHERE userID = ?");
+                if ($getLogin) {
+                    $getLogin->bind_param("i", $user['id']);
+                    $getLogin->execute();
+                    $loginResult = $getLogin->get_result();
+                    if ($row = $loginResult->fetch_assoc()) {
+                        $prevLogin = $row['last_login'];
+                    }
+                    $getLogin->close();
+                }
+
+                $updateLogin = $conn->prepare("UPDATE users SET last_login = NOW() WHERE userID = ?");
+                if ($updateLogin) {
+                    $updateLogin->bind_param("i", $user['id']);
+                    $updateLogin->execute();
+                    $updateLogin->close();
+                }
+
+                $fieldsComplete =
+                    !empty($user["country"]) &&
+                    !empty($user["city"]) &&
+                    !empty($user["address"]) &&
+                    !empty($user["postcode"]) &&
+                    !empty($user["dob"]) &&
+                    !empty($user["phone"]);
+
+                $isVerified = ((int)($user["is_verified"] ?? 0) === 1);
+                $role = (string)($user["role"] ?? 'user');
+
+                $_SESSION["user"] = [
+                    "id" => $user["id"],
+                    "email" => $user["email"],
+                    "full_name" => $user["full_name"],
+                    "role" => $role,
+                    "last_login" => $prevLogin,
+                    "profile_complete" => $fieldsComplete ? 1 : 0,
+                    "is_verified" => $isVerified ? 1 : 0,
+                ];
+                $_SESSION['user_id'] = $user['id'];
+                $_SESSION['role'] = $role;
+                $_SESSION['email'] = $user['email'];
+                $_SESSION['full_name'] = $user['full_name'];
+
+                if (!$fieldsComplete) {
+                    header("Location: complete_profile.php");
+                    exit();
+                }
+
+                if (!$isVerified) {
+                    header("Location: verify.php");
+                    exit();
+                }
+
+                header("Location: " . consumeAuthRedirectTarget("../index.php"));
+                exit();
+            }
+        }
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -44,7 +131,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     <link rel="stylesheet" href="../assets/styling/style.css">
     <link rel="stylesheet" href="../assets/styling/authentication.css">
 </head>
-
 <body class="registration_page">
 
     <div class="wizard-box">
@@ -59,7 +145,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         </div>
 
         <div class="wizard-content">
-            <!-- Social Sign-In -->
             <div class="mb-3">
                 <button
                     type="button"
@@ -92,101 +177,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 <?php unset($_SESSION["registration_error"]); ?>
             <?php endif; ?>
 
-            <?php
-            // Εκτελείται μόνο όταν ο χρήστης υποβάλλει το form (πατάει Login)
-            if (isset($_POST["login"])) {
-                $loginInput = trim($_POST["login_input"]); // email ή username
-                $password   = $_POST["password"];
-
-                // Ψάχνει στη DB με email ή username (case-insensitive)
-                // Το userID AS id το κάνει alias ώστε να δουλεύει παντού ως $user["id"]
-                $sql  = "SELECT *, userID AS id FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?)";
-                $stmt = mysqli_stmt_init($conn);
-
-                if (mysqli_stmt_prepare($stmt, $sql)) {
-                    // Περνάει το loginInput δύο φορές: μία για email, μία για username
-                    mysqli_stmt_bind_param($stmt, "ss", $loginInput, $loginInput);
-                    mysqli_stmt_execute($stmt);
-                    $result = mysqli_stmt_get_result($stmt);
-
-                    if ($user = mysqli_fetch_assoc($result)) {
-                        // password_verify: συγκρίνει plain text με το hashed password της DB
-                        if (password_verify($password, $user["password"])) {
-
-                            // Αποθηκεύει την προηγούμενη σύνδεση πριν την αντικαταστήσει
-                            $prevLogin = null;
-                            $getLogin  = $conn->prepare("SELECT last_login FROM users WHERE userID = ?");
-                            $getLogin->bind_param("i", $user['id']);
-                            $getLogin->execute();
-                            $loginResult = $getLogin->get_result();
-                            if ($row = $loginResult->fetch_assoc()) {
-                                $prevLogin = $row['last_login'];
-                            }
-                            $getLogin->close();
-
-                            // Ενημερώνει το last_login στη DB με την τωρινή ώρα
-                            $updateLogin = $conn->prepare("UPDATE users SET last_login = NOW() WHERE userID = ?");
-                            $updateLogin->bind_param("i", $user['id']); //bind_param san to pdo
-                            $updateLogin->execute();
-                            $updateLogin->close();
-
-                            // Ελέγχει αν τα υποχρεωτικά πεδία προφίλ είναι συμπληρωμένα
-                            $fieldsComplete =
-                                !empty($user["country"])  &&
-                                !empty($user["city"])     &&
-                                !empty($user["address"])  &&
-                                !empty($user["postcode"]) &&
-                                !empty($user["dob"])      && //date of birth
-                                !empty($user["phone"]);
-
-                            // Ελέγχει αν το email έχει επαληθευτεί (0 ή 1 στη DB)
-                            $isVerified = ((int)($user["is_verified"] ?? 0) === 1);
-                            //$user["is_verified"] = "1"  → (int)"1" = 1 → 1 === 1 → true
-                            //$user["is_verified"] = "0"  → (int)"0" = 0 → 0 === 1 → false
-                            //$user["is_verified"] = null → ?? 0       → 0 === 1 → false
-
-                            // Δημιουργεί το session — αυτό είναι το "login"
-                            $_SESSION["user"] = [
-                                "id"               => $user["id"],
-                                "email"            => $user["email"],
-                                "full_name"        => $user["full_name"],
-                                "role"             => $user["role"],
-                                "last_login"       => $prevLogin,
-                                "profile_complete" => $fieldsComplete ? 1 : 0,
-                                "is_verified"      => $isVerified ? 1 : 0
-                            ];
-                            // Παλιές μεταβλητές session για backwards compatibility με άλλες σελίδες
-                            $_SESSION['user_id']   = $user['id'];
-                            $_SESSION['role']      = $user['role'];
-                            $_SESSION['email']     = $user['email'];
-                            $_SESSION['full_name'] = $user['full_name'];
-
-                            // Αν το προφίλ δεν είναι ολοκληρωμένο, πήγαινε στο wizard
-                            if (!$fieldsComplete) {
-                                header("Location: complete_profile.php");
-                                exit();
-                            }
-
-                            // Αν το email δεν είναι verified, πήγαινε στην επαλήθευση
-                            if (!$isVerified) {
-                                header("Location: verify.php");
-                                exit();
-                            }
-
-                            // Όλα εντάξει — πήγαινε στην αρχική
-                            header("Location: " . consumeAuthRedirectTarget("../index.php"));
-                            exit();
-                        } else {
-                            echo "<div class='alert alert-danger'>Incorrect password.</div>";
-                        }
-                    } else {
-                        echo "<div class='alert alert-danger'>Email or username not found.</div>";
-                    }
-                } else {
-                    echo "<div class='alert alert-danger'>Something went wrong. Please try again.</div>";
-                }
-            }
-            ?>
+            <?php if ($loginError !== ''): ?>
+                <div class="alert alert-danger"><?= htmlspecialchars($loginError) ?></div>
+            <?php endif; ?>
 
             <form action="login.php" method="post" class="mt-3">
                 <?= app_csrf_input() ?>
@@ -198,6 +191,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         id="login_input"
                         name="login_input"
                         placeholder="e.g. user150 or user@example.com"
+                        value="<?= htmlspecialchars($loginInputValue) ?>"
                         required
                     >
                 </div>
@@ -240,8 +234,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 state: <?= json_encode($googleState, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>
             });
 
-            const authUrl = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
-            window.location.href = authUrl;
+            window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
         });
 
         document.getElementById('facebook-signin-btn').addEventListener('click', function () {
@@ -253,8 +246,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 state: <?= json_encode($facebookState, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>
             });
 
-            const fbAuthUrl = 'https://www.facebook.com/v18.0/dialog/oauth?' + params.toString();
-            window.location.href = fbAuthUrl;
+            window.location.href = 'https://www.facebook.com/v18.0/dialog/oauth?' + params.toString();
         });
 
         $(document).ready(function () {
