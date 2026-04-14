@@ -64,7 +64,7 @@ if ($isLoggedIn && !$initials) {
                 <!-- Language selector -->
                 <div class="language-selector" role="button" tabindex="0"<?= app_translate_aria_attrs('Toggle language', 'Αλλαγή γλώσσας') ?><?= app_translate_title_attrs('Toggle language', 'Αλλαγή γλώσσας') ?>>
                     <i class="fas fa-globe"></i>
-                    <span>EN</span>
+                    <span class="language-selector-label">EN</span>
                 </div>
 
                 <?php

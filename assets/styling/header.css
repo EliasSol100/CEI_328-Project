@@ -201,6 +201,7 @@ header.header .language-selector span {
     line-height: 1;
     color: #334155;
     font-weight: 500;
+    white-space: nowrap;
 }
 
 header.header .language-selector:hover {
@@ -598,19 +599,27 @@ header.header .admin-icon:hover {
     }
 
     header.header .utility-icons {
-        gap: 6px;
+        gap: 4px;
     }
 
     header.header .utility-icon,
-    header.header .language-selector,
     header.header .mobile-nav-toggle {
         width: 38px;
         min-width: 38px;
         height: 38px;
     }
 
+    header.header .language-selector {
+        width: auto;
+        min-width: 0;
+        height: 38px;
+        padding: 0 8px 0 4px;
+        gap: 5px;
+    }
+
     header.header .language-selector span {
-        display: none;
+        display: inline;
+        font-size: 17px;
     }
 
     header.header .admin-icon {

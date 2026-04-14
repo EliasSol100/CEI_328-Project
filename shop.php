@@ -592,6 +592,13 @@ if ($vpRes) {
         height: 100%;
         object-fit: cover;
     }
+    @media (max-width: 640px) {
+        .shop-carousel .carousel-item img {
+            object-fit: contain;
+            object-position: center center;
+            background: #fcf8ff;
+        }
+    }
     .shop-carousel .carousel-control-prev,
     .shop-carousel .carousel-control-next {
         width: 30px;

@@ -294,7 +294,23 @@ $homepageSettings = app_homepage_load_settings($conn);
     <section class="hero" style="background-image: url('<?= htmlspecialchars(app_homepage_asset_url($homepageSettings['hero_image']), ENT_QUOTES, 'UTF-8') ?>');">
         <div class="hero-overlay"></div>
         <div class="hero-content">
-            <div class="hero-copy">
+            <div class="hero-copy hero-copy-desktop">
+                <h1 class="hero-title" data-translate="heroTitle">
+                    Soft Handmade Crochet Treasures
+                </h1>
+                <p class="hero-subtitle" data-translate="heroSubtitle">
+                    Discover cozy plushies, thoughtful gifts, and charming crochet creations made with love by Athina.
+                </p>
+                <a href="shop.php" class="cta-button hero-cta-button">
+                    <span data-translate="shopNow">Shop Now</span>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <section class="hero-mobile-copy-section" aria-label="Homepage introduction">
+        <div class="container">
+            <div class="hero-copy hero-copy-mobile">
                 <h1 class="hero-title" data-translate="heroTitle">
                     Soft Handmade Crochet Treasures
                 </h1>

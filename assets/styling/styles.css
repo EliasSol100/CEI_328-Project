@@ -199,6 +199,10 @@ body.account-page .footer {
     margin: 0 auto;
 }
 
+.hero-mobile-copy-section {
+    display: none;
+}
+
 /* Shop by Collection Section */
 .shop-collection {
     padding: 80px 0;
@@ -875,32 +879,36 @@ body.account-page .footer {
     }
 
     .hero {
-        height: auto;
-        min-height: 420px;
-        padding: 28px 0;
-        background-position: center;
+        height: clamp(240px, 62vw, 340px);
+        min-height: 0;
+        padding: 0;
+        background-position: center top;
     }
 
     .hero-overlay {
         background:
-            linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(255, 255, 255, 0.56) 54%, rgba(255, 255, 255, 0.28) 100%);
+            linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.08) 55%, rgba(255, 255, 255, 0.12) 100%);
     }
 
     .hero-content {
-        padding: 0 14px;
-        align-items: flex-end;
+        display: none;
     }
 
-    .hero-copy {
+    .hero-mobile-copy-section {
+        display: block;
+        padding: 18px 0 6px;
+    }
+
+    .hero-copy-mobile {
         padding: 18px 16px;
         border-radius: 18px;
     }
 
-    .hero-title {
+    .hero-copy-mobile .hero-title {
         font-size: 28px;
     }
 
-    .hero-subtitle {
+    .hero-copy-mobile .hero-subtitle {
         font-size: 15px;
         margin-bottom: 22px;
     }
