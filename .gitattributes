@@ -1,0 +1,1 @@
+sql/athina_eshop.sql filter=lfs diff=lfs merge=lfs -text

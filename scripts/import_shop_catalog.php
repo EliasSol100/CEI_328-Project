@@ -39,7 +39,6 @@ function catalogEnsurePhotoStorageSchema(mysqli $conn): void
         $conn->query("ALTER TABLE photos MODIFY COLUMN photo MEDIUMBLOB NOT NULL");
     }
 }
-
 function catalogTableHasColumn(mysqli $conn, string $table, string $column): bool
 {
     $safeTable = $conn->real_escape_string($table);
@@ -165,6 +164,104 @@ function catalogSlugify(string $value): string
     return $value !== '' ? $value : 'asset';
 }
 
+function catalogLocalProductsRoot(): string
+{
+    return dirname(__DIR__) . '/uploads/assets/images/products';
+}
+
+function catalogCollectLocalSkuFiles(string $skuSlug): array
+{
+    static $cache = [];
+    if (isset($cache[$skuSlug])) {
+        return $cache[$skuSlug];
+    }
+
+    $root = catalogLocalProductsRoot() . '/' . $skuSlug;
+    if (!is_dir($root)) {
+        $cache[$skuSlug] = [];
+        return $cache[$skuSlug];
+    }
+
+    $files = [];
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS)
+    );
+    foreach ($iterator as $entry) {
+        if ($entry->isFile()) {
+            $files[] = str_replace('\\', '/', $entry->getPathname());
+        }
+    }
+
+    sort($files);
+    $cache[$skuSlug] = $files;
+    return $files;
+}
+
+function catalogResolveSourcePath(string $sku, string $folderRoot, string $relativePath): ?string
+{
+    $relativePath = ltrim(str_replace('\\', '/', $relativePath), '/');
+    $directSource = str_replace('\\', '/', rtrim($folderRoot, '/\\') . '/' . $relativePath);
+    if (is_file($directSource)) {
+        return $directSource;
+    }
+
+    $skuSlug = catalogSlugify($sku);
+    $localRoot = catalogLocalProductsRoot() . '/' . $skuSlug;
+    $directLocal = str_replace('\\', '/', rtrim($localRoot, '/\\') . '/' . $relativePath);
+    if (is_file($directLocal)) {
+        return $directLocal;
+    }
+
+    $files = catalogCollectLocalSkuFiles($skuSlug);
+    if (empty($files)) {
+        return null;
+    }
+
+    $expectedExt = strtolower((string)pathinfo($relativePath, PATHINFO_EXTENSION));
+    $expectedSlug = catalogSlugify((string)pathinfo($relativePath, PATHINFO_FILENAME));
+    $dirSlug = catalogSlugify(str_replace('\\', '/', dirname($relativePath)));
+    $matches = [];
+
+    foreach ($files as $path) {
+        $pathExt = strtolower((string)pathinfo($path, PATHINFO_EXTENSION));
+        if ($expectedExt !== '' && $pathExt !== $expectedExt) {
+            continue;
+        }
+
+        $pathSlug = catalogSlugify((string)pathinfo($path, PATHINFO_FILENAME));
+        $score = 0;
+
+        if ($pathSlug === $expectedSlug) {
+            $score += 60;
+        } elseif (str_ends_with($pathSlug, '-' . $expectedSlug) || str_ends_with($pathSlug, $expectedSlug)) {
+            $score += 45;
+        } elseif (str_contains($pathSlug, $expectedSlug)) {
+            $score += 20;
+        }
+
+        if ($dirSlug !== '' && $dirSlug !== '.' && str_contains(strtolower($path), '/' . $dirSlug . '/')) {
+            $score += 25;
+        }
+
+        if ($score > 0) {
+            $matches[] = ['path' => $path, 'score' => $score];
+        }
+    }
+
+    if (empty($matches)) {
+        return null;
+    }
+
+    usort($matches, static function (array $left, array $right): int {
+        if ($left['score'] === $right['score']) {
+            return strcmp((string)$left['path'], (string)$right['path']);
+        }
+        return $right['score'] <=> $left['score'];
+    });
+
+    return (string)$matches[0]['path'];
+}
+
 function catalogCopyAsset(string $sourcePath, string $relativeTargetPath): string
 {
     if (!is_file($sourcePath)) {
@@ -174,6 +271,16 @@ function catalogCopyAsset(string $sourcePath, string $relativeTargetPath): strin
     $relativeTargetPath = ltrim(str_replace('\\', '/', $relativeTargetPath), '/');
     $destinationPath = dirname(__DIR__) . '/' . $relativeTargetPath;
     catalogEnsureDirectory(dirname($destinationPath));
+
+    $sourceRealPath = realpath($sourcePath);
+    $destinationRealPath = realpath($destinationPath);
+    if (
+        $sourceRealPath !== false &&
+        $destinationRealPath !== false &&
+        strcasecmp($sourceRealPath, $destinationRealPath) === 0
+    ) {
+        return $relativeTargetPath;
+    }
 
     if (!copy($sourcePath, $destinationPath)) {
         throw new RuntimeException("Could not copy asset to {$relativeTargetPath}");
@@ -405,8 +512,8 @@ function catalogBuildPlushieWarningsEn(): array
 function catalogBuildPlushieWarningsGr(): array
 {
     return [
-        "Σημαντικό: Τα μικρά κομμάτια και τα ματάκια σε αυτό το λούτρινο απαιτούν επίβλεψη από γονείς για μωρά και μικρά παιδιά.",
-        "Αποποίηση ευθύνης: Οι φωτογραφίες αποτελούν μια κατά προσέγγιση απεικόνιση του τελικού χρώματος. Λόγω διαφορών στα υλικά, στις ρυθμίσεις των ψηφιακών οθονών και στις παραλλαγές παραγωγής, δεν μπορούμε να εγγυηθούμε ότι το χρώμα που βλέπετε στην οθόνη σας είναι ακριβώς το πραγματικό χρώμα του προϊόντος.",
+        "Î£Î·Î¼Î±Î½Ï„Î¹ÎºÏŒ: Î¤Î± Î¼Î¹ÎºÏÎ¬ ÎºÎ¿Î¼Î¼Î¬Ï„Î¹Î± ÎºÎ±Î¹ Ï„Î± Î¼Î±Ï„Î¬ÎºÎ¹Î± ÏƒÎµ Î±Ï…Ï„ÏŒ Ï„Î¿ Î»Î¿ÏÏ„ÏÎ¹Î½Î¿ Î±Ï€Î±Î¹Ï„Î¿ÏÎ½ ÎµÏ€Î¯Î²Î»ÎµÏˆÎ· Î±Ï€ÏŒ Î³Î¿Î½ÎµÎ¯Ï‚ Î³Î¹Î± Î¼Ï‰ÏÎ¬ ÎºÎ±Î¹ Î¼Î¹ÎºÏÎ¬ Ï€Î±Î¹Î´Î¹Î¬.",
+        "Î‘Ï€Î¿Ï€Î¿Î¯Î·ÏƒÎ· ÎµÏ…Î¸ÏÎ½Î·Ï‚: ÎŸÎ¹ Ï†Ï‰Ï„Î¿Î³ÏÎ±Ï†Î¯ÎµÏ‚ Î±Ï€Î¿Ï„ÎµÎ»Î¿ÏÎ½ Î¼Î¹Î± ÎºÎ±Ï„Î¬ Ï€ÏÎ¿ÏƒÎ­Î³Î³Î¹ÏƒÎ· Î±Ï€ÎµÎ¹ÎºÏŒÎ½Î¹ÏƒÎ· Ï„Î¿Ï… Ï„ÎµÎ»Î¹ÎºÎ¿Ï Ï‡ÏÏŽÎ¼Î±Ï„Î¿Ï‚. Î›ÏŒÎ³Ï‰ Î´Î¹Î±Ï†Î¿ÏÏŽÎ½ ÏƒÏ„Î± Ï…Î»Î¹ÎºÎ¬, ÏƒÏ„Î¹Ï‚ ÏÏ…Î¸Î¼Î¯ÏƒÎµÎ¹Ï‚ Ï„Ï‰Î½ ÏˆÎ·Ï†Î¹Î±ÎºÏŽÎ½ Î¿Î¸Î¿Î½ÏŽÎ½ ÎºÎ±Î¹ ÏƒÏ„Î¹Ï‚ Ï€Î±ÏÎ±Î»Î»Î±Î³Î­Ï‚ Ï€Î±ÏÎ±Î³Ï‰Î³Î®Ï‚, Î´ÎµÎ½ Î¼Ï€Î¿ÏÎ¿ÏÎ¼Îµ Î½Î± ÎµÎ³Î³Ï…Î·Î¸Î¿ÏÎ¼Îµ ÏŒÏ„Î¹ Ï„Î¿ Ï‡ÏÏŽÎ¼Î± Ï€Î¿Ï… Î²Î»Î­Ï€ÎµÏ„Îµ ÏƒÏ„Î·Î½ Î¿Î¸ÏŒÎ½Î· ÏƒÎ±Ï‚ ÎµÎ¯Î½Î±Î¹ Î±ÎºÏÎ¹Î²ÏŽÏ‚ Ï„Î¿ Ï€ÏÎ±Î³Î¼Î±Ï„Î¹ÎºÏŒ Ï‡ÏÏŽÎ¼Î± Ï„Î¿Ï… Ï€ÏÎ¿ÏŠÏŒÎ½Ï„Î¿Ï‚.",
     ];
 }
 
@@ -425,8 +532,8 @@ function catalogJoinDescription(array $lines): string
 function catalogNormalizeText(string $value): string
 {
     return str_replace(
-        ['Ã¢â€šÂ¬', 'â‚¬'],
-        ['€', '€'],
+        ['ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬', 'ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬', 'Ã¢â€šÂ¬'],
+        ['â‚¬', 'â‚¬', 'â‚¬'],
         $value
     );
 }
@@ -447,7 +554,7 @@ $catalog = [
             '60.DSC_0608.jpg',
         ],
         'name_en' => 'Chick with Hat Plushie',
-        'name_gr' => 'Κοτοπουλάκι Με Καπέλο',
+        'name_gr' => 'ÎšÎ¿Ï„Î¿Ï€Î¿Ï…Î»Î¬ÎºÎ¹ ÎœÎµ ÎšÎ±Ï€Î­Î»Î¿',
         'description_en' => catalogJoinDescription([
             'Meet an adorable handmade chick plushie with a tiny hat, a soft velvet texture, and a cheerful handmade look.',
             'Perfect for gifting, nursery shelves, desk decor, or anyone who loves cute crochet companions.',
@@ -456,10 +563,10 @@ $catalog = [
             ...$plushWarningEn,
         ]),
         'description_gr' => catalogJoinDescription([
-            'Γνωρίστε ένα αξιολάτρευτο χειροποίητο κοτοπουλάκι με μικρό καπέλο, βελούδινη υφή και γλυκιά χειροποίητη εμφάνιση.',
-            'Ιδανικό για δώρο, παιδικό δωμάτιο, διακόσμηση γραφείου ή για όποιον αγαπά τα χαριτωμένα crochet λούτρινα.',
-            'Επιλογή προσαρμογής: το χρώμα στο καπέλο μπορεί να αλλάξει κατόπιν συνεννόησης.',
-            'Υλικό: Νήμα velvet.',
+            'Î“Î½Ï‰ÏÎ¯ÏƒÏ„Îµ Î­Î½Î± Î±Î¾Î¹Î¿Î»Î¬Ï„ÏÎµÏ…Ï„Î¿ Ï‡ÎµÎ¹ÏÎ¿Ï€Î¿Î¯Î·Ï„Î¿ ÎºÎ¿Ï„Î¿Ï€Î¿Ï…Î»Î¬ÎºÎ¹ Î¼Îµ Î¼Î¹ÎºÏÏŒ ÎºÎ±Ï€Î­Î»Î¿, Î²ÎµÎ»Î¿ÏÎ´Î¹Î½Î· Ï…Ï†Î® ÎºÎ±Î¹ Î³Î»Ï…ÎºÎ¹Î¬ Ï‡ÎµÎ¹ÏÎ¿Ï€Î¿Î¯Î·Ï„Î· ÎµÎ¼Ï†Î¬Î½Î¹ÏƒÎ·.',
+            'Î™Î´Î±Î½Î¹ÎºÏŒ Î³Î¹Î± Î´ÏŽÏÎ¿, Ï€Î±Î¹Î´Î¹ÎºÏŒ Î´Ï‰Î¼Î¬Ï„Î¹Î¿, Î´Î¹Î±ÎºÏŒÏƒÎ¼Î·ÏƒÎ· Î³ÏÎ±Ï†ÎµÎ¯Î¿Ï… Î® Î³Î¹Î± ÏŒÏ€Î¿Î¹Î¿Î½ Î±Î³Î±Ï€Î¬ Ï„Î± Ï‡Î±ÏÎ¹Ï„Ï‰Î¼Î­Î½Î± crochet Î»Î¿ÏÏ„ÏÎ¹Î½Î±.',
+            'Î•Ï€Î¹Î»Î¿Î³Î® Ï€ÏÎ¿ÏƒÎ±ÏÎ¼Î¿Î³Î®Ï‚: Ï„Î¿ Ï‡ÏÏŽÎ¼Î± ÏƒÏ„Î¿ ÎºÎ±Ï€Î­Î»Î¿ Î¼Ï€Î¿ÏÎµÎ¯ Î½Î± Î±Î»Î»Î¬Î¾ÎµÎ¹ ÎºÎ±Ï„ÏŒÏ€Î¹Î½ ÏƒÏ…Î½ÎµÎ½Î½ÏŒÎ·ÏƒÎ·Ï‚.',
+            'Î¥Î»Î¹ÎºÏŒ: ÎÎ®Î¼Î± velvet.',
             ...$plushWarningGr,
         ]),
         'price' => 10.00,
@@ -469,9 +576,9 @@ $catalog = [
         'category' => 'Plushies',
         'custom_color_fields' => 1,
         'custom_color_label_1' => 'Hat colour',
-        'custom_color_label_1_gr' => 'Χρώμα για το καπέλο',
+        'custom_color_label_1_gr' => 'Î§ÏÏŽÎ¼Î± Î³Î¹Î± Ï„Î¿ ÎºÎ±Ï€Î­Î»Î¿',
         'custom_color_help' => 'Choose the hat colour you would like and Athina will crochet it to match your request.',
-        'custom_color_help_gr' => 'Διαλέξτε το χρώμα που θέλετε για το καπέλο και η Αθηνά θα το πλέξει σύμφωνα με την προτίμησή σας.',
+        'custom_color_help_gr' => 'Î”Î¹Î±Î»Î­Î¾Ï„Îµ Ï„Î¿ Ï‡ÏÏŽÎ¼Î± Ï€Î¿Ï… Î¸Î­Î»ÎµÏ„Îµ Î³Î¹Î± Ï„Î¿ ÎºÎ±Ï€Î­Î»Î¿ ÎºÎ±Î¹ Î· Î‘Î¸Î·Î½Î¬ Î¸Î± Ï„Î¿ Ï€Î»Î­Î¾ÎµÎ¹ ÏƒÏÎ¼Ï†Ï‰Î½Î± Î¼Îµ Ï„Î·Î½ Ï€ÏÎ¿Ï„Î¯Î¼Î·ÏƒÎ® ÏƒÎ±Ï‚.',
         'description_en' => catalogJoinDescription([
             'Meet an adorable handmade chick plushie with a tiny hat, a soft velvet texture, and a cheerful handmade look.',
             'Perfect for gifting, nursery shelves, desk decor, or anyone who loves cute crochet companions.',
@@ -497,7 +604,7 @@ $catalog = [
             '95.DSC_0095 (2).jpg',
         ],
         'name_en' => 'Velvet Octopus Plushie',
-        'name_gr' => 'Χταποδάκι Velvet',
+        'name_gr' => 'Î§Ï„Î±Ï€Î¿Î´Î¬ÎºÎ¹ Velvet',
         'description_en' => catalogJoinDescription([
             'A super soft handmade octopus plushie designed to feel cuddly, playful, and full of character.',
             'A lovely gift for sea-life fans, crochet collectors, or a cozy corner in a child\'s room.',
@@ -506,10 +613,10 @@ $catalog = [
             ...$plushWarningEn,
         ]),
         'description_gr' => catalogJoinDescription([
-            'Ένα υπερ-μαλακό χειροποίητο χταποδάκι, σχεδιασμένο για αγκαλιές, παιχνίδι και πολλή χαριτωμένη προσωπικότητα.',
-            'Υπέροχη επιλογή για λάτρεις της θάλασσας, συλλέκτες χειροποίητων ή για μια ζεστή γωνιά σε παιδικό δωμάτιο.',
-            'Επιλογή προσαρμογής: μπορείτε να ζητήσετε το χρώμα που προτιμάτε.',
-            'Υλικό: Νήμα velvet.',
+            'ÎˆÎ½Î± Ï…Ï€ÎµÏ-Î¼Î±Î»Î±ÎºÏŒ Ï‡ÎµÎ¹ÏÎ¿Ï€Î¿Î¯Î·Ï„Î¿ Ï‡Ï„Î±Ï€Î¿Î´Î¬ÎºÎ¹, ÏƒÏ‡ÎµÎ´Î¹Î±ÏƒÎ¼Î­Î½Î¿ Î³Î¹Î± Î±Î³ÎºÎ±Î»Î¹Î­Ï‚, Ï€Î±Î¹Ï‡Î½Î¯Î´Î¹ ÎºÎ±Î¹ Ï€Î¿Î»Î»Î® Ï‡Î±ÏÎ¹Ï„Ï‰Î¼Î­Î½Î· Ï€ÏÎ¿ÏƒÏ‰Ï€Î¹ÎºÏŒÏ„Î·Ï„Î±.',
+            'Î¥Ï€Î­ÏÎ¿Ï‡Î· ÎµÏ€Î¹Î»Î¿Î³Î® Î³Î¹Î± Î»Î¬Ï„ÏÎµÎ¹Ï‚ Ï„Î·Ï‚ Î¸Î¬Î»Î±ÏƒÏƒÎ±Ï‚, ÏƒÏ…Î»Î»Î­ÎºÏ„ÎµÏ‚ Ï‡ÎµÎ¹ÏÎ¿Ï€Î¿Î¯Î·Ï„Ï‰Î½ Î® Î³Î¹Î± Î¼Î¹Î± Î¶ÎµÏƒÏ„Î® Î³Ï‰Î½Î¹Î¬ ÏƒÎµ Ï€Î±Î¹Î´Î¹ÎºÏŒ Î´Ï‰Î¼Î¬Ï„Î¹Î¿.',
+            'Î•Ï€Î¹Î»Î¿Î³Î® Ï€ÏÎ¿ÏƒÎ±ÏÎ¼Î¿Î³Î®Ï‚: Î¼Ï€Î¿ÏÎµÎ¯Ï„Îµ Î½Î± Î¶Î·Ï„Î®ÏƒÎµÏ„Îµ Ï„Î¿ Ï‡ÏÏŽÎ¼Î± Ï€Î¿Ï… Ï€ÏÎ¿Ï„Î¹Î¼Î¬Ï„Îµ.',
+            'Î¥Î»Î¹ÎºÏŒ: ÎÎ®Î¼Î± velvet.',
             ...$plushWarningGr,
         ]),
         'price' => 10.00,
@@ -519,9 +626,9 @@ $catalog = [
         'category' => 'Plushies',
         'custom_color_fields' => 1,
         'custom_color_label_1' => 'Preferred octopus colour',
-        'custom_color_label_1_gr' => 'Χρώμα για το χταποδάκι',
+        'custom_color_label_1_gr' => 'Î§ÏÏŽÎ¼Î± Î³Î¹Î± Ï„Î¿ Ï‡Ï„Î±Ï€Î¿Î´Î¬ÎºÎ¹',
         'custom_color_help' => 'Tell us the velvet shade you prefer for the octopus body.',
-        'custom_color_help_gr' => 'Πείτε μας ποια βελούδινη απόχρωση προτιμάτε για το σώμα του χταποδιού.',
+        'custom_color_help_gr' => 'Î ÎµÎ¯Ï„Îµ Î¼Î±Ï‚ Ï€Î¿Î¹Î± Î²ÎµÎ»Î¿ÏÎ´Î¹Î½Î· Î±Ï€ÏŒÏ‡ÏÏ‰ÏƒÎ· Ï€ÏÎ¿Ï„Î¹Î¼Î¬Ï„Îµ Î³Î¹Î± Ï„Î¿ ÏƒÏŽÎ¼Î± Ï„Î¿Ï… Ï‡Ï„Î±Ï€Î¿Î´Î¹Î¿Ï.',
         'description_en' => catalogJoinDescription([
             'A super soft handmade octopus plushie designed to feel cuddly, playful, and full of character.',
             'A lovely gift for sea-life fans, crochet collectors, or a cozy corner in a child\'s room.',
@@ -531,7 +638,7 @@ $catalog = [
         ]),
         'custom_color_fields' => 0,
         'custom_color_label_1' => 'Selected colour',
-        'custom_color_label_1_gr' => 'Î•Ï€Î¹Î»ÎµÎ³Î¼Î­Î½Î¿ Ï‡ÏÏŽÎ¼Î±',
+        'custom_color_label_1_gr' => 'ÃŽâ€¢Ãâ‚¬ÃŽÂ¹ÃŽÂ»ÃŽÂµÃŽÂ³ÃŽÂ¼ÃŽÂ­ÃŽÂ½ÃŽÂ¿ Ãâ€¡ÃÂÃÅ½ÃŽÂ¼ÃŽÂ±',
         'custom_color_help' => '',
         'custom_color_help_gr' => '',
         'color_options' => [
@@ -569,7 +676,7 @@ $catalog = [
             '98.DSC_0049.jpg',
         ],
         'name_en' => 'Bumble Bee Plushie',
-        'name_gr' => 'Μελισσάκι Plushie',
+        'name_gr' => 'ÎœÎµÎ»Î¹ÏƒÏƒÎ¬ÎºÎ¹ Plushie',
         'description_en' => catalogJoinDescription([
             'This handmade bumble bee plushie brings a bright, happy feel with its soft velvet finish and playful shape.',
             'It makes a sweet handmade gift and a cozy little companion for shelves, beds, or cuddle time.',
@@ -578,10 +685,10 @@ $catalog = [
             ...$plushWarningEn,
         ]),
         'description_gr' => catalogJoinDescription([
-            'Αυτό το χειροποίητο μελισσάκι χαρίζει χαρούμενη διάθεση με τη βελούδινη υφή του και το παιχνιδιάρικο σχήμα του.',
-            'Είναι μια γλυκιά χειροποίητη ιδέα για δώρο και ένας όμορφος μικρός σύντροφος για ράφια, κρεβάτια ή αγκαλιές.',
-            'Επιλογή προσαρμογής: μπορείτε να αλλάξετε το χρώμα 1 και το χρώμα 2 κατόπιν συνεννόησης.',
-            'Υλικό: Νήμα velvet.',
+            'Î‘Ï…Ï„ÏŒ Ï„Î¿ Ï‡ÎµÎ¹ÏÎ¿Ï€Î¿Î¯Î·Ï„Î¿ Î¼ÎµÎ»Î¹ÏƒÏƒÎ¬ÎºÎ¹ Ï‡Î±ÏÎ¯Î¶ÎµÎ¹ Ï‡Î±ÏÎ¿ÏÎ¼ÎµÎ½Î· Î´Î¹Î¬Î¸ÎµÏƒÎ· Î¼Îµ Ï„Î· Î²ÎµÎ»Î¿ÏÎ´Î¹Î½Î· Ï…Ï†Î® Ï„Î¿Ï… ÎºÎ±Î¹ Ï„Î¿ Ï€Î±Î¹Ï‡Î½Î¹Î´Î¹Î¬ÏÎ¹ÎºÎ¿ ÏƒÏ‡Î®Î¼Î± Ï„Î¿Ï….',
+            'Î•Î¯Î½Î±Î¹ Î¼Î¹Î± Î³Î»Ï…ÎºÎ¹Î¬ Ï‡ÎµÎ¹ÏÎ¿Ï€Î¿Î¯Î·Ï„Î· Î¹Î´Î­Î± Î³Î¹Î± Î´ÏŽÏÎ¿ ÎºÎ±Î¹ Î­Î½Î±Ï‚ ÏŒÎ¼Î¿ÏÏ†Î¿Ï‚ Î¼Î¹ÎºÏÏŒÏ‚ ÏƒÏÎ½Ï„ÏÎ¿Ï†Î¿Ï‚ Î³Î¹Î± ÏÎ¬Ï†Î¹Î±, ÎºÏÎµÎ²Î¬Ï„Î¹Î± Î® Î±Î³ÎºÎ±Î»Î¹Î­Ï‚.',
+            'Î•Ï€Î¹Î»Î¿Î³Î® Ï€ÏÎ¿ÏƒÎ±ÏÎ¼Î¿Î³Î®Ï‚: Î¼Ï€Î¿ÏÎµÎ¯Ï„Îµ Î½Î± Î±Î»Î»Î¬Î¾ÎµÏ„Îµ Ï„Î¿ Ï‡ÏÏŽÎ¼Î± 1 ÎºÎ±Î¹ Ï„Î¿ Ï‡ÏÏŽÎ¼Î± 2 ÎºÎ±Ï„ÏŒÏ€Î¹Î½ ÏƒÏ…Î½ÎµÎ½Î½ÏŒÎ·ÏƒÎ·Ï‚.',
+            'Î¥Î»Î¹ÎºÏŒ: ÎÎ®Î¼Î± velvet.',
             ...$plushWarningGr,
         ]),
         'price' => 20.00,
@@ -592,10 +699,10 @@ $catalog = [
         'custom_color_fields' => 2,
         'custom_color_label_1' => 'Primary colour',
         'custom_color_label_2' => 'Secondary colour',
-        'custom_color_label_1_gr' => 'Χρώμα 1',
-        'custom_color_label_2_gr' => 'Χρώμα 2',
+        'custom_color_label_1_gr' => 'Î§ÏÏŽÎ¼Î± 1',
+        'custom_color_label_2_gr' => 'Î§ÏÏŽÎ¼Î± 2',
         'custom_color_help' => 'Choose the two velvet colours you want Athina to combine for the bee.',
-        'custom_color_help_gr' => 'Διαλέξτε τα δύο βελούδινα χρώματα που θέλετε να συνδυαστούν για το μελισσάκι.',
+        'custom_color_help_gr' => 'Î”Î¹Î±Î»Î­Î¾Ï„Îµ Ï„Î± Î´ÏÎ¿ Î²ÎµÎ»Î¿ÏÎ´Î¹Î½Î± Ï‡ÏÏŽÎ¼Î±Ï„Î± Ï€Î¿Ï… Î¸Î­Î»ÎµÏ„Îµ Î½Î± ÏƒÏ…Î½Î´Ï…Î±ÏƒÏ„Î¿ÏÎ½ Î³Î¹Î± Ï„Î¿ Î¼ÎµÎ»Î¹ÏƒÏƒÎ¬ÎºÎ¹.',
         'description_en' => catalogJoinDescription([
             'This handmade bumble bee plushie brings a bright, happy feel with its soft velvet finish and playful shape.',
             'It makes a sweet handmade gift and a cozy little companion for shelves, beds, or cuddle time.',
@@ -606,7 +713,7 @@ $catalog = [
         'custom_color_fields' => 0,
         'custom_color_label_1' => 'Selected colourway',
         'custom_color_label_2' => '',
-        'custom_color_label_1_gr' => 'Î•Ï€Î¹Î»ÎµÎ³Î¼Î­Î½Î¿Ï‚ Ï‡ÏÏ‰Î¼Î±Ï„Î¹ÎºÏŒÏ‚ ÏƒÏ…Î½Î´Ï…Î±ÏƒÎ¼ÏŒÏ‚',
+        'custom_color_label_1_gr' => 'ÃŽâ€¢Ãâ‚¬ÃŽÂ¹ÃŽÂ»ÃŽÂµÃŽÂ³ÃŽÂ¼ÃŽÂ­ÃŽÂ½ÃŽÂ¿Ãâ€š Ãâ€¡ÃÂÃâ€°ÃŽÂ¼ÃŽÂ±Ãâ€žÃŽÂ¹ÃŽÂºÃÅ’Ãâ€š ÃÆ’Ãâ€¦ÃŽÂ½ÃŽÂ´Ãâ€¦ÃŽÂ±ÃÆ’ÃŽÂ¼ÃÅ’Ãâ€š',
         'custom_color_label_2_gr' => '',
         'custom_color_help' => '',
         'custom_color_help_gr' => '',
@@ -645,21 +752,21 @@ $catalog = [
             'SMALL/58.DSC_0611.jpg',
         ],
         'name_en' => 'Velvet Whale Plushie',
-        'name_gr' => 'Φαλαινάκι Velvet',
+        'name_gr' => 'Î¦Î±Î»Î±Î¹Î½Î¬ÎºÎ¹ Velvet',
         'description_en' => catalogJoinDescription([
             'A super soft handmade whale plushie with a calming ocean feel and a cuddly velvet texture.',
             'A beautiful handmade gift for sea-life lovers and a charming decor piece for nursery or bedroom shelves.',
-            'Available sizes and prices: Small €5, Medium €20, Large €50.',
+            'Available sizes and prices: Small â‚¬5, Medium â‚¬20, Large â‚¬50.',
             'Custom option: choose colour 1 and your preferred size.',
             'Material: Velvet yarn.',
             ...$plushWarningEn,
         ]),
         'description_gr' => catalogJoinDescription([
-            'Ένα υπερ-μαλακό χειροποίητο φαλαινάκι με ήρεμη θαλασσινή αισθητική και βελούδινη υφή για αγκαλιές.',
-            'Υπέροχο χειροποίητο δώρο για λάτρεις της θάλασσας και όμορφη διακοσμητική πινελιά για παιδικό ή υπνοδωμάτιο.',
-            'Διαθέσιμα μεγέθη και τιμές: Small €5, Medium €20, Large €50.',
-            'Επιλογή προσαρμογής: μπορείτε να διαλέξετε το χρώμα 1 και το μέγεθος που προτιμάτε.',
-            'Υλικό: Νήμα velvet.',
+            'ÎˆÎ½Î± Ï…Ï€ÎµÏ-Î¼Î±Î»Î±ÎºÏŒ Ï‡ÎµÎ¹ÏÎ¿Ï€Î¿Î¯Î·Ï„Î¿ Ï†Î±Î»Î±Î¹Î½Î¬ÎºÎ¹ Î¼Îµ Î®ÏÎµÎ¼Î· Î¸Î±Î»Î±ÏƒÏƒÎ¹Î½Î® Î±Î¹ÏƒÎ¸Î·Ï„Î¹ÎºÎ® ÎºÎ±Î¹ Î²ÎµÎ»Î¿ÏÎ´Î¹Î½Î· Ï…Ï†Î® Î³Î¹Î± Î±Î³ÎºÎ±Î»Î¹Î­Ï‚.',
+            'Î¥Ï€Î­ÏÎ¿Ï‡Î¿ Ï‡ÎµÎ¹ÏÎ¿Ï€Î¿Î¯Î·Ï„Î¿ Î´ÏŽÏÎ¿ Î³Î¹Î± Î»Î¬Ï„ÏÎµÎ¹Ï‚ Ï„Î·Ï‚ Î¸Î¬Î»Î±ÏƒÏƒÎ±Ï‚ ÎºÎ±Î¹ ÏŒÎ¼Î¿ÏÏ†Î· Î´Î¹Î±ÎºÎ¿ÏƒÎ¼Î·Ï„Î¹ÎºÎ® Ï€Î¹Î½ÎµÎ»Î¹Î¬ Î³Î¹Î± Ï€Î±Î¹Î´Î¹ÎºÏŒ Î® Ï…Ï€Î½Î¿Î´Ï‰Î¼Î¬Ï„Î¹Î¿.',
+            'Î”Î¹Î±Î¸Î­ÏƒÎ¹Î¼Î± Î¼ÎµÎ³Î­Î¸Î· ÎºÎ±Î¹ Ï„Î¹Î¼Î­Ï‚: Small â‚¬5, Medium â‚¬20, Large â‚¬50.',
+            'Î•Ï€Î¹Î»Î¿Î³Î® Ï€ÏÎ¿ÏƒÎ±ÏÎ¼Î¿Î³Î®Ï‚: Î¼Ï€Î¿ÏÎµÎ¯Ï„Îµ Î½Î± Î´Î¹Î±Î»Î­Î¾ÎµÏ„Îµ Ï„Î¿ Ï‡ÏÏŽÎ¼Î± 1 ÎºÎ±Î¹ Ï„Î¿ Î¼Î­Î³ÎµÎ¸Î¿Ï‚ Ï€Î¿Ï… Ï€ÏÎ¿Ï„Î¹Î¼Î¬Ï„Îµ.',
+            'Î¥Î»Î¹ÎºÏŒ: ÎÎ®Î¼Î± velvet.',
             ...$plushWarningGr,
         ]),
         'price' => 5.00,
@@ -669,9 +776,9 @@ $catalog = [
         'category' => 'Plushies',
         'custom_color_fields' => 1,
         'custom_color_label_1' => 'Colour 1',
-        'custom_color_label_1_gr' => 'Χρώμα 1',
+        'custom_color_label_1_gr' => 'Î§ÏÏŽÎ¼Î± 1',
         'custom_color_help' => 'Choose the main velvet colour you want for the whale. The photos update by size.',
-        'custom_color_help_gr' => 'Διαλέξτε το βασικό βελούδινο χρώμα που θέλετε για τη φάλαινα. Οι φωτογραφίες αλλάζουν ανάλογα με το μέγεθος.',
+        'custom_color_help_gr' => 'Î”Î¹Î±Î»Î­Î¾Ï„Îµ Ï„Î¿ Î²Î±ÏƒÎ¹ÎºÏŒ Î²ÎµÎ»Î¿ÏÎ´Î¹Î½Î¿ Ï‡ÏÏŽÎ¼Î± Ï€Î¿Ï… Î¸Î­Î»ÎµÏ„Îµ Î³Î¹Î± Ï„Î· Ï†Î¬Î»Î±Î¹Î½Î±. ÎŸÎ¹ Ï†Ï‰Ï„Î¿Î³ÏÎ±Ï†Î¯ÎµÏ‚ Î±Î»Î»Î¬Î¶Î¿Ï…Î½ Î±Î½Î¬Î»Î¿Î³Î± Î¼Îµ Ï„Î¿ Î¼Î­Î³ÎµÎ¸Î¿Ï‚.',
         'variations' => [
             [
                 'size' => 'Small',
@@ -704,14 +811,14 @@ $catalog = [
         'description_en' => catalogJoinDescription([
             'A super soft handmade whale plushie with a calming ocean feel and a cuddly velvet texture.',
             'A beautiful handmade gift for sea-life lovers and a charming decor piece for nursery or bedroom shelves.',
-            'Available sizes and prices: Small â‚¬5, Medium â‚¬20, Large â‚¬50.',
+            'Available sizes and prices: Small Ã¢â€šÂ¬5, Medium Ã¢â€šÂ¬20, Large Ã¢â€šÂ¬50.',
             'Choose your preferred size and pick one of the pictured whale colourways.',
             'Material: Velvet yarn.',
             ...$plushWarningEn,
         ]),
         'custom_color_fields' => 0,
         'custom_color_label_1' => 'Selected colour',
-        'custom_color_label_1_gr' => 'Î•Ï€Î¹Î»ÎµÎ³Î¼Î­Î½Î¿ Ï‡ÏÏŽÎ¼Î±',
+        'custom_color_label_1_gr' => 'ÃŽâ€¢Ãâ‚¬ÃŽÂ¹ÃŽÂ»ÃŽÂµÃŽÂ³ÃŽÂ¼ÃŽÂ­ÃŽÂ½ÃŽÂ¿ Ãâ€¡ÃÂÃÅ½ÃŽÂ¼ÃŽÂ±',
         'custom_color_help' => '',
         'custom_color_help_gr' => '',
         'color_options' => [
@@ -739,7 +846,7 @@ $catalog = [
             '48.IMG_20240413_114058.jpg',
         ],
         'name_en' => 'SpongeBob Crochet Plushie',
-        'name_gr' => 'Λούτρινο SpongeBob',
+        'name_gr' => 'Î›Î¿ÏÏ„ÏÎ¹Î½Î¿ SpongeBob',
         'description_en' => catalogJoinDescription([
             'A handmade SpongeBob-inspired crochet plushie with bold details, soft texture, and lots of character.',
             'Perfect for cartoon fans, themed gifts, or anyone who wants a fun handmade statement piece.',
@@ -747,9 +854,9 @@ $catalog = [
             ...$plushWarningEn,
         ]),
         'description_gr' => catalogJoinDescription([
-            'Ένα χειροποίητο λούτρινο εμπνευσμένο από τον SpongeBob, με έντονες λεπτομέρειες, απαλή υφή και πολύ χαρακτήρα.',
-            'Ιδανικό για fans καρτούν, θεματικά δώρα ή για όποιον θέλει ένα ξεχωριστό χειροποίητο κομμάτι.',
-            'Υλικό: Νήμα velvet.',
+            'ÎˆÎ½Î± Ï‡ÎµÎ¹ÏÎ¿Ï€Î¿Î¯Î·Ï„Î¿ Î»Î¿ÏÏ„ÏÎ¹Î½Î¿ ÎµÎ¼Ï€Î½ÎµÏ…ÏƒÎ¼Î­Î½Î¿ Î±Ï€ÏŒ Ï„Î¿Î½ SpongeBob, Î¼Îµ Î­Î½Ï„Î¿Î½ÎµÏ‚ Î»ÎµÏ€Ï„Î¿Î¼Î­ÏÎµÎ¹ÎµÏ‚, Î±Ï€Î±Î»Î® Ï…Ï†Î® ÎºÎ±Î¹ Ï€Î¿Î»Ï Ï‡Î±ÏÎ±ÎºÏ„Î®ÏÎ±.',
+            'Î™Î´Î±Î½Î¹ÎºÏŒ Î³Î¹Î± fans ÎºÎ±ÏÏ„Î¿ÏÎ½, Î¸ÎµÎ¼Î±Ï„Î¹ÎºÎ¬ Î´ÏŽÏÎ± Î® Î³Î¹Î± ÏŒÏ€Î¿Î¹Î¿Î½ Î¸Î­Î»ÎµÎ¹ Î­Î½Î± Î¾ÎµÏ‡Ï‰ÏÎ¹ÏƒÏ„ÏŒ Ï‡ÎµÎ¹ÏÎ¿Ï€Î¿Î¯Î·Ï„Î¿ ÎºÎ¿Î¼Î¼Î¬Ï„Î¹.',
+            'Î¥Î»Î¹ÎºÏŒ: ÎÎ®Î¼Î± velvet.',
             ...$plushWarningGr,
         ]),
         'price' => 12.00,
@@ -767,7 +874,7 @@ $catalog = [
             '22.DSC_0419.jpg',
         ],
         'name_en' => 'Patrick Star Crochet Plushie',
-        'name_gr' => 'Λούτρινος Patrick Star',
+        'name_gr' => 'Î›Î¿ÏÏ„ÏÎ¹Î½Î¿Ï‚ Patrick Star',
         'description_en' => catalogJoinDescription([
             'A soft handmade Patrick-inspired plushie with a playful shape and a cozy crochet finish.',
             'Great for cartoon lovers, themed gifts, or adding a bit of fun personality to a handmade collection.',
@@ -775,9 +882,9 @@ $catalog = [
             ...$plushWarningEn,
         ]),
         'description_gr' => catalogJoinDescription([
-            'Ένα απαλό χειροποίητο λούτρινο εμπνευσμένο από τον Patrick, με παιχνιδιάρικο σχήμα και cozy crochet τελείωμα.',
-            'Ταιριάζει υπέροχα σε fans καρτούν, θεματικά δώρα ή σε μια ξεχωριστή συλλογή χειροποίητων.',
-            'Υλικό: Νήμα velvet.',
+            'ÎˆÎ½Î± Î±Ï€Î±Î»ÏŒ Ï‡ÎµÎ¹ÏÎ¿Ï€Î¿Î¯Î·Ï„Î¿ Î»Î¿ÏÏ„ÏÎ¹Î½Î¿ ÎµÎ¼Ï€Î½ÎµÏ…ÏƒÎ¼Î­Î½Î¿ Î±Ï€ÏŒ Ï„Î¿Î½ Patrick, Î¼Îµ Ï€Î±Î¹Ï‡Î½Î¹Î´Î¹Î¬ÏÎ¹ÎºÎ¿ ÏƒÏ‡Î®Î¼Î± ÎºÎ±Î¹ cozy crochet Ï„ÎµÎ»ÎµÎ¯Ï‰Î¼Î±.',
+            'Î¤Î±Î¹ÏÎ¹Î¬Î¶ÎµÎ¹ Ï…Ï€Î­ÏÎ¿Ï‡Î± ÏƒÎµ fans ÎºÎ±ÏÏ„Î¿ÏÎ½, Î¸ÎµÎ¼Î±Ï„Î¹ÎºÎ¬ Î´ÏŽÏÎ± Î® ÏƒÎµ Î¼Î¹Î± Î¾ÎµÏ‡Ï‰ÏÎ¹ÏƒÏ„Î® ÏƒÏ…Î»Î»Î¿Î³Î® Ï‡ÎµÎ¹ÏÎ¿Ï€Î¿Î¯Î·Ï„Ï‰Î½.',
+            'Î¥Î»Î¹ÎºÏŒ: ÎÎ®Î¼Î± velvet.',
             ...$plushWarningGr,
         ]),
         'price' => 12.00,
@@ -797,7 +904,7 @@ $catalog = [
             '61.InShot_20240613_101456931.jpg',
         ],
         'name_en' => 'Frog with Dangly Legs Plushie',
-        'name_gr' => 'Βάτραχος Με Ποδαράκια',
+        'name_gr' => 'Î’Î¬Ï„ÏÎ±Ï‡Î¿Ï‚ ÎœÎµ Î Î¿Î´Î±ÏÎ¬ÎºÎ¹Î±',
         'description_en' => catalogJoinDescription([
             'A handmade frog plushie with extra-long dangling legs, soft velvet texture, and a playful expression.',
             'Lovely as a cheerful gift, shelf buddy, or cuddle companion for anyone who loves whimsical handmade toys.',
@@ -806,10 +913,10 @@ $catalog = [
             ...$plushWarningEn,
         ]),
         'description_gr' => catalogJoinDescription([
-            'Ένας χειροποίητος βάτραχος με μακριά ποδαράκια, απαλή βελούδινη υφή και παιχνιδιάρικη έκφραση.',
-            'Ιδανικός για χαρούμενο δώρο, για ράφι ή για αγκαλιές από όσους αγαπούν τα whimsical χειροποίητα λούτρινα.',
-            'Επιλογή προσαρμογής: το χρώμα 1 μπορεί να αλλάξει κατόπιν συνεννόησης.',
-            'Υλικό: Νήμα velvet.',
+            'ÎˆÎ½Î±Ï‚ Ï‡ÎµÎ¹ÏÎ¿Ï€Î¿Î¯Î·Ï„Î¿Ï‚ Î²Î¬Ï„ÏÎ±Ï‡Î¿Ï‚ Î¼Îµ Î¼Î±ÎºÏÎ¹Î¬ Ï€Î¿Î´Î±ÏÎ¬ÎºÎ¹Î±, Î±Ï€Î±Î»Î® Î²ÎµÎ»Î¿ÏÎ´Î¹Î½Î· Ï…Ï†Î® ÎºÎ±Î¹ Ï€Î±Î¹Ï‡Î½Î¹Î´Î¹Î¬ÏÎ¹ÎºÎ· Î­ÎºÏ†ÏÎ±ÏƒÎ·.',
+            'Î™Î´Î±Î½Î¹ÎºÏŒÏ‚ Î³Î¹Î± Ï‡Î±ÏÎ¿ÏÎ¼ÎµÎ½Î¿ Î´ÏŽÏÎ¿, Î³Î¹Î± ÏÎ¬Ï†Î¹ Î® Î³Î¹Î± Î±Î³ÎºÎ±Î»Î¹Î­Ï‚ Î±Ï€ÏŒ ÏŒÏƒÎ¿Ï…Ï‚ Î±Î³Î±Ï€Î¿ÏÎ½ Ï„Î± whimsical Ï‡ÎµÎ¹ÏÎ¿Ï€Î¿Î¯Î·Ï„Î± Î»Î¿ÏÏ„ÏÎ¹Î½Î±.',
+            'Î•Ï€Î¹Î»Î¿Î³Î® Ï€ÏÎ¿ÏƒÎ±ÏÎ¼Î¿Î³Î®Ï‚: Ï„Î¿ Ï‡ÏÏŽÎ¼Î± 1 Î¼Ï€Î¿ÏÎµÎ¯ Î½Î± Î±Î»Î»Î¬Î¾ÎµÎ¹ ÎºÎ±Ï„ÏŒÏ€Î¹Î½ ÏƒÏ…Î½ÎµÎ½Î½ÏŒÎ·ÏƒÎ·Ï‚.',
+            'Î¥Î»Î¹ÎºÏŒ: ÎÎ®Î¼Î± velvet.',
             ...$plushWarningGr,
         ]),
         'price' => 12.00,
@@ -819,9 +926,9 @@ $catalog = [
         'category' => 'Plushies',
         'custom_color_fields' => 1,
         'custom_color_label_1' => 'Frog colour',
-        'custom_color_label_1_gr' => 'Χρώμα για τον βάτραχο',
+        'custom_color_label_1_gr' => 'Î§ÏÏŽÎ¼Î± Î³Î¹Î± Ï„Î¿Î½ Î²Î¬Ï„ÏÎ±Ï‡Î¿',
         'custom_color_help' => 'Choose the main velvet colour you would like for the frog.',
-        'custom_color_help_gr' => 'Διαλέξτε το βασικό βελούδινο χρώμα που θέλετε για τον βάτραχο.',
+        'custom_color_help_gr' => 'Î”Î¹Î±Î»Î­Î¾Ï„Îµ Ï„Î¿ Î²Î±ÏƒÎ¹ÎºÏŒ Î²ÎµÎ»Î¿ÏÎ´Î¹Î½Î¿ Ï‡ÏÏŽÎ¼Î± Ï€Î¿Ï… Î¸Î­Î»ÎµÏ„Îµ Î³Î¹Î± Ï„Î¿Î½ Î²Î¬Ï„ÏÎ±Ï‡Î¿.',
         'description_en' => catalogJoinDescription([
             'A handmade frog plushie with extra-long dangling legs, soft velvet texture, and a playful expression.',
             'Lovely as a cheerful gift, shelf buddy, or cuddle companion for anyone who loves whimsical handmade toys.',
@@ -831,7 +938,7 @@ $catalog = [
         ]),
         'custom_color_fields' => 0,
         'custom_color_label_1' => 'Selected colour',
-        'custom_color_label_1_gr' => 'Î•Ï€Î¹Î»ÎµÎ³Î¼Î­Î½Î¿ Ï‡ÏÏŽÎ¼Î±',
+        'custom_color_label_1_gr' => 'ÃŽâ€¢Ãâ‚¬ÃŽÂ¹ÃŽÂ»ÃŽÂµÃŽÂ³ÃŽÂ¼ÃŽÂ­ÃŽÂ½ÃŽÂ¿ Ãâ€¡ÃÂÃÅ½ÃŽÂ¼ÃŽÂ±',
         'custom_color_help' => '',
         'custom_color_help_gr' => '',
         'color_options' => [
@@ -861,19 +968,19 @@ $catalog = [
             'IMG_1588.JPG',
         ],
         'name_en' => 'Puffy Kids Blanket',
-        'name_gr' => 'Παιδική Puffy Κουβέρτα',
+        'name_gr' => 'Î Î±Î¹Î´Î¹ÎºÎ® Puffy ÎšÎ¿Ï…Î²Î­ÏÏ„Î±',
         'description_en' => catalogJoinDescription([
             'A super-soft handmade kids blanket made with puffy yarn for cozy cuddles, stroller walks, nap time, and sweet dreams.',
-            'Available sizes and prices: Newborn Blanket (45x45cm) €20, Receiving Blanket (110x110cm) €30, Stroller Blanket (95x75cm) €50, Crib Blanket (150x110cm) €70.',
+            'Available sizes and prices: Newborn Blanket (45x45cm) â‚¬20, Receiving Blanket (110x110cm) â‚¬30, Stroller Blanket (95x75cm) â‚¬50, Crib Blanket (150x110cm) â‚¬70.',
             'Available in beautiful colour combinations and ideal as a thoughtful baby gift.',
             'Material: Puffy yarn.',
             $blanketDisclaimerEn,
         ]),
         'description_gr' => catalogJoinDescription([
-            'Μια πολύ μαλακή χειροποίητη παιδική κουβέρτα από puffy νήμα, ιδανική για αγκαλιές, βόλτες με το καρότσι, ύπνο και γλυκά όνειρα.',
-            'Διαθέσιμα μεγέθη και τιμές: Κουβέρτα Νεογέννητου (45x45εκ) €20, Κουβέρτα Αγκαλιάς (110x110εκ) €30, Κουβέρτα Καροτσιού (95x75εκ) €50, Κουβέρτα Κούνιας (150x110εκ) €70.',
-            'Διαθέσιμη σε όμορφους χρωματικούς συνδυασμούς και ιδανική ως προσεγμένο δώρο για μωρό.',
-            'Υλικό: Puffy νήμα.',
+            'ÎœÎ¹Î± Ï€Î¿Î»Ï Î¼Î±Î»Î±ÎºÎ® Ï‡ÎµÎ¹ÏÎ¿Ï€Î¿Î¯Î·Ï„Î· Ï€Î±Î¹Î´Î¹ÎºÎ® ÎºÎ¿Ï…Î²Î­ÏÏ„Î± Î±Ï€ÏŒ puffy Î½Î®Î¼Î±, Î¹Î´Î±Î½Î¹ÎºÎ® Î³Î¹Î± Î±Î³ÎºÎ±Î»Î¹Î­Ï‚, Î²ÏŒÎ»Ï„ÎµÏ‚ Î¼Îµ Ï„Î¿ ÎºÎ±ÏÏŒÏ„ÏƒÎ¹, ÏÏ€Î½Î¿ ÎºÎ±Î¹ Î³Î»Ï…ÎºÎ¬ ÏŒÎ½ÎµÎ¹ÏÎ±.',
+            'Î”Î¹Î±Î¸Î­ÏƒÎ¹Î¼Î± Î¼ÎµÎ³Î­Î¸Î· ÎºÎ±Î¹ Ï„Î¹Î¼Î­Ï‚: ÎšÎ¿Ï…Î²Î­ÏÏ„Î± ÎÎµÎ¿Î³Î­Î½Î½Î·Ï„Î¿Ï… (45x45ÎµÎº) â‚¬20, ÎšÎ¿Ï…Î²Î­ÏÏ„Î± Î‘Î³ÎºÎ±Î»Î¹Î¬Ï‚ (110x110ÎµÎº) â‚¬30, ÎšÎ¿Ï…Î²Î­ÏÏ„Î± ÎšÎ±ÏÎ¿Ï„ÏƒÎ¹Î¿Ï (95x75ÎµÎº) â‚¬50, ÎšÎ¿Ï…Î²Î­ÏÏ„Î± ÎšÎ¿ÏÎ½Î¹Î±Ï‚ (150x110ÎµÎº) â‚¬70.',
+            'Î”Î¹Î±Î¸Î­ÏƒÎ¹Î¼Î· ÏƒÎµ ÏŒÎ¼Î¿ÏÏ†Î¿Ï…Ï‚ Ï‡ÏÏ‰Î¼Î±Ï„Î¹ÎºÎ¿ÏÏ‚ ÏƒÏ…Î½Î´Ï…Î±ÏƒÎ¼Î¿ÏÏ‚ ÎºÎ±Î¹ Î¹Î´Î±Î½Î¹ÎºÎ® Ï‰Ï‚ Ï€ÏÎ¿ÏƒÎµÎ³Î¼Î­Î½Î¿ Î´ÏŽÏÎ¿ Î³Î¹Î± Î¼Ï‰ÏÏŒ.',
+            'Î¥Î»Î¹ÎºÏŒ: Puffy Î½Î®Î¼Î±.',
             $blanketDisclaimerGr,
         ]),
         'price' => 20.00,
@@ -883,9 +990,9 @@ $catalog = [
         'category' => 'Blankets',
         'custom_color_fields' => 1,
         'custom_color_label_1' => 'Preferred colour or colour blend',
-        'custom_color_label_1_gr' => 'Χρώμα ή συνδυασμός χρωμάτων',
+        'custom_color_label_1_gr' => 'Î§ÏÏŽÎ¼Î± Î® ÏƒÏ…Î½Î´Ï…Î±ÏƒÎ¼ÏŒÏ‚ Ï‡ÏÏ‰Î¼Î¬Ï„Ï‰Î½',
         'custom_color_help' => 'Tell us the puffy yarn colour or blend you want for your blanket.',
-        'custom_color_help_gr' => 'Πείτε μας το χρώμα ή τον συνδυασμό puffy νημάτων που θέλετε για την κουβέρτα σας.',
+        'custom_color_help_gr' => 'Î ÎµÎ¯Ï„Îµ Î¼Î±Ï‚ Ï„Î¿ Ï‡ÏÏŽÎ¼Î± Î® Ï„Î¿Î½ ÏƒÏ…Î½Î´Ï…Î±ÏƒÎ¼ÏŒ puffy Î½Î·Î¼Î¬Ï„Ï‰Î½ Ï€Î¿Ï… Î¸Î­Î»ÎµÏ„Îµ Î³Î¹Î± Ï„Î·Î½ ÎºÎ¿Ï…Î²Î­ÏÏ„Î± ÏƒÎ±Ï‚.',
         'variations' => [
             [
                 'size' => 'Newborn Blanket (45x45cm)',
@@ -923,14 +1030,14 @@ $catalog = [
         ],
         'description_en' => catalogJoinDescription([
             'A super-soft handmade kids blanket made with puffy yarn for cozy cuddles, stroller walks, nap time, and sweet dreams.',
-            'Available sizes and prices: Newborn Blanket (45x45cm) â‚¬20, Receiving Blanket (110x110cm) â‚¬30, Stroller Blanket (95x75cm) â‚¬50, Crib Blanket (150x110cm) â‚¬70.',
+            'Available sizes and prices: Newborn Blanket (45x45cm) Ã¢â€šÂ¬20, Receiving Blanket (110x110cm) Ã¢â€šÂ¬30, Stroller Blanket (95x75cm) Ã¢â€šÂ¬50, Crib Blanket (150x110cm) Ã¢â€šÂ¬70.',
             'Choose from the ready-made colour blends in the gallery and pair them with the blanket size that suits your little one best.',
             'Material: Puffy yarn.',
             $blanketDisclaimerEn,
         ]),
         'custom_color_fields' => 0,
         'custom_color_label_1' => 'Selected colourway',
-        'custom_color_label_1_gr' => 'Î•Ï€Î¹Î»ÎµÎ³Î¼Î­Î½Î¿Ï‚ Ï‡ÏÏ‰Î¼Î±Ï„Î¹ÎºÏŒÏ‚ ÏƒÏ…Î½Î´Ï…Î±ÏƒÎ¼ÏŒÏ‚',
+        'custom_color_label_1_gr' => 'ÃŽâ€¢Ãâ‚¬ÃŽÂ¹ÃŽÂ»ÃŽÂµÃŽÂ³ÃŽÂ¼ÃŽÂ­ÃŽÂ½ÃŽÂ¿Ãâ€š Ãâ€¡ÃÂÃâ€°ÃŽÂ¼ÃŽÂ±Ãâ€žÃŽÂ¹ÃŽÂºÃÅ’Ãâ€š ÃÆ’Ãâ€¦ÃŽÂ½ÃŽÂ´Ãâ€¦ÃŽÂ±ÃÆ’ÃŽÂ¼ÃÅ’Ãâ€š',
         'custom_color_help' => '',
         'custom_color_help_gr' => '',
         'color_options' => [
@@ -955,6 +1062,41 @@ $catalog = [
         'manual_sales' => 8,
     ],
 ];
+
+$availableCatalog = [];
+$skippedCatalog = [];
+foreach ($catalog as $item) {
+    $mainImages = is_array($item['images'] ?? null) ? $item['images'] : [];
+    if (empty($mainImages)) {
+        $skippedCatalog[] = [
+            'sku' => (string)($item['sku'] ?? 'unknown'),
+            'reason' => 'No main images defined in catalog.',
+        ];
+        continue;
+    }
+
+    $folderRoot = rtrim(WEBSITE_SOURCE_ROOT, '/\\') . '/' . trim((string)($item['folder'] ?? ''), '/\\');
+    $hasAnySourceImage = false;
+    foreach ($mainImages as $mainImage) {
+        $resolved = catalogResolveSourcePath((string)$item['sku'], $folderRoot, (string)$mainImage);
+        if ($resolved !== null) {
+            $hasAnySourceImage = true;
+            break;
+        }
+    }
+
+    if (!$hasAnySourceImage) {
+        $skippedCatalog[] = [
+            'sku' => (string)($item['sku'] ?? 'unknown'),
+            'reason' => 'No matching local source assets were found.',
+        ];
+        continue;
+    }
+
+    $availableCatalog[] = $item;
+}
+
+$catalog = $availableCatalog;
 
 catalogEnsurePhotoStorageSchema($conn);
 app_product_options_ensure_schema($conn);
@@ -1121,8 +1263,20 @@ try {
         catalogDeleteImportedProductData($conn, $productId);
 
         $folderRoot = rtrim(WEBSITE_SOURCE_ROOT, '/\\') . '/' . trim((string)$item['folder'], '/\\');
+        $resolvedMainImages = [];
         foreach ((array)$item['images'] as $imageRelativePath) {
-            $fullPath = str_replace('\\', '/', $folderRoot . '/' . ltrim((string)$imageRelativePath, '/\\'));
+            $fullPath = catalogResolveSourcePath($sku, $folderRoot, (string)$imageRelativePath);
+            if ($fullPath === null) {
+                continue;
+            }
+            $resolvedMainImages[] = $fullPath;
+        }
+
+        if (empty($resolvedMainImages)) {
+            throw new RuntimeException("Could not resolve any storefront images for SKU {$sku}");
+        }
+
+        foreach ($resolvedMainImages as $fullPath) {
             $blob = catalogReadPhotoBlob($fullPath);
             catalogInsertPhoto($conn, $productId, $blob);
         }
@@ -1137,7 +1291,10 @@ try {
 
             $colorId = catalogEnsureColor($conn, $colorName, max(1, $inventory));
             foreach ((array)($colorDefinition['images'] ?? []) as $imageIndex => $colorImageRelativePath) {
-                $sourcePath = str_replace('\\', '/', $folderRoot . '/' . ltrim((string)$colorImageRelativePath, '/\\'));
+                $sourcePath = catalogResolveSourcePath($sku, $folderRoot, (string)$colorImageRelativePath);
+                if ($sourcePath === null) {
+                    continue;
+                }
                 $extension = strtolower((string)pathinfo($sourcePath, PATHINFO_EXTENSION));
                 $fileBaseName = catalogSlugify((string)pathinfo((string)$colorImageRelativePath, PATHINFO_FILENAME));
                 $fileName = sprintf('%02d-%s.%s', $imageIndex + 1, $fileBaseName, $extension !== '' ? $extension : 'jpg');
@@ -1160,7 +1317,10 @@ try {
 
                 $variationSlug = catalogSlugify((string)($variationDefinition['size'] ?? ('variation-' . ($variationIndex + 1))));
                 foreach ((array)($variationDefinition['images'] ?? []) as $imageIndex => $variationImageRelativePath) {
-                    $sourcePath = str_replace('\\', '/', $folderRoot . '/' . ltrim((string)$variationImageRelativePath, '/\\'));
+                    $sourcePath = catalogResolveSourcePath($sku, $folderRoot, (string)$variationImageRelativePath);
+                    if ($sourcePath === null) {
+                        continue;
+                    }
                     $extension = strtolower((string)pathinfo($sourcePath, PATHINFO_EXTENSION));
                     $fileBaseName = catalogSlugify((string)pathinfo((string)$variationImageRelativePath, PATHINFO_FILENAME));
                     $fileName = sprintf('%02d-%s.%s', $imageIndex + 1, $fileBaseName, $extension !== '' ? $extension : 'jpg');
@@ -1199,6 +1359,12 @@ try {
     }
     echo "Legacy products archived: {$legacySummary['archived']}\n";
     echo "Legacy products deleted: {$legacySummary['deleted']}\n";
+    if (!empty($skippedCatalog)) {
+        echo "Skipped products without local assets:\n";
+        foreach ($skippedCatalog as $row) {
+            echo "- {$row['sku']}: {$row['reason']}\n";
+        }
+    }
 } catch (Throwable $e) {
     try {
         if ($conn instanceof mysqli && @$conn->ping()) {
