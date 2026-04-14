@@ -72,3 +72,25 @@
         grid-template-columns: 1fr;
     }
 }
+
+@media (max-width: 600px) {
+    .about-hero {
+        padding: 48px 0 24px;
+    }
+
+    .about-hero h1 {
+        font-size: 28px;
+    }
+
+    .about-story {
+        padding-bottom: 48px;
+    }
+
+    .about-card {
+        padding: 20px;
+    }
+
+    .about-card h2 {
+        font-size: 24px;
+    }
+}

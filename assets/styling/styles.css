@@ -849,6 +849,104 @@ body.account-page .footer {
     }
 }
 
+@media (max-width: 640px) {
+    .container {
+        padding: 0 14px;
+    }
+
+    .hero {
+        height: auto;
+        min-height: 420px;
+        padding: 28px 0;
+        background-position: center;
+    }
+
+    .hero-overlay {
+        background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(255, 255, 255, 0.56) 54%, rgba(255, 255, 255, 0.28) 100%);
+    }
+
+    .hero-content {
+        padding: 0 14px;
+        align-items: flex-end;
+    }
+
+    .hero-copy {
+        padding: 18px 16px;
+        border-radius: 18px;
+    }
+
+    .hero-title {
+        font-size: 28px;
+    }
+
+    .hero-subtitle {
+        font-size: 15px;
+        margin-bottom: 22px;
+    }
+
+    .shop-collection,
+    .best-sellers,
+    .selling-fast,
+    .follow-journey,
+    .features,
+    .view-all-section {
+        padding: 54px 0;
+    }
+
+    .section-title {
+        font-size: 28px;
+    }
+
+    .section-subtitle {
+        font-size: 14px;
+        margin-bottom: 28px;
+    }
+
+    .collection-card {
+        width: 100%;
+        max-width: 340px;
+    }
+
+    .collection-image,
+    .product-image-wrapper,
+    .journey-image {
+        height: 220px;
+    }
+
+    .product-info {
+        padding: 16px;
+    }
+
+    .product-name {
+        font-size: 17px;
+    }
+
+    .product-price {
+        font-size: 20px;
+    }
+
+    .feature-icon {
+        width: 82px;
+        height: 82px;
+        margin-bottom: 18px;
+        font-size: 32px;
+    }
+
+    .feature-title {
+        font-size: 20px;
+    }
+
+    .footer {
+        padding: 48px 0 24px;
+    }
+
+    .footer-content {
+        gap: 24px;
+        margin-bottom: 28px;
+    }
+}
+
 /* =============================================
    CHECKOUT PAGE
    ============================================= */

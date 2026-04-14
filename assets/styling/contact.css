@@ -11,6 +11,25 @@
     max-width: 900px;
 }
 
+.contact-page .about-hero {
+    padding: 56px 0 24px;
+    text-align: center;
+}
+
+.contact-page .about-hero h1 {
+    font-size: 42px;
+    line-height: 1.1;
+    color: var(--purple-dark);
+    margin-bottom: 14px;
+}
+
+.contact-page .about-hero p {
+    max-width: 680px;
+    margin: 0 auto;
+    color: var(--text-gray);
+    font-size: 18px;
+}
+
 .contact-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -144,5 +163,51 @@
 
     .contact-btn {
         font-size: 20px;
+    }
+}
+
+@media (max-width: 600px) {
+    .contact-page .about-hero {
+        padding: 44px 0 20px;
+    }
+
+    .contact-page .about-hero h1 {
+        font-size: 30px;
+    }
+
+    .contact-page .about-hero p {
+        font-size: 15px;
+    }
+
+    .contact-content {
+        padding: 18px 0 48px;
+    }
+
+    .contact-page .container {
+        padding: 0 14px;
+    }
+
+    .contact-card {
+        padding: 22px 18px 24px;
+        border-radius: 18px;
+    }
+
+    .contact-card h2 {
+        font-size: 26px;
+    }
+
+    .contact-field label {
+        font-size: 16px;
+    }
+
+    .contact-field input,
+    .contact-field textarea,
+    .info-card p {
+        font-size: 15px;
+    }
+
+    .contact-btn {
+        padding: 13px 16px;
+        font-size: 18px;
     }
 }

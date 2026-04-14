@@ -627,9 +627,18 @@ if ($vpRes) {
             </div>
             <?php endif; ?>
 
+            <button type="button"
+                    class="shop-filter-toggle"
+                    id="shop-filter-toggle"
+                    aria-expanded="false"
+                    aria-controls="shop-filters-panel">
+                <i class="fas fa-sliders-h" aria-hidden="true"></i>
+                <span>Filters &amp; Search</span>
+            </button>
+
             <div class="shop-layout">
                 <!-- FILTER SIDEBAR -->
-                <aside class="shop-filters">
+                <aside class="shop-filters" id="shop-filters-panel">
                     <form id="shop-filters-form" method="get" action="shop.php">
 
                     <!-- Search -->
@@ -873,7 +882,36 @@ if ($vpRes) {
         const priceRange = document.getElementById('price-range');
         const priceMaxLabel = document.getElementById('price-max-label');
         const clearBtn = document.getElementById('clear-filters-btn');
+        const filterToggle = document.getElementById('shop-filter-toggle');
+        const filterPanel = document.getElementById('shop-filters-panel');
+        const mobileFilterQuery = window.matchMedia('(max-width: 1024px)');
         let searchTimer = null;
+
+        const setFiltersOpen = (open) => {
+            if (!filterPanel || !filterToggle) return;
+            const isOpen = Boolean(open) && mobileFilterQuery.matches;
+            filterPanel.classList.toggle('is-open', isOpen);
+            filterToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        };
+
+        if (filterToggle && filterPanel) {
+            filterToggle.addEventListener('click', (event) => {
+                event.stopPropagation();
+                setFiltersOpen(!filterPanel.classList.contains('is-open'));
+            });
+
+            document.addEventListener('click', (event) => {
+                if (!mobileFilterQuery.matches || !filterPanel.classList.contains('is-open')) return;
+                if (filterPanel.contains(event.target) || filterToggle.contains(event.target)) return;
+                setFiltersOpen(false);
+            });
+
+            window.addEventListener('resize', () => {
+                if (!mobileFilterQuery.matches) {
+                    setFiltersOpen(false);
+                }
+            });
+        }
 
         const updatePriceLabel = () => {
             if (!priceRange || !priceMaxLabel) return;

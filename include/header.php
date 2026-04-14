@@ -139,6 +139,14 @@ if ($isLoggedIn && !$initials) {
                         <span class="wishlist-count"><?= $wishlistCount ?></span>
                     <?php endif; ?>
                 </a>
+                <button type="button"
+                        class="mobile-nav-toggle"
+                        aria-expanded="false"
+                        aria-controls="site-navigation"
+                        aria-label="Toggle navigation menu"
+                        title="Toggle navigation menu">
+                    <span class="mobile-nav-icon" aria-hidden="true"></span>
+                </button>
             </div>
         </div>
     </div>
@@ -147,16 +155,62 @@ if ($isLoggedIn && !$initials) {
 <!-- Avatar dropdown behaviour (runs on EVERY page that includes header.php) -->
 <script>
 (function () {
-    function initUserDropdown() {
+    function initHeaderInteractions() {
         const header = document.querySelector('header.header');
         if (!header) return;
 
         const avatar  = header.querySelector('.user-avatar-circle');
         const wrapper = avatar ? avatar.closest('.user-dropdown-wrapper') : null;
         const dropdown = wrapper ? wrapper.querySelector('.user-dropdown') : null;
+        const nav = header.querySelector('.nav');
+        const navToggle = header.querySelector('.mobile-nav-toggle');
+        const mobileBreakpoint = window.matchMedia('(max-width: 900px)');
+
+        function setMobileNavOpen(isOpen) {
+            if (!nav || !navToggle) {
+                return;
+            }
+
+            const open = Boolean(isOpen) && mobileBreakpoint.matches;
+            header.classList.toggle('mobile-nav-open', open);
+            navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        }
+
+        function closeMobileNav() {
+            setMobileNavOpen(false);
+        }
+
+        if (nav && navToggle) {
+            navToggle.addEventListener('click', function (e) {
+                e.stopPropagation();
+                setMobileNavOpen(!header.classList.contains('mobile-nav-open'));
+            });
+
+            nav.querySelectorAll('.nav-link').forEach(function (link) {
+                link.addEventListener('click', closeMobileNav);
+            });
+
+            window.addEventListener('resize', function () {
+                if (!mobileBreakpoint.matches) {
+                    closeMobileNav();
+                }
+            });
+        }
 
         if (!avatar || !wrapper || !dropdown) {
-            return; // not logged in, nothing to wire
+            document.addEventListener('click', function (e) {
+                if (header.classList.contains('mobile-nav-open') && !header.contains(e.target)) {
+                    closeMobileNav();
+                }
+            });
+
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    closeMobileNav();
+                }
+            });
+
+            return; // not logged in, nothing else to wire
         }
 
         function closeDropdown() {
@@ -181,6 +235,10 @@ if ($isLoggedIn && !$initials) {
 
         // Close when clicking outside
         document.addEventListener('click', function (e) {
+            if (header.classList.contains('mobile-nav-open') && !header.contains(e.target)) {
+                closeMobileNav();
+            }
+
             if (!wrapper.classList.contains('open')) return;
             if (!wrapper.contains(e.target)) {
                 closeDropdown();
@@ -191,14 +249,15 @@ if ($isLoggedIn && !$initials) {
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') {
                 closeDropdown();
+                closeMobileNav();
             }
         });
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initUserDropdown);
+        document.addEventListener('DOMContentLoaded', initHeaderInteractions);
     } else {
-        initUserDropdown();
+        initHeaderInteractions();
     }
 })();
 </script>
