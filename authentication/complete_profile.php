@@ -413,6 +413,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                                id="dob"
                                placeholder="DD/MM/YYYY"
                                inputmode="numeric"
+                               maxlength="10"
                                pattern="\d{2}/\d{2}/\d{4}"
                                value="<?= htmlspecialchars(formatProfileDobInputValue($_POST['dob'] ?? '')) ?>"
                                required>
@@ -657,6 +658,23 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             $(this).find("i").toggleClass("bi-eye bi-eye-slash");
         });
 
+        function formatDobInput(value) {
+            const digits = value.replace(/\D/g, "").slice(0, 8);
+            let formatted = "";
+
+            if (digits.length > 0) {
+                formatted = digits.slice(0, 2);
+            }
+            if (digits.length > 2) {
+                formatted += "/" + digits.slice(2, 4);
+            }
+            if (digits.length > 4) {
+                formatted += "/" + digits.slice(4);
+            }
+
+            return formatted;
+        }
+
         $("#password").on("input", function () {
             const val = $(this).val();
 
@@ -681,8 +699,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         });
 
         $("#dob").on("input", function () {
-            const value = $(this).val().trim();
-            if (value !== "" && isValidDobInput(value)) {
+            const formatted = formatDobInput($(this).val());
+            $(this).val(formatted);
+
+            if (formatted === "" || formatted.length < 10 || isValidDobInput(formatted)) {
                 $(this).removeClass("is-invalid");
                 $("#dob-error").hide();
             }

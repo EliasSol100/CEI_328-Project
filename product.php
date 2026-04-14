@@ -1404,6 +1404,45 @@ include __DIR__ . "/include/header.php";
     var hasPriceRange = priceRow ? priceRow.getAttribute("data-has-range") === "1" : false;
     var currentBasePrice = hasPriceRange ? rangeMinPrice : basePrice;
     var validationStarted = false;
+    var fallbackTranslations = {
+        productEnterCustomColour: "Please share your preferred colour before adding this item to cart.",
+        productCompleteCustomColours: "Please complete each colour preference before continuing.",
+        productSelectSizeFirst: "Please choose a size to continue.",
+        productSelectValidSizeColor: "Please select a valid size and colour combination.",
+        productSelectColorFirst: "Please choose a colour to continue.",
+        productSelectedColour: "Selected colour: {name}",
+        productSelectAvailableOption: "Please choose the required option before continuing.",
+        inStock: "In stock",
+        outOfStock: "Out of stock",
+        madeToOrder: "Made to order",
+        productSelectedColorOutOfStock: "This colour is currently out of stock.",
+        productSelectedVariationOutOfStock: "This selection is currently out of stock.",
+        productCouponResponseError: "We could not read the server response.",
+        productCouponNetworkError: "We could not validate the coupon right now.",
+        productEnterCouponFirst: "Please enter a coupon code first.",
+        productInvalidCoupon: "This coupon is invalid or expired.",
+        productCouponSaveFailed: "We couldn't save this coupon right now.",
+        productCouldNotSaveCoupon: "We couldn't save this coupon right now.",
+        productValidCouponApplied: "Valid coupon applied: {name} (-€{amount})",
+        productCouponAppliedSuccess: "Coupon applied.",
+        productCouponRemoved: "Coupon removed.",
+        addedToCart: "Added to cart.",
+        couldNotAddToCart: "Could not add to cart.",
+        networkError: "Network error.",
+        productSelectColourA: "Please select Colour A.",
+        productSelectColourB: "Please select Colour B.",
+        productSelectColourC: "Please select Colour C."
+    };
+
+    function t(key, params) {
+        if (window.appTranslate) {
+            return window.appTranslate(key, params || {});
+        }
+        var template = (fallbackTranslations && fallbackTranslations[key]) ? fallbackTranslations[key] : key;
+        return template.replace(/\{(\w+)\}/g, function (_, token) {
+            return params && Object.prototype.hasOwnProperty.call(params, token) ? String(params[token]) : "";
+        });
+    }
 
     if (hasSelectableVariations) {
         variations.forEach(function (item) {
@@ -1658,18 +1697,21 @@ include __DIR__ . "/include/header.php";
             missingSelectionMessage = t(customField2Input ? "productCompleteCustomColours" : "productEnterCustomColour");
         }
 
-        if (!available && missingSelectionMessage !== "" && showValidation) {
+        if (!available && missingSelectionMessage !== "") {
             statusText = missingSelectionMessage;
-            statusIsError = true;
-        } else if (!available && missingSelectionMessage !== "" && !showValidation) {
-            statusText = "";
-            statusIsError = false;
+            statusIsError = !!showValidation;
         }
 
         setVariantStatus(statusText, statusIsError);
 
         if (addCartBtn) {
             addCartBtn.disabled = !available;
+            addCartBtn.setAttribute("aria-disabled", (!available).toString());
+            if (!available && missingSelectionMessage !== "") {
+                addCartBtn.setAttribute("title", missingSelectionMessage);
+            } else {
+                addCartBtn.removeAttribute("title");
+            }
         }
         updateColorChips();
         updateColorStockDisplay();
@@ -1761,30 +1803,6 @@ include __DIR__ . "/include/header.php";
     var couponRemoveBtn = document.getElementById("coupon-remove-btn");
     var couponFeedback = document.getElementById("coupon-feedback");
     var appliedCouponCode = <?= json_encode(!empty($initialCouponEvaluation['valid']) ? $storedCouponCode : "") ?>;
-    var fallbackTranslations = {
-        productEnterCustomColour: "Please share your preferred colour before adding this item to cart.",
-        productCompleteCustomColours: "Please complete each colour preference before continuing.",
-        productSelectSizeFirst: "Please choose a size to continue.",
-        productSelectValidSizeColor: "Please select a valid size and colour combination.",
-        productSelectColorFirst: "Please choose a colour to continue.",
-        productSelectedColour: "Selected colour: {name}",
-        inStock: "In stock",
-        outOfStock: "Out of stock",
-        madeToOrder: "Made to order",
-        productSelectedColorOutOfStock: "This colour is currently out of stock.",
-        productSelectedVariationOutOfStock: "This selection is currently out of stock."
-    };
-
-    function t(key, params) {
-        if (window.appTranslate) {
-            return window.appTranslate(key, params || {});
-        }
-        var template = fallbackTranslations[key] || key;
-        return template.replace(/\{(\w+)\}/g, function (_, token) {
-            return params && Object.prototype.hasOwnProperty.call(params, token) ? String(params[token]) : "";
-        });
-    }
-
     function normalizeCouponInput() {
         if (!couponInput) {
             return "";
@@ -2002,9 +2020,7 @@ include __DIR__ . "/include/header.php";
                 },
                 body: JSON.stringify(payload)
             })
-                .then(function (response) {
-                    return response.json();
-                })
+                .then(parseJsonResponse)
                 .then(function (data) {
                     if (data && data.success) {
                         var count = data.cart && data.cart.totals ? data.cart.totals.items_count : 0;

@@ -34,5 +34,8 @@ if (!app_allowed_image_mime($mimeType)) {
 
 header('Content-Type: ' . $mimeType);
 header('X-Content-Type-Options: nosniff');
-header('Cache-Control: max-age=86400');
+// Avoid stale broken thumbnails after DB imports or photo replacements.
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+header('Expires: 0');
 echo $data;

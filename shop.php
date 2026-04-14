@@ -745,6 +745,7 @@ if ($vpRes) {
                             $stars  = '';
                             $displayMinPrice = (float)($p['displayMinPrice'] ?? $p['basePrice'] ?? 0);
                             $displayMaxPrice = (float)($p['displayMaxPrice'] ?? $p['basePrice'] ?? 0);
+                            $requiresOptionSelection = ((int)($p['hasVariants'] ?? 0) === 1) || !empty($variationPaths) || !empty($colorPaths);
                             $filled = (int)round($rev['avg']);
                             for ($i = 1; $i <= 5; $i++) {
                                 $stars .= $i <= $filled ? '&#9733;' : '&#9734;';
@@ -842,7 +843,9 @@ if ($vpRes) {
                                 </div>
                                 <button class="shop-atc-btn"
                                         data-product-id="<?= $pid ?>"
-                                        data-has-variants="<?= (int)$p['hasVariants'] ?>">
+                                        data-has-variants="<?= (int)$p['hasVariants'] ?>"
+                                        data-requires-options="<?= $requiresOptionSelection ? 1 : 0 ?>"
+                                        data-product-url="product.php?id=<?= $pid ?>">
                                     <i class="fas fa-cart-plus"></i> <span data-translate="addToCart">Add to Cart</span>
                                 </button>
                             </div>
@@ -955,6 +958,23 @@ if ($vpRes) {
         }
     }
 
+    function parseJsonResponse(response) {
+        return response.text().then(raw => {
+            const clean = String(raw || '').replace(/^\uFEFF+/, '').trim();
+            if (!clean) {
+                return {};
+            }
+            try {
+                return JSON.parse(clean);
+            } catch (err) {
+                return {
+                    success: false,
+                    message: t('couldNotAddToCart')
+                };
+            }
+        });
+    }
+
     function addToCart(productId, variationId) {
         const body = { product_id: productId, quantity: 1 };
         if (variationId) body.variation_id = variationId;
@@ -967,7 +987,7 @@ if ($vpRes) {
             },
             body: JSON.stringify(body)
         })
-        .then(r => r.json())
+        .then(parseJsonResponse)
         .then(data => {
             if (data.success) {
                 const count = data.cart?.totals?.items_count ?? 0;
@@ -986,7 +1006,13 @@ if ($vpRes) {
         btn.addEventListener('click', function (e) {
             e.stopPropagation();
             const pid = parseInt(this.dataset.productId);
-            window.location.href = 'product.php?id=' + pid;
+            const requiresOptions = this.dataset.requiresOptions === '1';
+            const productUrl = this.dataset.productUrl || ('product.php?id=' + pid);
+            if (requiresOptions) {
+                window.location.href = productUrl;
+                return;
+            }
+            addToCart(pid);
         });
     });
     </script>
