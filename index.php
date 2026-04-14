@@ -370,7 +370,7 @@ $homepageSettings = app_homepage_load_settings($conn);
                         </div>
                         <div class="product-info">
                             <h3 class="product-name">
-                                <a href="product.php?id=<?= $pid ?>" class="product-title-link" data-product-name data-name-en="<?= htmlspecialchars((string)$product['nameEN'], ENT_QUOTES, 'UTF-8') ?>" data-name-el="<?= htmlspecialchars((string)($product['nameGR'] ?: $product['nameEN']), ENT_QUOTES, 'UTF-8') ?>">
+                                <a href="product.php?id=<?= $pid ?>" class="product-title-link" data-product-name data-name-en="<?= htmlspecialchars((string)$product['nameEN'], ENT_QUOTES, 'UTF-8') ?>" data-name-el="<?= htmlspecialchars((string)(($product['nameGR'] ?? $product['nameEN']) ?: $product['nameEN']), ENT_QUOTES, 'UTF-8') ?>">
                                     <?= htmlspecialchars($product['nameEN']) ?>
                                 </a>
                             </h3>
@@ -444,7 +444,7 @@ $homepageSettings = app_homepage_load_settings($conn);
                         </div>
                         <div class="product-info">
                             <h3 class="product-name">
-                                <a href="product.php?id=<?= $pid ?>" class="product-title-link" data-product-name data-name-en="<?= htmlspecialchars((string)$product['nameEN'], ENT_QUOTES, 'UTF-8') ?>" data-name-el="<?= htmlspecialchars((string)($product['nameGR'] ?: $product['nameEN']), ENT_QUOTES, 'UTF-8') ?>">
+                                <a href="product.php?id=<?= $pid ?>" class="product-title-link" data-product-name data-name-en="<?= htmlspecialchars((string)$product['nameEN'], ENT_QUOTES, 'UTF-8') ?>" data-name-el="<?= htmlspecialchars((string)(($product['nameGR'] ?? $product['nameEN']) ?: $product['nameEN']), ENT_QUOTES, 'UTF-8') ?>">
                                     <?= htmlspecialchars($product['nameEN']) ?>
                                 </a>
                             </h3>
