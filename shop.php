@@ -587,22 +587,7 @@ if ($vpRes) {
     .shop-carousel .carousel-item {
         height: 100%;
     }
-    .shop-carousel {
-        overflow: hidden;
-        background: #fcf8ff;
-        --bs-carousel-transition-duration: 0.78s;
-        --bs-carousel-transition: transform var(--bs-carousel-transition-duration) cubic-bezier(0.22, 1, 0.36, 1);
-    }
-    .shop-carousel .carousel-inner,
-    .shop-carousel .carousel-item,
     .shop-carousel .carousel-item img {
-        backface-visibility: hidden;
-    }
-    .shop-carousel .carousel-item {
-        will-change: transform;
-    }
-    .shop-carousel .carousel-item img {
-        display: block;
         width: 100%;
         height: 100%;
         object-fit: cover;
@@ -612,11 +597,6 @@ if ($vpRes) {
             object-fit: contain;
             object-position: center center;
             background: #fcf8ff;
-        }
-    }
-    @media (prefers-reduced-motion: reduce) {
-        .shop-carousel .carousel-item {
-            transition: none;
         }
     }
     .shop-carousel .carousel-control-prev,
@@ -823,11 +803,11 @@ if ($vpRes) {
                                     }));
                                 ?>
                                 <?php if (!empty($allSlides)): ?>
-                                <div id="carousel-<?= $pid ?>" class="carousel slide shop-carousel" data-bs-ride="carousel" data-bs-interval="3200" data-bs-pause="false">
+                                <div id="carousel-<?= $pid ?>" class="carousel slide shop-carousel" data-bs-ride="carousel" data-bs-interval="2000">
                                     <div class="carousel-inner">
                                         <?php foreach ($allSlides as $cidx => $slide): ?>
                                         <div class="carousel-item <?= $cidx === 0 ? 'active' : '' ?>">
-                                            <img src="<?= htmlspecialchars($slide['src']) ?>" alt="<?= htmlspecialchars($p['nameEN']) ?>" decoding="async">
+                                            <img src="<?= htmlspecialchars($slide['src']) ?>" alt="<?= htmlspecialchars($p['nameEN']) ?>">
                                         </div>
                                         <?php endforeach; ?>
                                     </div>
@@ -977,55 +957,6 @@ if ($vpRes) {
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="assets/js/wishlist-live.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/wishlist-live.js') ?>" defer></script>
     <script>
-    function preloadCarouselImage(img) {
-        if (!img) return;
-        const src = img.getAttribute('src');
-        if (!src) return;
-        const preload = new Image();
-        preload.decoding = 'async';
-        preload.src = src;
-    }
-
-    function preloadCarouselNeighbors(carouselEl, activeIndex) {
-        const images = Array.from(carouselEl.querySelectorAll('.carousel-item img'));
-        if (images.length <= 1) return;
-
-        const total = images.length;
-        const nextIndex = (activeIndex + 1) % total;
-        const prevIndex = (activeIndex - 1 + total) % total;
-
-        preloadCarouselImage(images[nextIndex]);
-        preloadCarouselImage(images[prevIndex]);
-    }
-
-    document.querySelectorAll('.shop-carousel').forEach(carouselEl => {
-        const items = Array.from(carouselEl.querySelectorAll('.carousel-item'));
-        if (items.length <= 1 || typeof bootstrap === 'undefined') {
-            return;
-        }
-
-        const activeIndex = items.findIndex(item => item.classList.contains('active'));
-        preloadCarouselNeighbors(carouselEl, activeIndex >= 0 ? activeIndex : 0);
-
-        const existingCarousel = bootstrap.Carousel.getInstance(carouselEl);
-        if (existingCarousel) {
-            existingCarousel.dispose();
-        }
-
-        new bootstrap.Carousel(carouselEl, {
-            interval: 3200,
-            pause: false,
-            ride: 'carousel',
-            touch: true,
-            wrap: true
-        });
-
-        carouselEl.addEventListener('slide.bs.carousel', event => {
-            const nextIndex = typeof event.to === 'number' ? event.to : 0;
-            preloadCarouselNeighbors(carouselEl, nextIndex);
-        });
-    });
-
     document.querySelectorAll('.shop-product-card.is-clickable').forEach(card => {
         const productUrl = card.dataset.productUrl;
         if (!productUrl) return;
