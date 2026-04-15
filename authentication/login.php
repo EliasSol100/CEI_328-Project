@@ -2,6 +2,16 @@
 session_start();
 require_once __DIR__ . "/../include/security.php";
 require_once "database.php";
+require_once __DIR__ . "/../include/platform_integrations.php";
+
+app_system_config_seed_defaults($conn, app_platform_integrations_default_values());
+
+$googleOauthConfig = app_social_auth_config($conn, 'google');
+$facebookOauthConfig = app_social_auth_config($conn, 'facebook');
+$googleEnabled = !empty($googleOauthConfig['enabled']);
+$facebookEnabled = !empty($facebookOauthConfig['enabled']);
+$googleClientId = (string)($googleOauthConfig['client_id'] ?? '');
+$facebookAppId = (string)($facebookOauthConfig['client_id'] ?? '');
 
 $loginError = '';
 $loginInputValue = trim((string)($_POST["login_input"] ?? ''));
@@ -150,10 +160,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["login"])) {
                     type="button"
                     id="google-signin-btn"
                     class="btn btn-light border d-flex align-items-center justify-content-center gap-2 mx-auto auth-social-btn"
+                    <?= $googleEnabled ? '' : 'disabled aria-disabled="true" title="Google login is not configured yet."' ?>
                 >
                     <img src="https://developers.google.com/identity/images/g-logo.png"
                          class="auth-social-logo" alt="Google logo">
-                    Continue with Google
+                    <?= $googleEnabled ? 'Continue with Google' : 'Google login unavailable' ?>
                 </button>
             </div>
 
@@ -162,9 +173,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["login"])) {
                     type="button"
                     id="facebook-signin-btn"
                     class="btn d-flex align-items-center justify-content-center gap-2 mx-auto auth-social-btn auth-facebook-btn"
+                    <?= $facebookEnabled ? '' : 'disabled aria-disabled="true" title="Facebook login is not configured yet."' ?>
                 >
                     <i class="bi bi-facebook"></i>
-                    Continue with Facebook
+                    <?= $facebookEnabled ? 'Continue with Facebook' : 'Facebook login unavailable' ?>
                 </button>
             </div>
 
@@ -222,32 +234,40 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["login"])) {
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script>
-        document.getElementById('google-signin-btn').addEventListener('click', function () {
-            const params = new URLSearchParams({
-                client_id: '901502356414-324b839ks2vas27hoq8hq0448qa6a0oj.apps.googleusercontent.com',
-                redirect_uri: <?= json_encode($googleRedirectUri, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
-                response_type: 'code',
-                scope: 'email profile',
-                access_type: 'online',
-                include_granted_scopes: 'true',
-                prompt: 'select_account',
-                state: <?= json_encode($googleState, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>
+        var googleEnabled = <?= $googleEnabled ? 'true' : 'false' ?>;
+        var facebookEnabled = <?= $facebookEnabled ? 'true' : 'false' ?>;
+
+        if (googleEnabled) {
+            document.getElementById('google-signin-btn').addEventListener('click', function () {
+                const params = new URLSearchParams({
+                    client_id: <?= json_encode($googleClientId, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
+                    redirect_uri: <?= json_encode($googleRedirectUri, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
+                    response_type: 'code',
+                    scope: 'email profile',
+                    access_type: 'online',
+                    include_granted_scopes: 'true',
+                    prompt: 'select_account',
+                    state: <?= json_encode($googleState, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>
+                });
+
+                window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
             });
+        }
 
-            window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
-        });
+        if (facebookEnabled) {
+            document.getElementById('facebook-signin-btn').addEventListener('click', function () {
+                const params = new URLSearchParams({
+                    client_id: <?= json_encode($facebookAppId, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
+                    redirect_uri: <?= json_encode($facebookRedirectUri, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
+                    response_type: 'code',
+                    auth_type: 'rerequest',
+                    scope: 'email',
+                    state: <?= json_encode($facebookState, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>
+                });
 
-        document.getElementById('facebook-signin-btn').addEventListener('click', function () {
-            const params = new URLSearchParams({
-                client_id: '924345056652857',
-                redirect_uri: <?= json_encode($facebookRedirectUri, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
-                response_type: 'code',
-                auth_type: 'rerequest',
-                state: <?= json_encode($facebookState, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>
+                window.location.href = 'https://www.facebook.com/v18.0/dialog/oauth?' + params.toString();
             });
-
-            window.location.href = 'https://www.facebook.com/v18.0/dialog/oauth?' + params.toString();
-        });
+        }
 
         $(document).ready(function () {
             $(".toggle-password").click(function () {

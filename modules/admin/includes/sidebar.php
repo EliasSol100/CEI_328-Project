@@ -15,6 +15,7 @@ $nav = [
     ['id' => 'custom_orders',          'label' => 'Custom Orders',          'icon' => 'fa-star',           'file' => 'custom_orders.php'],
     ['id' => 'discounts_promotions',   'label' => 'Discounts & Promotions', 'icon' => 'fa-percent',        'file' => 'discounts_promotions.php'],
     ['id' => 'analytics_reports',      'label' => 'Analytics & Reports',    'icon' => 'fa-chart-bar',      'file' => 'analytics_reports.php'],
+    ['id' => 'store_integrations',     'label' => 'Store Integrations',     'icon' => 'fa-key',            'file' => 'store_integrations.php'],
     ['id' => 'marketing_integrations', 'label' => 'Marketing Integrations', 'icon' => 'fa-envelope',       'file' => 'marketing_integrations.php'],
     ['id' => 'content_management',     'label' => 'Content Management',     'icon' => 'fa-file-alt',       'file' => 'content_management.php'],
     ['id' => 'homepage_customization', 'label' => 'Home Page Customization','icon' => 'fa-image',          'file' => 'homepage_customization.php'],

@@ -6,14 +6,12 @@ error_reporting(E_ALL);
 session_start();
 require_once "database.php";
 require_once __DIR__ . "/../include/security.php";
+require_once __DIR__ . "/../include/platform_integrations.php";
 
-/*
- * Make sure the redirect URI below is added in your Facebook app
- * and matches the current domain for this deployment.
- */
-$appId        = '924345056652857';
-$appSecret    = '961389e18dd6d117327fb0ad668e8d0e';
-$redirectUri  = app_url('/authentication/facebook_callback.php');
+app_system_config_seed_defaults($conn, app_platform_integrations_default_values());
+app_social_auth_ensure_user_schema($conn);
+
+$redirectUri = app_url('/authentication/facebook_callback.php');
 $redirectPage = (($_SESSION['oauth_origin_facebook'] ?? 'registration') === 'login') ? 'login.php' : 'registration.php';
 unset($_SESSION['oauth_origin_facebook']);
 
@@ -23,131 +21,169 @@ if (!app_verify_oauth_state('facebook', $_GET['state'] ?? null)) {
     exit();
 }
 
+$facebookConfig = app_social_auth_config($conn, 'facebook');
+$appId = (string)($facebookConfig['client_id'] ?? '');
+$appSecret = (string)($facebookConfig['client_secret'] ?? '');
+
+if ($appId === '' || $appSecret === '') {
+    $_SESSION["registration_error"] = "Facebook login is not configured yet.";
+    header("Location: " . $redirectPage);
+    exit();
+}
+
 if (!isset($_GET['code'])) {
-    // User cancelled or something went wrong at FB side
     $_SESSION["registration_error"] = "Facebook login was cancelled or failed. Please try again or use your email.";
     header("Location: " . $redirectPage);
     exit();
 }
 
-$code = $_GET['code'];
+$code = trim((string)$_GET['code']);
 
-/* === 1. Exchange code for access token === */
-$tokenUrl = 'https://graph.facebook.com/v18.0/oauth/access_token';
-
-$tokenParams = [
-    'client_id'     => $appId,
-    'redirect_uri'  => $redirectUri,
+$tokenUrl = 'https://graph.facebook.com/v18.0/oauth/access_token?' . http_build_query([
+    'client_id' => $appId,
+    'redirect_uri' => $redirectUri,
     'client_secret' => $appSecret,
-    'code'          => $code
-];
+    'code' => $code,
+]);
 
-$ch = curl_init($tokenUrl . '?' . http_build_query($tokenParams));
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-$tokenResponse = curl_exec($ch);
-curl_close($ch);
+$tokenRequest = curl_init($tokenUrl);
+curl_setopt($tokenRequest, CURLOPT_RETURNTRANSFER, true);
+$tokenResponse = curl_exec($tokenRequest);
+curl_close($tokenRequest);
 
-$tokenData = json_decode($tokenResponse, true);
-
-if (!isset($tokenData['access_token'])) {
-    $_SESSION["registration_error"] = "Failed to get access token from Facebook.";
+$tokenData = json_decode((string)$tokenResponse, true);
+if (!is_array($tokenData) || empty($tokenData['access_token'])) {
+    $_SESSION["registration_error"] = "Failed to get an access token from Facebook.";
     header("Location: " . $redirectPage);
     exit();
 }
 
-$accessToken = $tokenData['access_token'];
+$userInfoRequest = curl_init('https://graph.facebook.com/me?fields=id,name,email&access_token=' . urlencode((string)$tokenData['access_token']));
+curl_setopt($userInfoRequest, CURLOPT_RETURNTRANSFER, true);
+$userInfoResponse = curl_exec($userInfoRequest);
+curl_close($userInfoRequest);
 
-/* === 2. Fetch user info === */
-// We ask for id, name, email. If email is not available, we'll handle that.
-$userInfoUrl = 'https://graph.facebook.com/me?fields=id,name,email';
+$userInfo = json_decode((string)$userInfoResponse, true);
+$facebookId = trim((string)($userInfo['id'] ?? ''));
+$fullName = trim((string)($userInfo['name'] ?? 'Facebook User'));
+$email = trim((string)($userInfo['email'] ?? ''));
 
-$ch = curl_init($userInfoUrl . '&access_token=' . urlencode($accessToken));
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-$userInfoResponse = curl_exec($ch);
-curl_close($ch);
-
-$userInfo = json_decode($userInfoResponse, true);
-
-$fullName = $userInfo['name']  ?? '';
-$email    = $userInfo['email'] ?? '';
-
-if (!$email) {
-    // Without an email we can't link to your user table, so bail out gracefully.
-    $_SESSION["registration_error"] = "We couldn't retrieve your email from Facebook. Please sign up with your email instead.";
+if ($facebookId === '') {
+    $_SESSION["registration_error"] = "Facebook did not return a valid account ID.";
     header("Location: " . $redirectPage);
     exit();
 }
 
-/* === 3. Check if user already exists === */
-$stmt = $conn->prepare("SELECT * FROM users WHERE email = ?");
-$stmt->bind_param("s", $email);
-$stmt->execute();
-$result = $stmt->get_result();
+if ($email === '') {
+    $_SESSION["registration_error"] = "We couldn't retrieve your email from Facebook. Please make sure the app requests the email permission or register with your email address.";
+    header("Location: " . $redirectPage);
+    exit();
+}
 
-if ($result && $result->num_rows > 0) {
-    // Existing user
-    $user = $result->fetch_assoc();
+$user = null;
+
+$stmt = $conn->prepare("SELECT *, userID AS id FROM users WHERE facebook_id = ? LIMIT 1");
+if ($stmt) {
+    $stmt->bind_param("s", $facebookId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $user = $result ? $result->fetch_assoc() : null;
+    $stmt->close();
+}
+
+if (!$user) {
+    $stmt = $conn->prepare("SELECT *, userID AS id FROM users WHERE email = ? LIMIT 1");
+    if ($stmt) {
+        $stmt->bind_param("s", $email);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $user = $result ? $result->fetch_assoc() : null;
+        $stmt->close();
+    }
+}
+
+if ($user) {
+    $userId = (int)($user['id'] ?? 0);
+    if ($userId > 0 && trim((string)($user['facebook_id'] ?? '')) === '') {
+        $linkStmt = $conn->prepare("UPDATE users SET facebook_id = ?, is_verified = 1 WHERE userID = ?");
+        if ($linkStmt) {
+            $linkStmt->bind_param("si", $facebookId, $userId);
+            $linkStmt->execute();
+            $linkStmt->close();
+        }
+        $user['facebook_id'] = $facebookId;
+        $user['is_verified'] = 1;
+    }
 } else {
-    // New Facebook user: create minimal record (verified but NOT profile_complete)
-    $dummyPassword = password_hash(uniqid(), PASSWORD_DEFAULT);
+    $dummyPassword = password_hash(bin2hex(random_bytes(16)), PASSWORD_DEFAULT);
+    $username = app_social_auth_generate_username($conn, 'facebook', $facebookId);
 
     $stmt = $conn->prepare("
-        INSERT INTO users (full_name, email, password, is_verified, profile_complete, role)
-        VALUES (?, ?, ?, 1, 0, 'user')
+        INSERT INTO users (full_name, email, facebook_id, username, password, is_verified, profile_complete, role)
+        VALUES (?, ?, ?, ?, ?, 1, 0, 'user')
     ");
-    $stmt->bind_param("sss", $fullName, $email, $dummyPassword);
-    $stmt->execute();
 
-    $user = [
-        'id'               => $stmt->insert_id,
-        'full_name'        => $fullName,
-        'email'            => $email,
-        'country'          => null,
-        'city'             => null,
-        'address'          => null,
-        'postcode'         => null,
-        'dob'              => null,
-        'phone'            => null,
-        'role'             => 'user',
-        'profile_complete' => 0,
-    ];
+    if (!$stmt) {
+        $_SESSION["registration_error"] = "We could not create your Facebook account. Please try again.";
+        header("Location: " . $redirectPage);
+        exit();
+    }
+
+    $stmt->bind_param("sssss", $fullName, $email, $facebookId, $username, $dummyPassword);
+    $ok = $stmt->execute();
+    $newUserId = (int)$stmt->insert_id;
+    $stmt->close();
+
+    if (!$ok || $newUserId <= 0) {
+        $_SESSION["registration_error"] = "We could not create your Facebook account. Please try again.";
+        header("Location: " . $redirectPage);
+        exit();
+    }
+
+    $stmt = $conn->prepare("SELECT *, userID AS id FROM users WHERE userID = ? LIMIT 1");
+    if ($stmt) {
+        $stmt->bind_param("i", $newUserId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $user = $result ? $result->fetch_assoc() : null;
+        $stmt->close();
+    }
 }
 
-/* === 4. Fetch previous last_login before updating === */
-$prevLogin = null;
-$getLogin  = $conn->prepare("SELECT last_login FROM users WHERE userID = ?");
-$getLogin->bind_param("i", $user['id']);
-$getLogin->execute();
-$loginResult = $getLogin->get_result();
-if ($row = $loginResult->fetch_assoc()) {
-    $prevLogin = $row['last_login'];
+if (!$user || empty($user['id'])) {
+    $_SESSION["registration_error"] = "Facebook login could not be completed. Please try again.";
+    header("Location: " . $redirectPage);
+    exit();
 }
 
-/* === 5. Update last_login to now === */
+$userId = (int)$user['id'];
+$previousLogin = $user['last_login'] ?? null;
+
 $updateLogin = $conn->prepare("UPDATE users SET last_login = NOW() WHERE userID = ?");
-$updateLogin->bind_param("i", $user['id']);
-$updateLogin->execute();
+if ($updateLogin) {
+    $updateLogin->bind_param("i", $userId);
+    $updateLogin->execute();
+    $updateLogin->close();
+}
 
-/* === 6. Store in session === */
+session_regenerate_id(true);
+
 $profileComplete = !empty($user['profile_complete']);
 
 $_SESSION['user'] = [
-    'id'               => $user['id'],
-    'full_name'        => $user['full_name'],
-    'email'            => $user['email'],
-    'role'             => $user['role'] ?? 'user',
+    'id' => $userId,
+    'full_name' => (string)($user['full_name'] ?? $fullName),
+    'email' => (string)($user['email'] ?? $email),
+    'role' => (string)($user['role'] ?? 'user'),
     'profile_complete' => $profileComplete,
-    'last_login'       => $prevLogin
+    'is_verified' => 1,
+    'last_login' => $previousLogin,
 ];
-$_SESSION['user_id'] = $user['id'];
-$_SESSION['role'] = $user['role'] ?? 'user';
-$_SESSION['email'] = $user['email'];
-$_SESSION['full_name'] = $user['full_name'];
+$_SESSION['user_id'] = $userId;
+$_SESSION['role'] = (string)($user['role'] ?? 'user');
+$_SESSION['email'] = (string)($user['email'] ?? $email);
+$_SESSION['full_name'] = (string)($user['full_name'] ?? $fullName);
 
-/* === 7. Redirect like Google:
- * - If profile is complete, go to dashboard (index.php)
- * - If not complete (new user or missing data), go to complete_profile.php
- */
 if ($profileComplete) {
     header("Location: " . consumeAuthRedirectTarget("../index.php"));
 } else {
