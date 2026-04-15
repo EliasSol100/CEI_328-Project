@@ -58,7 +58,7 @@ $sectionMessages = [
     'logo' => 'Header logo updated.',
 ];
 $emptyScopeMessages = [
-    'all' => 'No new Home Page changes were submitted.',
+    'all' => 'No new homepage changes were submitted.',
     'hero' => 'No new hero image was submitted.',
     'collections' => 'No new Shop by Collection changes were submitted.',
     'journey' => 'No new Follow Our Journey images were submitted.',
@@ -188,7 +188,7 @@ function homepageCustomizationValue(string $value): string
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Home Page Customization - Athena Admin</title>
+  <title>Homepage Editor - Athena Admin</title>
   <link rel="stylesheet" href="assets/admin.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -199,7 +199,7 @@ function homepageCustomizationValue(string $value): string
   <main class="admin-main">
     <div class="content-header">
       <div class="content-header-left">
-        <h1>Home Page Customization</h1>
+        <h1>Homepage Editor</h1>
         <p>Work section by section, save only what you need, or batch multiple updates together with one save.</p>
       </div>
     </div>
@@ -235,7 +235,7 @@ function homepageCustomizationValue(string $value): string
 
           <div class="homepage-toolbar-actions">
             <button type="submit" name="save_scope" value="all" class="btn-primary">
-              <i class="fas fa-save"></i> Save all Home Page changes
+              <i class="fas fa-save"></i> Save all homepage changes
             </button>
             <a href="../../index.php" class="btn-secondary" target="_blank" rel="noopener">
               <i class="fas fa-arrow-up-right-from-square"></i> Preview Homepage
