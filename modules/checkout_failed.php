@@ -4,6 +4,8 @@ ini_set('display_errors', '0');
 session_start();
 
 require_once __DIR__ . '/../include/translation_helpers.php';
+require_once __DIR__ . '/../authentication/database.php';
+require_once __DIR__ . '/../include/checkout_payment_helpers.php';
 
 $project = rtrim(str_replace('\\', '/', dirname(dirname($_SERVER['SCRIPT_NAME'] ?? ''))), '/');
 if ($project === '' || $project === '.') {
@@ -14,9 +16,24 @@ $failure = $_SESSION['checkout_failed'] ?? [];
 unset($_SESSION['checkout_failed']);
 
 $provider = trim((string)($failure['provider'] ?? ($_GET['provider'] ?? '')));
+$checkoutToken = trim((string)($_GET['checkout_token'] ?? ''));
+$reason = strtolower(trim((string)($_GET['reason'] ?? '')));
 $message = trim((string)($failure['message'] ?? ''));
 if ($message === '') {
     $message = 'We could not complete your payment. Please try again or return to checkout.';
+}
+
+if (
+    $checkoutToken !== '' &&
+    $provider !== '' &&
+    $conn instanceof mysqli &&
+    !$conn->connect_error
+) {
+    $status = $reason === 'cancelled' ? 'cancelled' : 'failed';
+    $failureMessage = $reason === 'cancelled'
+        ? 'The customer cancelled the payment before confirmation.'
+        : $message;
+    checkout_payment_mark_failed($conn, $checkoutToken, $provider, $failureMessage, $status);
 }
 
 $configPath = __DIR__ . '/../authentication/get_config.php';

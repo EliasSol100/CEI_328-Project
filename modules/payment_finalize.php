@@ -28,9 +28,21 @@ if (!$conn || $conn->connect_error) {
     paymentFinalizeFail($project, 'Database connection failed while completing your payment.', $provider);
 }
 
-$pending = checkout_payment_get_pending($checkoutToken);
+$pending = checkout_payment_get_pending($conn, $checkoutToken);
 if (!$pending) {
     paymentFinalizeFail($project, 'Your payment session expired or could not be found. Please try checkout again.', $provider);
+}
+
+$existingResult = checkout_payment_get_finalized_result($pending);
+if (is_array($existingResult) && !empty($existingResult['order_id'])) {
+    $_SESSION['checkout_result'] = $existingResult;
+    if (!empty($existingResult['temp_password'])) {
+        $_SESSION['temp_password'] = (string)$existingResult['temp_password'];
+    }
+    checkout_payment_clear_cart_state();
+    checkout_payment_clear_pending($checkoutToken);
+    header('Location: ' . $project . '/modules/checkout_success.php');
+    exit;
 }
 
 if ($provider === '' || trim((string)($pending['payment_method'] ?? '')) !== $provider) {
@@ -56,6 +68,7 @@ try {
         if ($expectedSessionId !== '' && $expectedSessionId !== trim((string)($session['id'] ?? ''))) {
             throw new RuntimeException('Stripe returned an unexpected checkout session.');
         }
+        checkout_payment_update_gateway_reference($conn, $checkoutToken, 'stripe', trim((string)($session['id'] ?? '')));
 
         if (strtolower(trim((string)($session['payment_status'] ?? ''))) !== 'paid') {
             throw new RuntimeException('Stripe payment was not completed.');
@@ -81,6 +94,7 @@ try {
         if ($expectedOrderId !== '' && $expectedOrderId !== $orderId) {
             throw new RuntimeException('PayPal returned an unexpected order reference.');
         }
+        checkout_payment_update_gateway_reference($conn, $checkoutToken, 'paypal', $orderId);
 
         $capture = payment_gateway_capture_paypal_order($conn, $orderId);
         if (strtoupper(trim((string)($capture['status'] ?? ''))) !== 'COMPLETED') {
@@ -107,5 +121,6 @@ try {
     exit;
 } catch (Throwable $e) {
     error_log('Payment finalize error: ' . $e->getMessage());
+    checkout_payment_mark_failed($conn, $checkoutToken, $provider, $e->getMessage());
     paymentFinalizeFail($project, 'Your payment could not be confirmed. Please try again or return to checkout.', $provider);
 }

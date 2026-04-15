@@ -751,7 +751,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $loyaltyDiscount = (float)($previewLoyaltyRedemption['discount_amount'] ?? 0);
                 $combinedDiscountTotal = round($couponDiscount + $loyaltyDiscount, 2);
                 $totalAmount = max(0, ($cartTotal - $combinedDiscountTotal) + $shippingCost);
-                $pendingPayment = checkout_payment_store_pending([
+                $pendingPayment = checkout_payment_store_pending($conn, [
                     'payment_method' => $totalAmount > 0 ? $paymentMethod : 'manual',
                     'items' => $cartItems,
                     'is_logged_in' => $isLoggedIn,
@@ -807,6 +807,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $pendingPayment['gateway_reference'] = (string)$gatewayStart['gateway_reference'];
+                checkout_payment_update_gateway_reference(
+                    $conn,
+                    (string)$pendingPayment['checkout_token'],
+                    (string)$pendingPayment['payment_method'],
+                    (string)$gatewayStart['gateway_reference']
+                );
                 $_SESSION['pending_checkout_payment'] = $pendingPayment;
 
                 header('Location: ' . (string)$gatewayStart['redirect_url']);

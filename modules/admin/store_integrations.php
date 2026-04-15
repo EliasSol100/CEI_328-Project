@@ -28,8 +28,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $saved = app_system_config_set_many($conn, [
             'stripe_publishable_key' => trim((string)($_POST['stripe_publishable_key'] ?? '')),
             'stripe_secret_key' => trim((string)($_POST['stripe_secret_key'] ?? '')),
+            'stripe_webhook_secret' => trim((string)($_POST['stripe_webhook_secret'] ?? '')),
             'paypal_client_id' => trim((string)($_POST['paypal_client_id'] ?? '')),
             'paypal_client_secret' => trim((string)($_POST['paypal_client_secret'] ?? '')),
+            'paypal_webhook_id' => trim((string)($_POST['paypal_webhook_id'] ?? '')),
             'paypal_mode' => $paypalMode,
         ]);
 
@@ -64,8 +66,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $stripePublishableKey = app_integration_setting($conn, 'STRIPE_PUBLISHABLE_KEY', 'stripe_publishable_key', '');
 $stripeSecretKey = app_integration_setting($conn, 'STRIPE_SECRET_KEY', 'stripe_secret_key', '');
+$stripeWebhookSecret = app_integration_setting($conn, 'STRIPE_WEBHOOK_SECRET', 'stripe_webhook_secret', '');
 $paypalClientId = app_integration_setting($conn, 'PAYPAL_CLIENT_ID', 'paypal_client_id', '');
 $paypalClientSecret = app_integration_setting($conn, 'PAYPAL_CLIENT_SECRET', 'paypal_client_secret', '');
+$paypalWebhookId = app_integration_setting($conn, 'PAYPAL_WEBHOOK_ID', 'paypal_webhook_id', '');
 $paypalMode = strtolower(app_integration_setting($conn, 'PAYPAL_MODE', 'paypal_mode', 'live'));
 if (!in_array($paypalMode, ['live', 'sandbox'], true)) {
     $paypalMode = 'live';
@@ -76,6 +80,8 @@ $facebookConfig = app_social_auth_config($conn, 'facebook');
 
 $googleRedirectUri = app_url('/authentication/google_callback.php');
 $facebookRedirectUri = app_url('/authentication/facebook_callback.php');
+$stripeWebhookUrl = app_url('/modules/stripe_webhook.php');
+$paypalWebhookUrl = app_url('/modules/paypal_webhook.php');
 
 $stripeConfigured = $stripeSecretKey !== '';
 $paypalConfigured = $paypalClientId !== '' && $paypalClientSecret !== '';
@@ -116,6 +122,9 @@ $facebookConfigured = !empty($facebookConfig['enabled']);
         </p>
         <p class="alert-text">
           Google and Facebook login will stay unavailable until both the client ID/app ID and secret are saved here and the redirect URLs below are also added in the provider dashboards.
+        </p>
+        <p class="alert-text">
+          For the most reliable checkout flow, also add the Stripe webhook signing secret and the PayPal webhook ID after creating webhook endpoints in the payment provider dashboards.
         </p>
       </div>
 
@@ -160,6 +169,20 @@ $facebookConfigured = !empty($facebookConfig['enabled']);
                   <input id="stripe_secret_key" name="stripe_secret_key" class="form-input" type="password" autocomplete="off" placeholder="sk_live_... or sk_test_..." value="<?= htmlspecialchars($stripeSecretKey) ?>">
                   <div class="form-hint">Required for Stripe Checkout session creation and payment verification.</div>
                 </div>
+
+                <div class="form-group" style="margin-top:16px;">
+                  <label class="form-label" for="stripe_webhook_secret">Stripe Webhook Signing Secret</label>
+                  <input id="stripe_webhook_secret" name="stripe_webhook_secret" class="form-input" type="password" autocomplete="off" placeholder="whsec_..." value="<?= htmlspecialchars($stripeWebhookSecret) ?>">
+                  <div class="form-hint">Recommended for production so paid Stripe sessions can still be finalized if the customer never returns to the success page.</div>
+                </div>
+
+                <div class="form-group" style="margin-bottom:0;">
+                  <label class="form-label" for="stripe_webhook_url">Stripe Webhook URL</label>
+                  <div class="flex gap-2">
+                    <input id="stripe_webhook_url" class="form-input" type="text" readonly value="<?= htmlspecialchars($stripeWebhookUrl) ?>">
+                    <button class="btn-secondary" type="button" onclick="copyCode(document.getElementById('stripe_webhook_url').value)">Copy</button>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -194,6 +217,20 @@ $facebookConfigured = !empty($facebookConfig['enabled']);
                 <div class="form-group" style="margin-bottom:0;">
                   <label class="form-label" for="paypal_client_secret">PayPal Client Secret</label>
                   <input id="paypal_client_secret" name="paypal_client_secret" class="form-input" type="password" autocomplete="off" placeholder="PayPal client secret" value="<?= htmlspecialchars($paypalClientSecret) ?>">
+                </div>
+
+                <div class="form-group" style="margin-top:16px;">
+                  <label class="form-label" for="paypal_webhook_id">PayPal Webhook ID</label>
+                  <input id="paypal_webhook_id" name="paypal_webhook_id" class="form-input" type="text" autocomplete="off" placeholder="PayPal webhook ID" value="<?= htmlspecialchars($paypalWebhookId) ?>">
+                  <div class="form-hint">Recommended for production so approved PayPal orders can be captured and finalized safely through webhook confirmation.</div>
+                </div>
+
+                <div class="form-group" style="margin-bottom:0;">
+                  <label class="form-label" for="paypal_webhook_url">PayPal Webhook URL</label>
+                  <div class="flex gap-2">
+                    <input id="paypal_webhook_url" class="form-input" type="text" readonly value="<?= htmlspecialchars($paypalWebhookUrl) ?>">
+                    <button class="btn-secondary" type="button" onclick="copyCode(document.getElementById('paypal_webhook_url').value)">Copy</button>
+                  </div>
                 </div>
               </div>
             </div>

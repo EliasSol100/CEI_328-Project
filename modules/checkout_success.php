@@ -14,7 +14,7 @@ if (!isset($_SESSION['checkout_result'])) {
 $result = $_SESSION['checkout_result'];
 unset($_SESSION['checkout_result']);
 
-$tempPassword = $_SESSION['temp_password'] ?? null;
+$tempPassword = $_SESSION['temp_password'] ?? ($result['temp_password'] ?? null);
 unset($_SESSION['temp_password']);
 
 // Correct relative path for includes

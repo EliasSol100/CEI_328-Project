@@ -68,7 +68,9 @@ if (!function_exists('payment_gateway_is_placeholder_value')) {
             'sk_live_or_test_here',
             'your_paypal_client_id',
             'your_paypal_client_secret',
+            'your_paypal_webhook_id',
             'your_stripe_secret_key',
+            'your_stripe_webhook_secret',
             'changeme',
             'replace_me',
             'replace-with-real-value',
@@ -162,6 +164,22 @@ if (!function_exists('payment_gateway_http_request')) {
             'body_raw' => $bodyText,
             'json' => is_array($json) ? $json : null,
         ];
+    }
+}
+
+if (!function_exists('payment_gateway_json_encode')) {
+    function payment_gateway_json_encode(array $payload): string
+    {
+        $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return is_string($json) ? $json : '{}';
+    }
+}
+
+if (!function_exists('payment_gateway_server_header')) {
+    function payment_gateway_server_header(array $server, string $headerName): string
+    {
+        $serverKey = 'HTTP_' . strtoupper(str_replace('-', '_', $headerName));
+        return trim((string)($server[$serverKey] ?? ''));
     }
 }
 
@@ -283,6 +301,7 @@ if (!function_exists('payment_gateway_paypal_config')) {
         return [
             'client_id' => payment_gateway_setting($conn, 'PAYPAL_CLIENT_ID', 'paypal_client_id', ''),
             'client_secret' => payment_gateway_setting($conn, 'PAYPAL_CLIENT_SECRET', 'paypal_client_secret', ''),
+            'webhook_id' => payment_gateway_setting($conn, 'PAYPAL_WEBHOOK_ID', 'paypal_webhook_id', ''),
             'mode' => $mode,
             'base_url' => $mode === 'sandbox' ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com',
         ];
@@ -423,5 +442,114 @@ if (!function_exists('payment_gateway_capture_paypal_order')) {
         }
 
         return $json;
+    }
+}
+
+if (!function_exists('payment_gateway_verify_stripe_webhook_event')) {
+    function payment_gateway_verify_stripe_webhook_event(mysqli $conn, string $payload, string $signatureHeader): array
+    {
+        $secret = payment_gateway_setting($conn, 'STRIPE_WEBHOOK_SECRET', 'stripe_webhook_secret', '');
+        if ($secret === '') {
+            throw new RuntimeException('Stripe webhook secret has not been configured.');
+        }
+
+        $timestamp = 0;
+        $signatures = [];
+        foreach (explode(',', $signatureHeader) as $part) {
+            [$key, $value] = array_pad(explode('=', trim($part), 2), 2, '');
+            if ($key === 't') {
+                $timestamp = (int)$value;
+            } elseif ($key === 'v1' && $value !== '') {
+                $signatures[] = $value;
+            }
+        }
+
+        if ($timestamp <= 0 || $signatures === []) {
+            throw new RuntimeException('Stripe webhook signature header is invalid.');
+        }
+
+        if (abs(time() - $timestamp) > 300) {
+            throw new RuntimeException('Stripe webhook timestamp is outside the accepted window.');
+        }
+
+        $signedPayload = $timestamp . '.' . $payload;
+        $expectedSignature = hash_hmac('sha256', $signedPayload, $secret);
+        $matched = false;
+        foreach ($signatures as $signature) {
+            if (hash_equals($expectedSignature, $signature)) {
+                $matched = true;
+                break;
+            }
+        }
+
+        if (!$matched) {
+            throw new RuntimeException('Stripe webhook signature verification failed.');
+        }
+
+        $event = json_decode($payload, true);
+        if (!is_array($event)) {
+            throw new RuntimeException('Stripe webhook payload is not valid JSON.');
+        }
+
+        return $event;
+    }
+}
+
+if (!function_exists('payment_gateway_verify_paypal_webhook_event')) {
+    function payment_gateway_verify_paypal_webhook_event(mysqli $conn, array $server, string $payload): array
+    {
+        $config = payment_gateway_paypal_config($conn);
+        $webhookId = trim((string)($config['webhook_id'] ?? ''));
+        if ($webhookId === '') {
+            throw new RuntimeException('PayPal webhook ID has not been configured.');
+        }
+
+        $event = json_decode($payload, true);
+        if (!is_array($event)) {
+            throw new RuntimeException('PayPal webhook payload is not valid JSON.');
+        }
+
+        $headers = [
+            'transmission_id' => payment_gateway_server_header($server, 'PAYPAL-TRANSMISSION-ID'),
+            'transmission_time' => payment_gateway_server_header($server, 'PAYPAL-TRANSMISSION-TIME'),
+            'transmission_sig' => payment_gateway_server_header($server, 'PAYPAL-TRANSMISSION-SIG'),
+            'cert_url' => payment_gateway_server_header($server, 'PAYPAL-CERT-URL'),
+            'auth_algo' => payment_gateway_server_header($server, 'PAYPAL-AUTH-ALGO'),
+        ];
+
+        foreach ($headers as $value) {
+            if ($value === '') {
+                throw new RuntimeException('PayPal webhook verification headers are missing.');
+            }
+        }
+
+        $accessToken = payment_gateway_fetch_paypal_access_token($conn);
+        $response = payment_gateway_http_request(
+            'POST',
+            $config['base_url'] . '/v1/notifications/verify-webhook-signature',
+            [
+                'Authorization: Bearer ' . $accessToken,
+                'Content-Type: application/json',
+                'Accept: application/json',
+            ],
+            payment_gateway_json_encode([
+                'transmission_id' => $headers['transmission_id'],
+                'transmission_time' => $headers['transmission_time'],
+                'cert_url' => $headers['cert_url'],
+                'auth_algo' => $headers['auth_algo'],
+                'transmission_sig' => $headers['transmission_sig'],
+                'webhook_id' => $webhookId,
+                'webhook_event' => $event,
+            ])
+        );
+
+        $json = $response['json'] ?? [];
+        $verificationStatus = strtoupper(trim((string)($json['verification_status'] ?? '')));
+        if ($response['status'] < 200 || $response['status'] >= 300 || $verificationStatus !== 'SUCCESS') {
+            $message = trim((string)($json['message'] ?? $json['verification_status'] ?? $response['body_raw'] ?? 'PayPal webhook verification failed.'));
+            throw new RuntimeException($message !== '' ? $message : 'PayPal webhook verification failed.');
+        }
+
+        return $event;
     }
 }
