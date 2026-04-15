@@ -590,16 +590,15 @@ if ($vpRes) {
     .shop-carousel {
         overflow: hidden;
         background: #fcf8ff;
-        transform: translateZ(0);
+        --bs-carousel-transition-duration: 0.78s;
+        --bs-carousel-transition: transform var(--bs-carousel-transition-duration) cubic-bezier(0.22, 1, 0.36, 1);
     }
     .shop-carousel .carousel-inner,
     .shop-carousel .carousel-item,
     .shop-carousel .carousel-item img {
         backface-visibility: hidden;
-        transform: translateZ(0);
     }
     .shop-carousel .carousel-item {
-        transition: transform 0.78s cubic-bezier(0.22, 1, 0.36, 1);
         will-change: transform;
     }
     .shop-carousel .carousel-item img {
