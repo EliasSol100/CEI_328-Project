@@ -615,7 +615,8 @@
 }
 
 @media (max-width: 980px) {
-    .custom-order-layout {
+    .custom-order-layout,
+    .custom-order-layout.custom-order-layout-single {
         grid-template-columns: 1fr;
     }
 
