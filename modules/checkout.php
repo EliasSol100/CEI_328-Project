@@ -1054,10 +1054,10 @@ if (file_exists($headerPath)) {
                 <fieldset>
                     <legend data-translate="checkoutPayment">Payment</legend>
                     <div class="form-options form-options-column">
-                        <label class="option-label"><input type="radio" name="payment_method" value="stripe" <?= (($formData['payment_method'] ?? $defaultPaymentMethod) === 'stripe') ? 'checked' : '' ?> <?= empty($availablePaymentMethods['stripe']) ? 'disabled' : '' ?> required> <span data-translate="checkoutPaymentStripe">Credit Card (Stripe)</span><?= empty($availablePaymentMethods['stripe']) ? ' <em>(Not configured)</em>' : '' ?></label>
-                        <label class="option-label"><input type="radio" name="payment_method" value="paypal" <?= (($formData['payment_method'] ?? $defaultPaymentMethod) === 'paypal') ? 'checked' : '' ?> <?= empty($availablePaymentMethods['paypal']) ? 'disabled' : '' ?>> <span data-translate="checkoutPaymentPaypal">PayPal</span><?= empty($availablePaymentMethods['paypal']) ? ' <em>(Not configured)</em>' : '' ?></label>
+                        <label class="option-label"><input type="radio" name="payment_method" value="stripe" <?= (($formData['payment_method'] ?? $defaultPaymentMethod) === 'stripe') ? 'checked' : '' ?> <?= empty($availablePaymentMethods['stripe']) ? 'disabled' : '' ?> required> <span data-translate="checkoutPaymentStripe">Credit Card (Stripe)</span><?= empty($availablePaymentMethods['stripe']) ? ' <em' . app_translate_text_attrs('(Not configured)', '(Δεν έχει ρυθμιστεί)') . '>(Not configured)</em>' : '' ?></label>
+                        <label class="option-label"><input type="radio" name="payment_method" value="paypal" <?= (($formData['payment_method'] ?? $defaultPaymentMethod) === 'paypal') ? 'checked' : '' ?> <?= empty($availablePaymentMethods['paypal']) ? 'disabled' : '' ?>> <span data-translate="checkoutPaymentPaypal">PayPal</span><?= empty($availablePaymentMethods['paypal']) ? ' <em' . app_translate_text_attrs('(Not configured)', '(Δεν έχει ρυθμιστεί)') . '>(Not configured)</em>' : '' ?></label>
                     </div>
-                    <span class="form-helper">Successful payments redirect to the confirmation page automatically. If a payment is cancelled or fails, the customer will be sent to the checkout failed page.</span>
+                    <span class="form-helper"<?= app_translate_text_attrs('Successful payments redirect to the confirmation page automatically. If a payment is cancelled or fails, the customer will be sent to the checkout failed page.', 'Οι επιτυχημένες πληρωμές μεταφέρουν αυτόματα στη σελίδα επιβεβαίωσης. Αν μια πληρωμή ακυρωθεί ή αποτύχει, ο πελάτης θα μεταφερθεί στη σελίδα αποτυχημένου checkout.') ?>>Successful payments redirect to the confirmation page automatically. If a payment is cancelled or fails, the customer will be sent to the checkout failed page.</span>
                     <?php if (isset($errors['payment_method'])): ?><span class="error"><?= $errors['payment_method'] ?></span><?php endif; ?>
                 </fieldset>
 
@@ -1178,7 +1178,7 @@ if (file_exists($headerPath)) {
                 <div class="summary-row"><span data-translate="subtotal">Subtotal</span><span>&euro;<span id="orderSubtotal"><?= number_format($cartTotal,2) ?></span></span></div>
                 <div class="summary-row"><span data-translate="checkoutCouponDiscount">Coupon Discount</span><span>-&euro;<span id="orderCouponDiscount"><?= number_format($couponDiscount,2) ?></span></span></div>
                 <div class="summary-row"><span data-translate="checkoutLoyaltyDiscount">Loyalty Discount</span><span>-&euro;<span id="orderLoyaltyDiscount"><?= number_format($loyaltyDiscount,2) ?></span></span></div>
-                <div class="summary-row"><span data-translate="shipping">Shipping</span><span id="orderShipping"><?= $freeShippingEligible ? 'FREE' : ('€' . number_format($displayShippingCost,2)) ?></span></div>
+                <div class="summary-row"><span data-translate="shipping">Shipping</span><span id="orderShipping"><?php if ($freeShippingEligible): ?><span data-translate="freeLabel">FREE</span><?php else: ?>€<?= number_format($displayShippingCost,2) ?><?php endif; ?></span></div>
                 <div class="summary-row summary-row-total"><span data-translate="total">Total</span><span>&euro;<span id="orderTotal"><?= number_format($displayTotal,2) ?></span></span></div>
             </div>
         </div>
@@ -1860,6 +1860,4 @@ if (file_exists($footerPath)) {
     echo "</body></html>";
 }
 ?>
-
-
 
