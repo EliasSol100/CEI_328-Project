@@ -750,6 +750,95 @@ body.account-page .footer {
     box-shadow: 0 4px 12px rgba(153, 50, 204, 0.3);
 }
 
+.footer-inline-link {
+    appearance: none;
+    border: none;
+    padding: 0;
+    background: transparent;
+    color: var(--text-gray);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    transition: color 0.3s;
+}
+
+.footer-inline-link:hover {
+    color: var(--purple-dark);
+}
+
+.footer-legal-summary {
+    margin-bottom: 36px;
+    padding: 28px;
+    border-radius: 24px;
+    border: 1px solid rgba(106, 13, 173, 0.12);
+    background:
+        radial-gradient(circle at top left, rgba(255, 255, 255, 0.78) 0%, rgba(255, 255, 255, 0) 48%),
+        linear-gradient(135deg, rgba(255, 255, 255, 0.78) 0%, rgba(255, 255, 255, 0.48) 100%);
+    box-shadow: 0 18px 40px rgba(106, 13, 173, 0.08);
+}
+
+.footer-kicker {
+    margin-bottom: 10px;
+    color: #8b5dc5;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.footer-legal-title {
+    margin-bottom: 12px;
+}
+
+.footer-legal-text {
+    max-width: 960px;
+}
+
+.footer-legal-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 18px;
+    margin: 22px 0;
+    padding: 0;
+    list-style: none;
+}
+
+.footer-legal-list li {
+    position: relative;
+    min-height: 100%;
+    padding: 16px 16px 16px 44px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.7);
+    color: #4d4260;
+    font-size: 14px;
+    line-height: 1.7;
+}
+
+.footer-legal-list li::before {
+    content: "\f058";
+    position: absolute;
+    top: 18px;
+    left: 16px;
+    color: var(--purple-dark);
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    font-size: 16px;
+}
+
+.footer-legal-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--purple-dark);
+    font-size: 14px;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.footer-legal-link:hover {
+    text-decoration: underline;
+}
+
 .footer-bottom {
     display: flex;
     justify-content: space-between;
@@ -798,6 +887,194 @@ body.account-page .footer {
     color: var(--text-gray);
 }
 
+.cookie-consent-open,
+.cookie-consent-open body {
+    overflow: hidden;
+}
+
+.cookie-consent-shell {
+    position: fixed;
+    inset: 0;
+    z-index: 5000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.cookie-consent-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(35, 24, 54, 0.64);
+    backdrop-filter: blur(6px);
+}
+
+.cookie-consent-dialog {
+    position: relative;
+    z-index: 1;
+    width: min(760px, 100%);
+    max-height: min(90vh, 760px);
+    overflow-y: auto;
+    padding: 30px;
+    border-radius: 28px;
+    border: 1px solid rgba(143, 84, 217, 0.18);
+    background:
+        radial-gradient(circle at top right, rgba(255, 220, 241, 0.8) 0%, rgba(255, 220, 241, 0) 30%),
+        linear-gradient(180deg, #ffffff 0%, #fcf8ff 100%);
+    box-shadow: 0 28px 70px rgba(34, 16, 57, 0.28);
+}
+
+.cookie-consent-close {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 999px;
+    background: rgba(106, 13, 173, 0.08);
+    color: var(--purple-dark);
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.cookie-consent-eyebrow {
+    margin-bottom: 10px;
+    color: #a64d8b;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.cookie-consent-dialog h2 {
+    margin-bottom: 14px;
+    color: #2b1848;
+    font-size: clamp(1.9rem, 2.4vw, 2.4rem);
+    line-height: 1.15;
+}
+
+.cookie-consent-description,
+.cookie-consent-note {
+    color: #5c516f;
+    font-size: 15px;
+    line-height: 1.75;
+}
+
+.cookie-consent-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 24px 0 20px;
+}
+
+.cookie-consent-btn {
+    min-height: 48px;
+    border-radius: 999px;
+    padding: 12px 20px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.cookie-consent-btn:hover {
+    transform: translateY(-1px);
+}
+
+.cookie-consent-btn-primary {
+    border: none;
+    background: linear-gradient(90deg, var(--purple-gradient-start) 0%, var(--purple-gradient-end) 100%);
+    color: #fff;
+    box-shadow: 0 10px 24px rgba(153, 50, 204, 0.2);
+}
+
+.cookie-consent-btn-secondary,
+.cookie-consent-btn-outline {
+    border: 1px solid rgba(106, 13, 173, 0.18);
+    background: #fff;
+    color: #442b67;
+}
+
+.cookie-consent-panel {
+    display: grid;
+    gap: 14px;
+    margin-bottom: 18px;
+}
+
+.cookie-consent-option {
+    padding: 18px 18px 16px;
+    border-radius: 20px;
+    border: 1px solid #eadff7;
+    background: rgba(255, 255, 255, 0.84);
+}
+
+.cookie-consent-option-locked {
+    border-color: rgba(143, 84, 217, 0.2);
+    background: linear-gradient(180deg, rgba(245, 236, 255, 0.9) 0%, rgba(255, 255, 255, 0.92) 100%);
+}
+
+.cookie-consent-option-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.cookie-consent-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: #2e184d;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.cookie-consent-checkbox input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: #8f54d9;
+}
+
+.cookie-consent-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(143, 84, 217, 0.12);
+    color: #6a0dad;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.cookie-consent-option p {
+    color: #5c516f;
+    font-size: 14px;
+    line-height: 1.7;
+}
+
+.cookie-consent-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-top: 12px;
+}
+
+.cookie-consent-links a {
+    color: var(--purple-dark);
+    font-size: 14px;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.cookie-consent-links a:hover {
+    text-decoration: underline;
+}
+
 /* Responsive Design */
 @media (max-width: 1024px) {
     .products-grid {
@@ -814,6 +1091,10 @@ body.account-page .footer {
 
     .footer-content {
         grid-template-columns: repeat(2, 1fr);
+    }
+
+    .footer-legal-list {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -870,6 +1151,14 @@ body.account-page .footer {
         flex-direction: column;
         gap: 20px;
         text-align: center;
+    }
+
+    .cookie-consent-actions {
+        flex-direction: column;
+    }
+
+    .cookie-consent-btn {
+        width: 100%;
     }
 }
 
@@ -972,6 +1261,29 @@ body.account-page .footer {
     .footer-content {
         gap: 24px;
         margin-bottom: 28px;
+    }
+
+    .footer-legal-summary {
+        padding: 22px 18px;
+        border-radius: 20px;
+    }
+
+    .footer-legal-list li {
+        padding: 14px 14px 14px 40px;
+    }
+
+    .cookie-consent-shell {
+        padding: 14px;
+    }
+
+    .cookie-consent-dialog {
+        padding: 22px 18px;
+        border-radius: 22px;
+    }
+
+    .cookie-consent-option-heading {
+        align-items: flex-start;
+        flex-direction: column;
     }
 }
 

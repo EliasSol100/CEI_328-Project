@@ -1011,7 +1011,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
     <link rel="stylesheet" href="../assets/styling/account.css?v=<?= (int)@filemtime(__DIR__ . '/../assets/styling/account.css') ?>">
 
     <!-- Translations -->
-    <script src="../assets/js/translations.js" defer></script>
+    <script src="../assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/translations.js') ?>" defer></script>
 </head>
 
 <body class="account-page"<?= app_translate_page_title_attrs('My Account - Athina E-Shop', 'Ο Λογαριασμός μου - Athina E-Shop') ?>>

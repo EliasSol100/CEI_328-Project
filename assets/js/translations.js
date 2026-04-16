@@ -716,7 +716,75 @@ Object.assign(translations.el, {
     productCompleteCustomColours: "Παρακαλώ συμπληρώστε κάθε προτίμηση χρώματος πριν συνεχίσετε."
 });
 
-let currentLanguage = localStorage.getItem("language") || "en";
+const APP_COOKIE_CONSENT_NAME = "athina_cookie_consent";
+
+function readNamedCookie(name) {
+    const encodedName = encodeURIComponent(name) + "=";
+    const parts = document.cookie ? document.cookie.split("; ") : [];
+
+    for (let index = 0; index < parts.length; index += 1) {
+        if (parts[index].indexOf(encodedName) === 0) {
+            return decodeURIComponent(parts[index].slice(encodedName.length));
+        }
+    }
+
+    return "";
+}
+
+function readCookieConsent() {
+    const rawValue = readNamedCookie(APP_COOKIE_CONSENT_NAME);
+    if (!rawValue) {
+        return null;
+    }
+
+    try {
+        return JSON.parse(rawValue);
+    } catch (error) {
+        return null;
+    }
+}
+
+function canUsePreferenceStorage() {
+    const consent = readCookieConsent();
+    return Boolean(consent && consent.preferences);
+}
+
+function readPreferenceStorage(key) {
+    if (!canUsePreferenceStorage()) {
+        return null;
+    }
+
+    try {
+        return window.localStorage.getItem(key);
+    } catch (error) {
+        return null;
+    }
+}
+
+function writePreferenceStorage(key, value) {
+    try {
+        if (canUsePreferenceStorage()) {
+            window.localStorage.setItem(key, value);
+            return;
+        }
+
+        window.localStorage.removeItem(key);
+    } catch (error) {
+        // Ignore localStorage access issues silently.
+    }
+}
+
+function removePreferenceStorage(key) {
+    try {
+        window.localStorage.removeItem(key);
+    } catch (error) {
+        // Ignore localStorage access issues silently.
+    }
+}
+
+window.appPreferenceStorageAllowed = canUsePreferenceStorage;
+
+let currentLanguage = readPreferenceStorage("language") || "en";
 
 function replaceParams(text, params = {}) {
     let output = String(text ?? "");
@@ -793,7 +861,7 @@ function applyPairTranslations(lang) {
 
 function setLanguage(lang) {
     currentLanguage = lang;
-    localStorage.setItem("language", lang);
+    writePreferenceStorage("language", lang);
 
     document.querySelectorAll("[data-translate]").forEach((element) => {
         const key = element.getAttribute("data-translate");
@@ -841,6 +909,12 @@ window.appCurrentLanguage = function () {
     return currentLanguage;
 };
 window.appSetLanguage = setLanguage;
+
+document.addEventListener("app:cookieconsentchange", () => {
+    if (!canUsePreferenceStorage()) {
+        removePreferenceStorage("language");
+    }
+});
 
 document.addEventListener("DOMContentLoaded", () => {
     setLanguage(currentLanguage);

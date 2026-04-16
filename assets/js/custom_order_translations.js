@@ -1,5 +1,17 @@
 (function () {
-    var currentLanguage = localStorage.getItem('language') || 'en';
+    function readStoredLanguage() {
+        if (typeof window.appPreferenceStorageAllowed === 'function' && !window.appPreferenceStorageAllowed()) {
+            return null;
+        }
+
+        try {
+            return window.localStorage.getItem('language');
+        } catch (error) {
+            return null;
+        }
+    }
+
+    var currentLanguage = readStoredLanguage() || 'en';
     var customOrderTranslations = {
         en: {
             pageTitle: 'Creations by Athina - Custom Order',
@@ -67,7 +79,7 @@
     }
 
     function getActiveLanguage() {
-        return document.documentElement.lang || localStorage.getItem('language') || currentLanguage || 'en';
+        return document.documentElement.lang || readStoredLanguage() || currentLanguage || 'en';
     }
 
     applyCustomOrderTranslations(getActiveLanguage());

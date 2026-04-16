@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/translation_helpers.php';
+
 $footerScript = $_SERVER['PHP_SELF'] ?? '';
 $footerRootPrefix = (
     strpos($footerScript, '/profile/') !== false ||
@@ -40,6 +42,13 @@ unset($_SESSION['newsletter_flash']);
                     <li><a href="<?= htmlspecialchars($footerRootPrefix) ?>shipping_returns.php" data-translate="shippingReturns">Shipping & Returns</a></li>
                     <li><a href="<?= htmlspecialchars($footerRootPrefix) ?>terms.php" data-translate="termsOfService">Terms of Service</a></li>
                     <li><a href="<?= htmlspecialchars($footerRootPrefix) ?>faq.php" data-translate="faq">FAQ</a></li>
+                    <li>
+                        <button type="button"
+                                class="footer-inline-link"
+                                data-cookie-preferences-trigger<?= app_translate_text_attrs('Cookie Settings', 'Ρυθμίσεις Cookies') ?>>
+                            Cookie Settings
+                        </button>
+                    </li>
                 </ul>
             </div>
 
@@ -70,6 +79,40 @@ unset($_SESSION['newsletter_flash']);
             </div>
         </div>
 
+        <section class="footer-legal-summary"
+                 aria-labelledby="footer-terms-title">
+            <div class="footer-legal-copy">
+                <p class="footer-kicker"<?= app_translate_text_attrs('Terms at a glance', 'Όροι με μια ματιά') ?>>Terms at a glance</p>
+                <h4 id="footer-terms-title"
+                    class="footer-title footer-legal-title"<?= app_translate_text_attrs('Terms of Service', 'Όροι Χρήσης') ?>>
+                    Terms of Service
+                </h4>
+                <p class="footer-text footer-legal-text"<?= app_translate_text_attrs('By browsing or ordering from Creations by Athina, customers agree that handmade items may vary slightly, orders depend on availability and payment confirmation, custom requests require direct approval, and returns, privacy, and checkout rules apply as described on the policy pages.', 'Με την περιήγηση ή την παραγγελία από το Creations by Athina, οι πελάτες αποδέχονται ότι τα χειροποίητα προϊόντα μπορεί να έχουν μικρές διαφορές, οι παραγγελίες εξαρτώνται από διαθεσιμότητα και επιβεβαίωση πληρωμής, τα custom αιτήματα χρειάζονται άμεση έγκριση, και ισχύουν οι κανόνες επιστροφών, απορρήτου και checkout όπως περιγράφονται στις σελίδες πολιτικών.') ?>>
+                    By browsing or ordering from Creations by Athina, customers agree that handmade items may vary slightly, orders depend on availability and payment confirmation, custom requests require direct approval, and returns, privacy, and checkout rules apply as described on the policy pages.
+                </p>
+            </div>
+
+            <ul class="footer-legal-list">
+                <li<?= app_translate_text_attrs('Handmade products can have small natural variations in color, size, and finish.', 'Τα χειροποίητα προϊόντα μπορεί να έχουν μικρές φυσικές διαφορές σε χρώμα, μέγεθος και τελείωμα.') ?>>
+                    Handmade products can have small natural variations in color, size, and finish.
+                </li>
+                <li<?= app_translate_text_attrs('Orders are confirmed only after availability checks and successful payment authorisation.', 'Οι παραγγελίες επιβεβαιώνονται μόνο μετά από έλεγχο διαθεσιμότητας και επιτυχή έγκριση πληρωμής.') ?>>
+                    Orders are confirmed only after availability checks and successful payment authorisation.
+                </li>
+                <li<?= app_translate_text_attrs('Custom and made-to-order work may need extra production time and direct communication before purchase.', 'Οι custom και made-to-order παραγγελίες μπορεί να χρειάζονται επιπλέον χρόνο παραγωγής και άμεση επικοινωνία πριν από την αγορά.') ?>>
+                    Custom and made-to-order work may need extra production time and direct communication before purchase.
+                </li>
+                <li<?= app_translate_text_attrs('Using the website means following the shop policies for payments, shipping, returns, accounts, and acceptable use.', 'Η χρήση του website σημαίνει συμμόρφωση με τις πολιτικές του καταστήματος για πληρωμές, αποστολές, επιστροφές, λογαριασμούς και αποδεκτή χρήση.') ?>>
+                    Using the website means following the shop policies for payments, shipping, returns, accounts, and acceptable use.
+                </li>
+            </ul>
+
+            <a href="<?= htmlspecialchars($footerRootPrefix) ?>terms.php"
+               class="footer-legal-link"<?= app_translate_text_attrs('Read the full Terms of Service', 'Διαβάστε τους πλήρεις Όρους Χρήσης') ?>>
+                Read the full Terms of Service
+            </a>
+        </section>
+
         <div class="footer-bottom">
             <div class="social-icons">
                 <a href="https://www.instagram.com/creations.by.athina/"
@@ -98,3 +141,8 @@ unset($_SESSION['newsletter_flash']);
         </div>
     </div>
 </footer>
+<?php
+$cookieRootPrefix = $footerRootPrefix;
+include __DIR__ . '/cookie_consent.php';
+?>
+<script src="<?= htmlspecialchars($footerRootPrefix, ENT_QUOTES, 'UTF-8') ?>assets/js/cookie-consent.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/cookie-consent.js') ?>" defer></script>
