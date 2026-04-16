@@ -902,6 +902,10 @@ body.account-page .footer {
     padding: 24px;
 }
 
+.cookie-consent-shell[hidden] {
+    display: none !important;
+}
+
 .cookie-consent-backdrop {
     position: absolute;
     inset: 0;
@@ -1001,6 +1005,10 @@ body.account-page .footer {
     display: grid;
     gap: 14px;
     margin-bottom: 18px;
+}
+
+.cookie-consent-panel[hidden] {
+    display: none !important;
 }
 
 .cookie-consent-option {
