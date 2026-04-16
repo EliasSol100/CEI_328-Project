@@ -149,6 +149,9 @@ if (!$conn) {
 // Set charset to utf8mb4
 mysqli_set_charset($conn, "utf8mb4");
 
+require_once dirname(__DIR__) . '/include/auth_session.php';
+app_auth_bootstrap($conn);
+
 if (!function_exists('authNormalizeRedirectTarget')) {
     function authNormalizeRedirectTarget(string $target): string
     {

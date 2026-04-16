@@ -1,8 +1,8 @@
 <?php
 session_start();
-require_once __DIR__ . "/../include/security.php";
-require_once "database.php";
-require_once __DIR__ . "/../include/platform_integrations.php";
+require_once __DIR__ . '/../include/security.php';
+require_once __DIR__ . '/database.php';
+require_once __DIR__ . '/../include/platform_integrations.php';
 
 app_system_config_seed_defaults($conn, app_platform_integrations_default_values());
 
@@ -14,24 +14,18 @@ $googleClientId = (string)($googleOauthConfig['client_id'] ?? '');
 $facebookAppId = (string)($facebookOauthConfig['client_id'] ?? '');
 
 $loginError = '';
-$loginInputValue = trim((string)($_POST["login_input"] ?? ''));
+$rememberMeChecked = !empty($_POST['remember_me']);
+$loginInputValue = trim((string)($_POST['login_input'] ?? ''));
+if ($loginInputValue === '' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+    $loginInputValue = app_auth_login_hint();
+}
 
 if (isset($_GET['redirect'])) {
     rememberAuthRedirectTarget((string)$_GET['redirect']);
 }
 
-if (isset($_SESSION["user"])) {
-    $currentUser = $_SESSION["user"];
-    $profileComplete = !empty($currentUser["profile_complete"]);
-    $isVerified = !empty($currentUser["is_verified"]);
-
-    if (!$profileComplete) {
-        header("Location: complete_profile.php");
-    } elseif (!$isVerified) {
-        header("Location: verify.php");
-    } else {
-        header("Location: " . consumeAuthRedirectTarget("../index.php"));
-    }
+if (isset($_SESSION['user'])) {
+    header('Location: ' . app_auth_post_login_target($_SESSION['user'], '../index.php'));
     exit();
 }
 
@@ -42,89 +36,50 @@ $facebookRedirectUri = app_url('/authentication/facebook_callback.php');
 $_SESSION['oauth_origin_google'] = 'login';
 $_SESSION['oauth_origin_facebook'] = 'login';
 
-if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["login"])) {
-    app_require_csrf(false, "Invalid request token. Please refresh and try again.");
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
+    app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
 
-    $password = (string)($_POST["password"] ?? '');
-
+    $password = (string)($_POST['password'] ?? '');
     if ($loginInputValue === '' || $password === '') {
-        $loginError = "Please enter both your email/username and password.";
+        $loginError = 'Please enter both your email/username and password.';
     } else {
-        $sql = "SELECT *, userID AS id FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) LIMIT 1";
-        $stmt = mysqli_stmt_init($conn);
-
-        if (!mysqli_stmt_prepare($stmt, $sql)) {
-            $loginError = "Something went wrong. Please try again.";
+        $stmt = $conn->prepare("SELECT *, userID AS id FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) LIMIT 1");
+        if (!$stmt) {
+            $loginError = 'Something went wrong. Please try again.';
         } else {
-            mysqli_stmt_bind_param($stmt, "ss", $loginInputValue, $loginInputValue);
-            mysqli_stmt_execute($stmt);
-            $result = mysqli_stmt_get_result($stmt);
-            $user = $result ? mysqli_fetch_assoc($result) : null;
-            mysqli_stmt_close($stmt);
+            $stmt->bind_param('ss', $loginInputValue, $loginInputValue);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $user = $result ? $result->fetch_assoc() : null;
+            $stmt->close();
 
             if (!$user) {
-                $loginError = "Email or username not found.";
-            } elseif (!password_verify($password, (string)($user["password"] ?? ''))) {
-                $loginError = "Incorrect password.";
+                $loginError = 'Email or username not found.';
+            } elseif (!password_verify($password, (string)($user['password'] ?? ''))) {
+                $loginError = 'Incorrect password.';
             } else {
+                $userId = (int)($user['id'] ?? 0);
+                $trustedBrowser = $userId > 0 && app_auth_is_trusted_browser($conn, $userId);
+
+                if ($trustedBrowser) {
+                    $mode = $rememberMeChecked ? 'forever' : 'day';
+                    app_auth_clear_two_factor();
+                    app_auth_complete_login($conn, $user, $mode, [
+                        'login_identifier' => $loginInputValue,
+                        'keep_login_hint' => false,
+                    ]);
+                    header('Location: ' . app_auth_post_login_target($user, '../index.php'));
+                    exit();
+                }
+
                 session_regenerate_id(true);
-
-                $prevLogin = null;
-                $getLogin = $conn->prepare("SELECT last_login FROM users WHERE userID = ?");
-                if ($getLogin) {
-                    $getLogin->bind_param("i", $user['id']);
-                    $getLogin->execute();
-                    $loginResult = $getLogin->get_result();
-                    if ($row = $loginResult->fetch_assoc()) {
-                        $prevLogin = $row['last_login'];
-                    }
-                    $getLogin->close();
-                }
-
-                $updateLogin = $conn->prepare("UPDATE users SET last_login = NOW() WHERE userID = ?");
-                if ($updateLogin) {
-                    $updateLogin->bind_param("i", $user['id']);
-                    $updateLogin->execute();
-                    $updateLogin->close();
-                }
-
-                $fieldsComplete =
-                    !empty($user["country"]) &&
-                    !empty($user["city"]) &&
-                    !empty($user["address"]) &&
-                    !empty($user["postcode"]) &&
-                    !empty($user["dob"]) &&
-                    !empty($user["phone"]);
-
-                $isVerified = ((int)($user["is_verified"] ?? 0) === 1);
-                $role = (string)($user["role"] ?? 'user');
-
-                $_SESSION["user"] = [
-                    "id" => $user["id"],
-                    "email" => $user["email"],
-                    "full_name" => $user["full_name"],
-                    "role" => $role,
-                    "last_login" => $prevLogin,
-                    "profile_complete" => $fieldsComplete ? 1 : 0,
-                    "is_verified" => $isVerified ? 1 : 0,
-                ];
-                $_SESSION['user_id'] = $user['id'];
-                $_SESSION['role'] = $role;
-                $_SESSION['email'] = $user['email'];
-                $_SESSION['full_name'] = $user['full_name'];
-
-                if (!$fieldsComplete) {
-                    header("Location: complete_profile.php");
+                $challenge = app_auth_start_two_factor_challenge($user, $loginInputValue, $rememberMeChecked);
+                if (!empty($challenge['success'])) {
+                    header('Location: two_factor.php');
                     exit();
                 }
 
-                if (!$isVerified) {
-                    header("Location: verify.php");
-                    exit();
-                }
-
-                header("Location: " . consumeAuthRedirectTarget("../index.php"));
-                exit();
+                $loginError = (string)($challenge['message'] ?? "We couldn't send your 2FA code right now. Please try again.");
             }
         }
     }
@@ -184,9 +139,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["login"])) {
                 Or login with your email or username
             </p>
 
-            <?php if (isset($_SESSION["registration_error"])): ?>
-                <div class="alert alert-danger"><?= htmlspecialchars((string)$_SESSION["registration_error"]) ?></div>
-                <?php unset($_SESSION["registration_error"]); ?>
+            <?php if (isset($_SESSION['registration_error'])): ?>
+                <div class="alert alert-danger"><?= htmlspecialchars((string)$_SESSION['registration_error']) ?></div>
+                <?php unset($_SESSION['registration_error']); ?>
             <?php endif; ?>
 
             <?php if ($loginError !== ''): ?>
@@ -204,6 +159,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["login"])) {
                         name="login_input"
                         placeholder="e.g. user150 or user@example.com"
                         value="<?= htmlspecialchars($loginInputValue) ?>"
+                        autocomplete="username"
                         required
                     >
                 </div>
@@ -211,11 +167,18 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["login"])) {
                 <div class="form-group mb-3">
                     <label for="password">Password</label>
                     <div class="input-group">
-                        <input type="password" class="form-control" name="password" id="password" required>
+                        <input type="password" class="form-control" name="password" id="password" autocomplete="current-password" required>
                         <span class="input-group-text toggle-password" data-target="#password">
                             <i class="bi bi-eye"></i>
                         </span>
                     </div>
+                </div>
+
+                <div class="form-check mb-3 text-start">
+                    <input class="form-check-input" type="checkbox" value="1" id="remember_me" name="remember_me" <?= $rememberMeChecked ? 'checked' : '' ?>>
+                    <label class="form-check-label" for="remember_me">
+                        Remember Me
+                    </label>
                 </div>
 
                 <div class="wizard-actions mb-2">

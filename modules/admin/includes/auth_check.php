@@ -3,6 +3,8 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+require_once dirname(__DIR__, 3) . '/authentication/database.php';
+
 /**
  * Resolve current user and role from session.
  * Supports both the new $_SESSION['user'] array and legacy flat keys.
