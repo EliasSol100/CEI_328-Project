@@ -10,6 +10,7 @@ $footerRootPrefix = (
 $footerAccountLink = isset($_SESSION['user'])
     ? ($footerRootPrefix . 'profile/account.php')
     : ($footerRootPrefix . 'authentication/login.php');
+$footerCurrentPage = basename($footerScript);
 $newsletterFlash = $_SESSION['newsletter_flash'] ?? null;
 unset($_SESSION['newsletter_flash']);
 ?>
@@ -79,6 +80,7 @@ unset($_SESSION['newsletter_flash']);
             </div>
         </div>
 
+        <?php if ($footerCurrentPage !== 'terms.php'): ?>
         <section class="footer-legal-summary"
                  aria-labelledby="footer-terms-title">
             <div class="footer-legal-copy">
@@ -112,6 +114,7 @@ unset($_SESSION['newsletter_flash']);
                 Read the full Terms of Service
             </a>
         </section>
+        <?php endif; ?>
 
         <div class="footer-bottom">
             <div class="social-icons">
