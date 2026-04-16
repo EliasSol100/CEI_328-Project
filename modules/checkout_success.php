@@ -20,6 +20,7 @@ unset($_SESSION['temp_password']);
 // Correct relative path for includes
 require_once __DIR__ . '/../authentication/database.php';
 require_once __DIR__ . '/../include/loyalty_program.php';
+require_once __DIR__ . '/../include/translation_helpers.php';
 
 $configPath = __DIR__ . '/../authentication/get_config.php';
 if (file_exists($configPath)) {
@@ -67,15 +68,9 @@ if (isset($result['order_id'])) {
         $itemsStmt->execute();
         $itemsRes = $itemsStmt->get_result();
         while ($itemsRes && ($row = $itemsRes->fetch_assoc())) {
-            $label = trim((string)($row['nameEN'] ?? ''));
-            if ($label === '') {
-                $label = trim((string)($row['nameGR'] ?? ''));
-            }
-            if ($label === '') {
-                $label = 'Product';
-            }
             $orderItems[] = [
-                'name' => $label,
+                'name_en' => trim((string)($row['nameEN'] ?? '')) !== '' ? (string)$row['nameEN'] : (trim((string)($row['nameGR'] ?? '')) !== '' ? (string)$row['nameGR'] : 'Product'),
+                'name_el' => trim((string)($row['nameGR'] ?? '')) !== '' ? (string)$row['nameGR'] : (trim((string)($row['nameEN'] ?? '')) !== '' ? (string)$row['nameEN'] : 'Προϊόν'),
                 'quantity' => max(1, (int)($row['quantity'] ?? 1)),
             ];
         }
@@ -117,6 +112,22 @@ function isOrderReviewEligible(mysqli $conn, int $orderId): bool {
     $stmt->close();
     return $ok;
 }
+
+function checkoutSuccessStatusLabel(string $status): string {
+    $normalized = strtolower(trim($status));
+    $map = [
+        'pending' => 'Σε εκκρεμότητα',
+        'processing' => 'Σε επεξεργασία',
+        'paid' => 'Πληρωμένη',
+        'completed' => 'Ολοκληρωμένη',
+        'delivered' => 'Παραδόθηκε',
+        'cancelled' => 'Ακυρωμένη',
+        'failed' => 'Αποτυχημένη',
+        'refunded' => 'Επιστράφηκε',
+    ];
+
+    return $map[$normalized] ?? $status;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -127,6 +138,7 @@ function isOrderReviewEligible(mysqli $conn, int $orderId): bool {
     <link rel="stylesheet" href="<?= $project ?>/assets/styling/styles.css?v=<?= (int)@filemtime(__DIR__ . '/../assets/styling/styles.css') ?>">
     <link rel="stylesheet" href="<?= $project ?>/assets/styling/header.css?v=<?= (int)@filemtime(__DIR__ . '/../assets/styling/header.css') ?>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="<?= $project ?>/assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/translations.js') ?>" defer></script>
     <style>
         .success-container { max-width: 800px; margin: 60px auto; padding: 0 20px; }
         .success-card { background: white; border-radius: 12px; padding: 40px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); text-align: center; }
@@ -152,7 +164,7 @@ function isOrderReviewEligible(mysqli $conn, int $orderId): bool {
         .loyalty-box { background: #eef8ef; color: #1d5b2a; padding: 22px; border-radius: 8px; margin: 25px 0; text-align: left; }
     </style>
 </head>
-<body class="site-page">
+<body class="site-page"<?= app_translate_page_title_attrs('Order Confirmed - ' . $system_title, 'Η Παραγγελία Επιβεβαιώθηκε - ' . $system_title) ?>>
 <?php
 $headerPath = __DIR__ . '/../include/header.php';
 if (file_exists($headerPath)) {
@@ -163,40 +175,40 @@ if (file_exists($headerPath)) {
 <div class="success-container">
     <div class="success-card">
         <div class="success-icon"><i class="fas fa-check"></i></div>
-        <h1>Thank You!</h1>
-        <p style="color:#666; font-size:18px;">Your order has been placed successfully.</p>
-        <div class="order-number">Order #<?= htmlspecialchars((string)($result['order_number'] ?? $result['order_id'])) ?></div>
+        <h1<?= app_translate_text_attrs('Thank You!', 'Σας Ευχαριστούμε!') ?>>Thank You!</h1>
+        <p style="color:#666; font-size:18px;"<?= app_translate_text_attrs('Your order has been placed successfully.', 'Η παραγγελία σας καταχωρήθηκε με επιτυχία.') ?>>Your order has been placed successfully.</p>
+        <div class="order-number"<?= app_translate_text_attrs('Order #' . (string)($result['order_number'] ?? $result['order_id']), 'Παραγγελία #' . (string)($result['order_number'] ?? $result['order_id'])) ?>>Order #<?= htmlspecialchars((string)($result['order_number'] ?? $result['order_id'])) ?></div>
 
         <?php if (!empty($result['account_created']) && $tempPassword): ?>
             <div class="account-box">
-                <h3 style="margin-top:0;">Account Created</h3>
-                <p>Your temporary password:</p>
+                <h3 style="margin-top:0;"<?= app_translate_text_attrs('Account Created', 'Ο Λογαριασμός Δημιουργήθηκε') ?>>Account Created</h3>
+                <p<?= app_translate_text_attrs('Your temporary password:', 'Ο προσωρινός κωδικός σας:') ?>>Your temporary password:</p>
                 <div class="password-box"><?= htmlspecialchars($tempPassword) ?></div>
-                <p style="font-size:14px;">Please change it after logging in.</p>
-                <a href="<?= $project ?>/authentication/login.php" class="btn btn-primary" style="width:100%;">Login</a>
+                <p style="font-size:14px;"<?= app_translate_text_attrs('Please change it after logging in.', 'Παρακαλούμε αλλάξτε τον αφού συνδεθείτε.') ?>>Please change it after logging in.</p>
+                <a href="<?= $project ?>/authentication/login.php" class="btn btn-primary" style="width:100%;"<?= app_translate_text_attrs('Login', 'Σύνδεση') ?>>Login</a>
             </div>
         <?php endif; ?>
 
         <?php if ($orderDetails): ?>
         <div class="order-details">
-            <h3>Order Summary</h3>
-            <div class="detail-row"><span class="detail-label">Date:</span> <span><?= date('F j, Y, g:i a', strtotime((string)$orderDetails['createdAt'])) ?></span></div>
-            <div class="detail-row"><span class="detail-label">Status:</span> <span><?= htmlspecialchars((string)$orderDetails['status']) ?></span></div>
-            <div class="detail-row"><span class="detail-label">Items:</span> <span><?= $orderDetails['item_count'] ?> items</span></div>
-            <div class="detail-row"><span class="detail-label">Subtotal:</span> <span>&euro;<?= number_format((float)$orderDetails['subtotal'], 2) ?></span></div>
+            <h3<?= app_translate_text_attrs('Order Summary', 'Σύνοψη Παραγγελίας') ?>>Order Summary</h3>
+            <div class="detail-row"><span class="detail-label"<?= app_translate_text_attrs('Date:', 'Ημερομηνία:') ?>>Date:</span> <span><?= date('d/m/Y, H:i', strtotime((string)$orderDetails['createdAt'])) ?></span></div>
+            <div class="detail-row"><span class="detail-label"<?= app_translate_text_attrs('Status:', 'Κατάσταση:') ?>>Status:</span> <span<?= app_translate_text_attrs((string)$orderDetails['status'], checkoutSuccessStatusLabel((string)$orderDetails['status'])) ?>><?= htmlspecialchars((string)$orderDetails['status']) ?></span></div>
+            <div class="detail-row"><span class="detail-label"<?= app_translate_text_attrs('Items:', 'Προϊόντα:') ?>>Items:</span> <span<?= app_translate_text_attrs((int)$orderDetails['item_count'] . ' items', (int)$orderDetails['item_count'] . ' προϊόντα') ?>><?= (int)$orderDetails['item_count'] ?> items</span></div>
+            <div class="detail-row"><span class="detail-label"<?= app_translate_text_attrs('Subtotal:', 'Υποσύνολο:') ?>>Subtotal:</span> <span>&euro;<?= number_format((float)$orderDetails['subtotal'], 2) ?></span></div>
             <?php if ((float)($orderDetails['discountTotal'] ?? 0) > 0): ?>
-                <div class="detail-row"><span class="detail-label">Discounts:</span> <span>-&euro;<?= number_format((float)$orderDetails['discountTotal'], 2) ?></span></div>
+                <div class="detail-row"><span class="detail-label"<?= app_translate_text_attrs('Discounts:', 'Εκπτώσεις:') ?>>Discounts:</span> <span>-&euro;<?= number_format((float)$orderDetails['discountTotal'], 2) ?></span></div>
             <?php endif; ?>
-            <div class="detail-row"><span class="detail-label">Shipping:</span> <span>&euro;<?= number_format((float)$orderDetails['shippingCost'], 2) ?></span></div>
-            <div class="detail-row" style="font-size:18px; font-weight:bold; color:#28a745;"><span class="detail-label">Total Paid:</span> <span>&euro;<?= number_format((float)$orderDetails['totalAmount'],2) ?></span></div>
+            <div class="detail-row"><span class="detail-label"<?= app_translate_text_attrs('Shipping:', 'Αποστολή:') ?>>Shipping:</span> <span>&euro;<?= number_format((float)$orderDetails['shippingCost'], 2) ?></span></div>
+            <div class="detail-row" style="font-size:18px; font-weight:bold; color:#28a745;"><span class="detail-label"<?= app_translate_text_attrs('Total Paid:', 'Συνολικό Πληρωμένο:') ?>>Total Paid:</span> <span>&euro;<?= number_format((float)$orderDetails['totalAmount'],2) ?></span></div>
 
             <?php if (!empty($orderItems)): ?>
                 <div class="items-dropdown">
                     <details>
-                        <summary>View purchased items</summary>
+                        <summary<?= app_translate_text_attrs('View purchased items', 'Δείτε τα αγορασμένα προϊόντα') ?>>View purchased items</summary>
                         <ul>
                             <?php foreach ($orderItems as $item): ?>
-                                <li><?= htmlspecialchars($item['name']) ?> x<?= (int)$item['quantity'] ?></li>
+                                <li><span data-product-name data-name-en="<?= htmlspecialchars((string)$item['name_en']) ?>" data-name-el="<?= htmlspecialchars((string)$item['name_el']) ?>"><?= htmlspecialchars((string)$item['name_en']) ?></span> x<?= (int)$item['quantity'] ?></li>
                             <?php endforeach; ?>
                         </ul>
                     </details>
@@ -207,25 +219,25 @@ if (file_exists($headerPath)) {
 
         <?php if ($loyaltyHasActivity): ?>
             <div class="loyalty-box">
-                <h3 style="margin-top:0;">Loyalty Program</h3>
+                <h3 style="margin-top:0;"<?= app_translate_text_attrs('Loyalty Program', 'Πρόγραμμα Loyalty') ?>>Loyalty Program</h3>
                 <?php if ($loyaltyRedeemedPoints > 0): ?>
                     <div class="detail-row">
-                        <span class="detail-label">Redeemed:</span>
-                        <span><?= number_format($loyaltyRedeemedPoints) ?> points (-&euro;<?= number_format($loyaltyRedeemDiscount, 2) ?>)</span>
+                        <span class="detail-label"<?= app_translate_text_attrs('Redeemed:', 'Εξαργυρώθηκαν:') ?>>Redeemed:</span>
+                        <span<?= app_translate_text_attrs(number_format($loyaltyRedeemedPoints) . ' points (-€' . number_format($loyaltyRedeemDiscount, 2) . ')', number_format($loyaltyRedeemedPoints) . ' πόντοι (-€' . number_format($loyaltyRedeemDiscount, 2) . ')') ?>><?= number_format($loyaltyRedeemedPoints) ?> points (-&euro;<?= number_format($loyaltyRedeemDiscount, 2) ?>)</span>
                     </div>
                 <?php endif; ?>
                 <?php if ($loyaltyEarnedPoints > 0): ?>
                     <div class="detail-row">
-                        <span class="detail-label">Earned:</span>
-                        <span><?= number_format($loyaltyEarnedPoints) ?> points</span>
+                        <span class="detail-label"<?= app_translate_text_attrs('Earned:', 'Κερδήθηκαν:') ?>>Earned:</span>
+                        <span<?= app_translate_text_attrs(number_format($loyaltyEarnedPoints) . ' points', number_format($loyaltyEarnedPoints) . ' πόντοι') ?>><?= number_format($loyaltyEarnedPoints) ?> points</span>
                     </div>
                 <?php endif; ?>
                 <div class="detail-row">
-                    <span class="detail-label">Balance after this order:</span>
-                    <span><?= number_format($loyaltyBalanceAfter) ?> points</span>
+                    <span class="detail-label"<?= app_translate_text_attrs('Balance after this order:', 'Υπόλοιπο μετά από αυτή την παραγγελία:') ?>>Balance after this order:</span>
+                    <span<?= app_translate_text_attrs(number_format($loyaltyBalanceAfter) . ' points', number_format($loyaltyBalanceAfter) . ' πόντοι') ?>><?= number_format($loyaltyBalanceAfter) ?> points</span>
                 </div>
                 <?php if ($loyaltyAccountAvailable): ?>
-                    <p style="margin:14px 0 0;">Your loyalty history is now available in My Account.</p>
+                    <p style="margin:14px 0 0;"<?= app_translate_text_attrs('Your loyalty history is now available in My Account.', 'Το ιστορικό loyalty σας είναι πλέον διαθέσιμο στο My Account.') ?>>Your loyalty history is now available in My Account.</p>
                 <?php endif; ?>
             </div>
         <?php endif; ?>
@@ -252,34 +264,34 @@ if (file_exists($headerPath)) {
         }
         ?>
         <?php if ($confirmationSent): ?>
-            <div class="email-note"><i class="fas fa-envelope"></i> Confirmation sent to <strong><?= htmlspecialchars($confirmationTo) ?></strong></div>
+            <div class="email-note"><i class="fas fa-envelope"></i> <span<?= app_translate_html_attrs('Confirmation sent to <strong>' . htmlspecialchars($confirmationTo) . '</strong>', 'Η επιβεβαίωση στάλθηκε στο <strong>' . htmlspecialchars($confirmationTo) . '</strong>') ?>>Confirmation sent to <strong><?= htmlspecialchars($confirmationTo) ?></strong></span></div>
         <?php else: ?>
             <div class="email-note" style="background:#f8d7da;color:#721c24;">
                 <i class="fas fa-triangle-exclamation"></i>
-                We could not send confirmation email to <strong><?= htmlspecialchars($confirmationTo) ?></strong>.
+                <span<?= app_translate_html_attrs('We could not send confirmation email to <strong>' . htmlspecialchars($confirmationTo) . '</strong>.', 'Δεν μπορέσαμε να στείλουμε email επιβεβαίωσης στο <strong>' . htmlspecialchars($confirmationTo) . '</strong>.') ?>>We could not send confirmation email to <strong><?= htmlspecialchars($confirmationTo) ?></strong>.</span>
                 <?php if ($confirmationError !== ''): ?>
-                    <span style="display:block; margin-top:6px; font-size:13px;">Reason: <?= htmlspecialchars($confirmationError) ?></span>
+                    <span style="display:block; margin-top:6px; font-size:13px;"<?= app_translate_text_attrs('Reason: ' . $confirmationError, 'Αιτία: ' . $confirmationError) ?>>Reason: <?= htmlspecialchars($confirmationError) ?></span>
                 <?php endif; ?>
             </div>
         <?php endif; ?>
 
         <div>
-            <a href="<?= $project ?>/shop.php" class="btn btn-primary">Continue Shopping</a>
+            <a href="<?= $project ?>/shop.php" class="btn btn-primary"<?= app_translate_text_attrs('Continue Shopping', 'Συνέχεια Αγορών') ?>>Continue Shopping</a>
             <?php if ($reviewUrl !== ''): ?>
-                <a href="<?= htmlspecialchars($reviewUrl) ?>" class="btn btn-review">Product Review</a>
+                <a href="<?= htmlspecialchars($reviewUrl) ?>" class="btn btn-review"<?= app_translate_text_attrs('Product Review', 'Αξιολόγηση Προϊόντος') ?>>Product Review</a>
             <?php else: ?>
-                <span class="btn btn-review" style="opacity:.65;cursor:not-allowed;" title="Available after delivery">Product Review (Locked)</span>
+                <span class="btn btn-review" style="opacity:.65;cursor:not-allowed;"<?= app_translate_text_attrs('Product Review (Locked)', 'Αξιολόγηση Προϊόντος (Κλειδωμένη)') ?><?= app_translate_title_attrs('Available after delivery', 'Διαθέσιμο μετά την παράδοση') ?>>Product Review (Locked)</span>
             <?php endif; ?>
             <?php if (isset($_SESSION['user']) || !empty($result['account_created'])): ?>
-                <a href="<?= $project ?>/profile/account.php?tab=orders" class="btn btn-success">View Orders</a>
+                <a href="<?= $project ?>/profile/account.php?tab=orders" class="btn btn-success"<?= app_translate_text_attrs('View Orders', 'Δείτε τις Παραγγελίες') ?>>View Orders</a>
             <?php endif; ?>
-            <a href="<?= $project ?>/contact.php" class="btn btn-secondary">Need Help?</a>
+            <a href="<?= $project ?>/contact.php" class="btn btn-secondary"<?= app_translate_text_attrs('Need Help?', 'Χρειάζεστε Βοήθεια;') ?>>Need Help?</a>
         </div>
 
         <?php if (!$reviewEligible): ?>
             <div class="email-note" style="margin-top:14px;">
                 <i class="fas fa-circle-info"></i>
-                Product review opens after order delivery and confirmed payment. You will receive a notification email with your review link.
+                <span<?= app_translate_text_attrs('Product review opens after order delivery and confirmed payment. You will receive a notification email with your review link.', 'Η αξιολόγηση προϊόντος ανοίγει μετά την παράδοση της παραγγελίας και την επιβεβαιωμένη πληρωμή. Θα λάβετε ενημερωτικό email με τον σύνδεσμο αξιολόγησής σας.') ?>>Product review opens after order delivery and confirmed payment. You will receive a notification email with your review link.</span>
             </div>
         <?php endif; ?>
     </div>

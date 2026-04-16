@@ -640,7 +640,7 @@ if ($vpRes) {
                     aria-expanded="false"
                     aria-controls="shop-filters-panel">
                 <i class="fas fa-sliders-h" aria-hidden="true"></i>
-                <span>Filters &amp; Search</span>
+                <span<?= app_translate_text_attrs('Filters & Search', 'Φίλτρα & Αναζήτηση') ?>>Filters &amp; Search</span>
             </button>
 
             <div class="shop-layout">

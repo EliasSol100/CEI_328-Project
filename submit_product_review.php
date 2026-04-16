@@ -4,6 +4,7 @@ session_start();
 require_once __DIR__ . "/authentication/database.php";
 require_once __DIR__ . "/authentication/get_config.php";
 require_once __DIR__ . "/include/security.php";
+require_once __DIR__ . "/include/translation_helpers.php";
 
 const GUEST_REVIEW_SECRET = "athina_guest_review_v1";
 
@@ -394,6 +395,30 @@ function buildReviewUrl(int $orderId, int $productId, string $status = "", strin
     return "submit_product_review.php" . ($query !== "" ? ("?" . $query) : "");
 }
 
+function reviewTranslateMessage(string $message): string {
+    $map = [
+        'Could not initialize guest review access. Please try again.' => 'Δεν ήταν δυνατή η ενεργοποίηση πρόσβασης αξιολόγησης επισκέπτη. Προσπαθήστε ξανά.',
+        'Review unlocks only after delivery and confirmed payment.' => 'Η αξιολόγηση ξεκλειδώνει μόνο μετά την παράδοση και την επιβεβαιωμένη πληρωμή.',
+        'For guest reviews, use the secure review link that is sent after delivery.' => 'Για αξιολογήσεις επισκέπτη, χρησιμοποιήστε τον ασφαλή σύνδεσμο αξιολόγησης που αποστέλλεται μετά την παράδοση.',
+        'You can review only delivered products with confirmed payment.' => 'Μπορείτε να αξιολογήσετε μόνο προϊόντα που έχουν παραδοθεί και έχουν επιβεβαιωμένη πληρωμή.',
+        'Invalid request token. Please refresh and try again.' => 'Μη έγκυρο token αιτήματος. Ανανεώστε τη σελίδα και προσπαθήστε ξανά.',
+        'Select a product first.' => 'Επιλέξτε πρώτα ένα προϊόν.',
+        'Rating is required (1 to 5 stars).' => 'Η βαθμολογία είναι υποχρεωτική (1 έως 5 αστέρια).',
+        'Comment must be up to 1000 words.' => 'Το σχόλιο μπορεί να έχει έως 1000 λέξεις.',
+        'Could not update your review. Please try again.' => 'Δεν ήταν δυνατή η ενημέρωση της αξιολόγησής σας. Προσπαθήστε ξανά.',
+        'Could not save your review. Please try again.' => 'Δεν ήταν δυνατή η αποθήκευση της αξιολόγησής σας. Προσπαθήστε ξανά.',
+        'Review not found.' => 'Η αξιολόγηση δεν βρέθηκε.',
+        'Could not delete this review.' => 'Δεν ήταν δυνατή η διαγραφή αυτής της αξιολόγησης.',
+        'Only the customer who submitted this review (or admin) can delete it.' => 'Μόνο ο πελάτης που υπέβαλε αυτή την αξιολόγηση ή ο διαχειριστής μπορεί να τη διαγράψει.',
+        'Your review was saved successfully.' => 'Η αξιολόγησή σας αποθηκεύτηκε με επιτυχία.',
+        'Your review was deleted successfully.' => 'Η αξιολόγησή σας διαγράφηκε με επιτυχία.',
+        'Access denied for review submission.' => 'Η υποβολή αξιολόγησης δεν επιτρέπεται.',
+        'No delivered products with confirmed payment are available for review yet.' => 'Δεν υπάρχουν ακόμη παραδομένα προϊόντα με επιβεβαιωμένη πληρωμή διαθέσιμα για αξιολόγηση.',
+    ];
+
+    return $map[$message] ?? $message;
+}
+
 $orderId = (int)($_GET["order_id"] ?? $_POST["order_id"] ?? 0);
 $selectedProductId = (int)($_GET["product_id"] ?? $_POST["product_id"] ?? 0);
 $reviewKey = trim((string)($_GET["review_key"] ?? $_POST["review_key"] ?? ""));
@@ -624,8 +649,9 @@ $canUseReviewModule = $isAdmin || $actorUserId > 0;
     <link rel="stylesheet" href="assets/styling/header.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/header.css') ?>">
     <link rel="stylesheet" href="assets/styling/submit_product_review.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/submit_product_review.css') ?>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/translations.js') ?>" defer></script>
 </head>
-<body class="site-page">
+<body class="site-page"<?= app_translate_page_title_attrs('Submit Product Review - ' . $systemTitle, 'Υποβολή Αξιολόγησης Προϊόντος - ' . $systemTitle) ?>>
 <?php
 $activePage = "shop";
 include __DIR__ . "/include/header.php";
@@ -633,50 +659,60 @@ include __DIR__ . "/include/header.php";
 <main class="spr-page">
     <section class="spr-shell">
         <div class="spr-head">
-            <h1>Product Review</h1>
+            <h1<?= app_translate_text_attrs('Product Review', 'Αξιολόγηση Προϊόντος') ?>>Product Review</h1>
             <?php if ($selectedProductId > 0): ?>
-                <a href="product.php?id=<?= (int)$selectedProductId ?>" class="spr-btn spr-btn-secondary">Back to Product</a>
+                <a href="product.php?id=<?= (int)$selectedProductId ?>" class="spr-btn spr-btn-secondary"<?= app_translate_text_attrs('Back to Product', 'Επιστροφή στο Προϊόν') ?>>Back to Product</a>
             <?php endif; ?>
         </div>
-        <p class="spr-sub">Rate your delivered product with stars (required) and add an optional comment (max 1000 words).</p>
+        <p class="spr-sub"<?= app_translate_text_attrs('Rate your delivered product with stars (required) and add an optional comment (max 1000 words).', 'Βαθμολογήστε το παραδομένο προϊόν σας με αστέρια (υποχρεωτικό) και προσθέστε προαιρετικά ένα σχόλιο (έως 1000 λέξεις).') ?>>Rate your delivered product with stars (required) and add an optional comment (max 1000 words).</p>
 
         <?php if ($guestAccess && $orderSummary): ?>
-            <p class="spr-note">Guest review access enabled for delivered order <?= htmlspecialchars((string)$orderSummary["orderNumber"]) ?>.</p>
+            <p class="spr-note"<?= app_translate_text_attrs('Guest review access enabled for delivered order ' . (string)$orderSummary["orderNumber"] . '.', 'Η πρόσβαση αξιολόγησης επισκέπτη ενεργοποιήθηκε για την παραδομένη παραγγελία ' . (string)$orderSummary["orderNumber"] . '.') ?>>Guest review access enabled for delivered order <?= htmlspecialchars((string)$orderSummary["orderNumber"]) ?>.</p>
         <?php endif; ?>
 
         <?php if ($statusMessage !== ""): ?>
-            <div class="spr-alert success"><?= htmlspecialchars($statusMessage) ?></div>
+            <div class="spr-alert success"<?= app_translate_text_attrs($statusMessage, reviewTranslateMessage($statusMessage)) ?>><?= htmlspecialchars($statusMessage) ?></div>
         <?php endif; ?>
         <?php if (!empty($reviewErrors)): ?>
-            <div class="spr-alert error"><?= htmlspecialchars(implode(" ", $reviewErrors)) ?></div>
+            <?php $reviewErrorMessage = implode(" ", $reviewErrors); ?>
+            <div class="spr-alert error"<?= app_translate_text_attrs($reviewErrorMessage, reviewTranslateMessage($reviewErrorMessage)) ?>><?= htmlspecialchars($reviewErrorMessage) ?></div>
         <?php endif; ?>
 
         <?php if (!$canUseReviewModule): ?>
-            <div class="spr-alert error">
-                <?= htmlspecialchars($guestAccessError !== "" ? $guestAccessError : "Access denied for review submission.") ?>
+            <?php $accessDeniedMessage = $guestAccessError !== "" ? $guestAccessError : "Access denied for review submission."; ?>
+            <div class="spr-alert error"<?= app_translate_text_attrs($accessDeniedMessage, reviewTranslateMessage($accessDeniedMessage)) ?>>
+                <?= htmlspecialchars($accessDeniedMessage) ?>
             </div>
-            <a href="shop.php" class="spr-btn spr-btn-primary">Go to Shop</a>
+            <a href="shop.php" class="spr-btn spr-btn-primary"<?= app_translate_text_attrs('Go to Shop', 'Μετάβαση στο Shop') ?>>Go to Shop</a>
         <?php elseif (empty($availableProducts) && !$selectedProduct): ?>
-            <p class="spr-note">No delivered products with confirmed payment are available for review yet.</p>
-            <a href="shop.php" class="spr-btn spr-btn-primary">Go to Shop</a>
+            <p class="spr-note"<?= app_translate_text_attrs('No delivered products with confirmed payment are available for review yet.', 'Δεν υπάρχουν ακόμη παραδομένα προϊόντα με επιβεβαιωμένη πληρωμή διαθέσιμα για αξιολόγηση.') ?>>No delivered products with confirmed payment are available for review yet.</p>
+            <a href="shop.php" class="spr-btn spr-btn-primary"<?= app_translate_text_attrs('Go to Shop', 'Μετάβαση στο Shop') ?>>Go to Shop</a>
         <?php else: ?>
             <?php if (!empty($availableProducts)): ?>
                 <div class="spr-products">
                     <?php foreach ($availableProducts as $item): ?>
                         <?php
                         $pid = (int)$item["productID"];
-                        $label = trim((string)($item["nameEN"] ?? ""));
+                        $labelEn = trim((string)($item["nameEN"] ?? ""));
+                        $labelEl = trim((string)($item["nameGR"] ?? ""));
+                        $label = $labelEn;
                         if ($label === "") {
-                            $label = trim((string)($item["nameGR"] ?? ""));
+                            $label = $labelEl;
                         }
                         if ($label === "") {
                             $label = "Product #" . $pid;
+                        }
+                        if ($labelEn === "") {
+                            $labelEn = $label;
+                        }
+                        if ($labelEl === "") {
+                            $labelEl = "Προϊόν #" . $pid;
                         }
                         ?>
                         <a
                             class="spr-product-link <?= $pid === $selectedProductId ? "is-active" : "" ?>"
                             href="<?= htmlspecialchars(buildReviewUrl($orderId, $pid, "", $reviewKey)) ?>">
-                            <?= htmlspecialchars($label) ?>
+                            <span data-product-name data-name-en="<?= htmlspecialchars($labelEn) ?>" data-name-el="<?= htmlspecialchars($labelEl) ?>"><?= htmlspecialchars($label) ?></span>
                         </a>
                     <?php endforeach; ?>
                 </div>
@@ -684,25 +720,33 @@ include __DIR__ . "/include/header.php";
 
             <?php if ($selectedProduct): ?>
                 <?php
-                $selectedName = trim((string)($selectedProduct["nameEN"] ?? ""));
+                $selectedNameEn = trim((string)($selectedProduct["nameEN"] ?? ""));
+                $selectedNameEl = trim((string)($selectedProduct["nameGR"] ?? ""));
+                $selectedName = $selectedNameEn;
                 if ($selectedName === "") {
-                    $selectedName = trim((string)($selectedProduct["nameGR"] ?? ""));
+                    $selectedName = $selectedNameEl;
                 }
                 if ($selectedName === "") {
                     $selectedName = "Product #" . (int)$selectedProduct["productID"];
                 }
+                if ($selectedNameEn === "") {
+                    $selectedNameEn = $selectedName;
+                }
+                if ($selectedNameEl === "") {
+                    $selectedNameEl = "Προϊόν #" . (int)$selectedProduct["productID"];
+                }
                 $avgRounded = (int)round((float)$selectedProduct["avgRating"]);
                 ?>
                 <article class="spr-summary">
-                    <h2><?= htmlspecialchars($selectedName) ?></h2>
+                    <h2 data-product-name data-name-en="<?= htmlspecialchars($selectedNameEn) ?>" data-name-el="<?= htmlspecialchars($selectedNameEl) ?>"><?= htmlspecialchars($selectedName) ?></h2>
                     <div class="spr-summary-meta">
                         <span class="spr-stars">
                             <?php for ($i = 1; $i <= 5; $i++): ?>
                                 <i class="<?= $i <= $avgRounded ? "fas" : "far" ?> fa-star"></i>
                             <?php endfor; ?>
                         </span>
-                        <span><?= number_format((float)$selectedProduct["avgRating"], 1) ?> average</span>
-                        <span><?= (int)$selectedProduct["reviewCount"] ?> total reviews</span>
+                        <span<?= app_translate_text_attrs(number_format((float)$selectedProduct["avgRating"], 1) . ' average', number_format((float)$selectedProduct["avgRating"], 1) . ' μέσος όρος') ?>><?= number_format((float)$selectedProduct["avgRating"], 1) ?> average</span>
+                        <span<?= app_translate_text_attrs((int)$selectedProduct["reviewCount"] . ' total reviews', (int)$selectedProduct["reviewCount"] . ' συνολικές αξιολογήσεις') ?>><?= (int)$selectedProduct["reviewCount"] ?> total reviews</span>
                     </div>
                 </article>
             <?php endif; ?>
@@ -715,9 +759,9 @@ include __DIR__ . "/include/header.php";
                 ?>
                 <article class="spr-my-review">
                     <div class="spr-my-review-head">
-                        <strong>You</strong>
+                        <strong<?= app_translate_text_attrs('You', 'Εσείς') ?>>You</strong>
                         <time datetime="<?= htmlspecialchars($reviewDateAttr) ?>">
-                            <?= htmlspecialchars($reviewDateLabel) ?>
+                            <?= htmlspecialchars($reviewTs ? date("d/m/Y", $reviewTs) : $reviewDateLabel) ?>
                         </time>
                     </div>
                     <div class="spr-stars">
@@ -725,11 +769,11 @@ include __DIR__ . "/include/header.php";
                             <i class="<?= $i <= (int)$myReview["rating"] ? "fas" : "far" ?> fa-star"></i>
                         <?php endfor; ?>
                     </div>
-                    <p><?= nl2br(htmlspecialchars($myReview["reviewText"] !== "" ? $myReview["reviewText"] : "No comment provided.")) ?></p>
+                    <p<?= $myReview["reviewText"] === "" ? app_translate_text_attrs('No comment provided.', 'Δεν δόθηκε σχόλιο.') : '' ?>><?= nl2br(htmlspecialchars($myReview["reviewText"] !== "" ? $myReview["reviewText"] : "No comment provided.")) ?></p>
 
                     <?php if ($canSubmitCurrentSelection): ?>
                         <div class="spr-review-actions">
-                            <form method="post" onsubmit="return confirm('Delete this review?');">
+                            <form method="post" class="spr-delete-review-form">
                                 <?= app_csrf_input() ?>
                                 <input type="hidden" name="review_token" value="<?= htmlspecialchars($reviewToken) ?>">
                                 <input type="hidden" name="review_key" value="<?= htmlspecialchars($reviewKey) ?>">
@@ -737,11 +781,11 @@ include __DIR__ . "/include/header.php";
                                 <input type="hidden" name="order_id" value="<?= (int)$orderId ?>">
                                 <input type="hidden" name="product_id" value="<?= (int)$selectedProductId ?>">
                                 <input type="hidden" name="review_id" value="<?= (int)$myReview["reviewID"] ?>">
-                                <button type="submit" class="spr-delete-btn" title="Delete review" aria-label="Delete review">
+                                <button type="submit" class="spr-delete-btn"<?= app_translate_title_attrs('Delete review', 'Διαγραφή αξιολόγησης') ?><?= app_translate_aria_attrs('Delete review', 'Διαγραφή αξιολόγησης') ?>>
                                     <i class="fas fa-trash-can"></i>
                                 </button>
                             </form>
-                            <button type="button" class="spr-edit-btn" id="spr-edit-btn">Edit</button>
+                            <button type="button" class="spr-edit-btn" id="spr-edit-btn"<?= app_translate_text_attrs('Edit', 'Επεξεργασία') ?>>Edit</button>
                         </div>
                     <?php endif; ?>
                 </article>
@@ -756,7 +800,7 @@ include __DIR__ . "/include/header.php";
                     <input type="hidden" name="order_id" value="<?= (int)$orderId ?>">
                     <input type="hidden" name="product_id" value="<?= (int)$selectedProductId ?>">
 
-                    <label class="spr-label">Your rating *</label>
+                    <label class="spr-label"<?= app_translate_text_attrs('Your rating *', 'Η βαθμολογία σας *') ?>>Your rating *</label>
                     <div class="spr-star-input" id="spr-star-input">
                         <?php for ($i = 1; $i <= 5; $i++): ?>
                             <label class="spr-star <?= $i <= $defaultRating ? "is-on" : "" ?>">
@@ -766,24 +810,24 @@ include __DIR__ . "/include/header.php";
                         <?php endfor; ?>
                     </div>
 
-                    <label class="spr-label" for="spr-review-text">Your comment (optional)</label>
+                    <label class="spr-label" for="spr-review-text"<?= app_translate_text_attrs('Your comment (optional)', 'Το σχόλιό σας (προαιρετικό)') ?>>Your comment (optional)</label>
                     <textarea
                         id="spr-review-text"
                         name="review_text"
                         rows="6"
                         maxlength="7000"
-                        placeholder="Write your comment here..."><?= htmlspecialchars($reviewInput["review_text"]) ?></textarea>
-                    <div class="spr-word-counter" id="spr-word-counter">0 / 1000 words</div>
+                        placeholder="Write your comment here..."<?= app_translate_placeholder_attrs('Write your comment here...', 'Γράψτε το σχόλιό σας εδώ...') ?>><?= htmlspecialchars($reviewInput["review_text"]) ?></textarea>
+                    <div class="spr-word-counter" id="spr-word-counter"<?= app_translate_text_attrs('0 / 1000 words', '0 / 1000 λέξεις') ?>>0 / 1000 words</div>
 
                     <div class="spr-form-actions">
-                        <button type="submit" class="spr-btn spr-btn-primary"><?= $myReview ? "Save Changes" : "Submit Review" ?></button>
+                        <button type="submit" class="spr-btn spr-btn-primary"<?= app_translate_text_attrs($myReview ? 'Save Changes' : 'Submit Review', $myReview ? 'Αποθήκευση Αλλαγών' : 'Υποβολή Αξιολόγησης') ?>><?= $myReview ? "Save Changes" : "Submit Review" ?></button>
                         <?php if ($myReview): ?>
-                            <button type="button" class="spr-btn spr-btn-secondary" id="spr-cancel-btn">Cancel</button>
+                            <button type="button" class="spr-btn spr-btn-secondary" id="spr-cancel-btn"<?= app_translate_text_attrs('Cancel', 'Ακύρωση') ?>>Cancel</button>
                         <?php endif; ?>
                     </div>
                 </form>
             <?php elseif ($selectedProduct): ?>
-                <p class="spr-note">This page is view-only. Review becomes available after delivery and confirmed payment.</p>
+                <p class="spr-note"<?= app_translate_text_attrs('This page is view-only. Review becomes available after delivery and confirmed payment.', 'Αυτή η σελίδα είναι μόνο για προβολή. Η αξιολόγηση γίνεται διαθέσιμη μετά την παράδοση και την επιβεβαιωμένη πληρωμή.') ?>>This page is view-only. Review becomes available after delivery and confirmed payment.</p>
             <?php endif; ?>
         <?php endif; ?>
     </section>
@@ -793,6 +837,30 @@ include __DIR__ . "/include/header.php";
 
 <script>
 (function () {
+    function currentLang() {
+        if (typeof window.appCurrentLanguage === "function") {
+            return window.appCurrentLanguage();
+        }
+        return document.documentElement.lang === "el" ? "el" : "en";
+    }
+
+    function translate(key) {
+        var messages = {
+            en: {
+                wordCounterSuffix: "words",
+                commentLimit: "Comment must be up to 1000 words.",
+                deleteConfirm: "Delete this review?"
+            },
+            el: {
+                wordCounterSuffix: "λέξεις",
+                commentLimit: "Το σχόλιο μπορεί να έχει έως 1000 λέξεις.",
+                deleteConfirm: "Να διαγραφεί αυτή η αξιολόγηση;"
+            }
+        };
+        var lang = currentLang();
+        return (messages[lang] && messages[lang][key]) || messages.en[key] || "";
+    }
+
     function countWords(text) {
         var clean = String(text || "").trim();
         if (!clean) {
@@ -803,6 +871,7 @@ include __DIR__ . "/include/header.php";
     }
 
     var form = document.getElementById("spr-form");
+    var deleteForms = Array.prototype.slice.call(document.querySelectorAll(".spr-delete-review-form"));
     var editBtn = document.getElementById("spr-edit-btn");
     var cancelBtn = document.getElementById("spr-cancel-btn");
     if (editBtn && form) {
@@ -816,6 +885,14 @@ include __DIR__ . "/include/header.php";
             form.classList.add("hidden");
         });
     }
+
+    deleteForms.forEach(function (deleteForm) {
+        deleteForm.addEventListener("submit", function (event) {
+            if (!window.confirm(translate("deleteConfirm"))) {
+                event.preventDefault();
+            }
+        });
+    });
 
     var ratingInputs = Array.prototype.slice.call(document.querySelectorAll(".spr-star-input input[type='radio']"));
     function paintStars() {
@@ -844,7 +921,7 @@ include __DIR__ . "/include/header.php";
             return;
         }
         var words = countWords(textarea.value);
-        counter.textContent = words + " / 1000 words";
+        counter.textContent = words + " / 1000 " + translate("wordCounterSuffix");
         counter.classList.toggle("over", words > 1000);
     }
     if (textarea) {
@@ -858,10 +935,12 @@ include __DIR__ . "/include/header.php";
             var words = countWords(text);
             if (words > 1000) {
                 e.preventDefault();
-                alert("Comment must be up to 1000 words.");
+                alert(translate("commentLimit"));
             }
         });
     }
+
+    document.addEventListener("app:languagechange", updateCounter);
 })();
 </script>
 </body>
