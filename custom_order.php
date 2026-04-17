@@ -28,6 +28,7 @@ $instagramUrl = 'https://www.instagram.com/creations.by.athina/';
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/translations.js') ?>" defer></script>
     <script src="assets/js/custom_order_translations.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/custom_order_translations.js') ?>" defer></script>
+    <?php include __DIR__ . '/include/pwa_head.php'; ?>
 </head>
 <body class="site-page">
 <?php

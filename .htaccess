@@ -1,5 +1,7 @@
 RewriteEngine On
 
+AddType application/manifest+json .webmanifest
+
 # Keep internal project files off the public internet on the shared host.
 RewriteRule (^|/)\.(?!well-known/) - [F,L]
 RewriteRule ^(?:sql|docker|scripts|tmp)(?:/|$) - [F,L,NC]

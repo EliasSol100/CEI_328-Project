@@ -611,6 +611,7 @@ if ($vpRes) {
     }
     </style>
     <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/translations.js') ?>" defer></script>
+    <?php include __DIR__ . '/include/pwa_head.php'; ?>
 </head>
 <body class="site-page"<?= app_translate_page_title_attrs('Creations by Athina - Shop', 'Creations by Athina - Κατάστημα') ?>>
     <?php
