@@ -138,9 +138,32 @@ unset($_SESSION['newsletter_flash']);
                 </a>
             </div>
 
-            <p class="copyright" data-translate="copyright">
-                &copy; <?php echo date("Y"); ?> Creations by Athina. All rights reserved.
-            </p>
+            <div class="footer-copyright-row">
+                <p class="copyright">
+                    <span data-translate="copyright">&copy; <?php echo date("Y"); ?> Creations by Athina. All rights reserved.</span>
+                </p>
+                <div class="footer-info" data-footer-info>
+                    <button type="button"
+                            class="footer-info-toggle"
+                            aria-label="Website information"
+                            aria-expanded="false"
+                            aria-controls="footer-info-popup">
+                        <i class="fas fa-info" aria-hidden="true"></i>
+                    </button>
+                    <div class="footer-info-popup"
+                         id="footer-info-popup"
+                         role="dialog"
+                         aria-modal="false"
+                         aria-hidden="true">
+                        <button type="button"
+                                class="footer-info-close"
+                                aria-label="Close website information">
+                            &times;
+                        </button>
+                        <p>This website was created by students of the Cyprus University of Technology (TEPAK).</p>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </footer>
@@ -149,6 +172,7 @@ $cookieRootPrefix = $footerRootPrefix;
 include __DIR__ . '/cookie_consent.php';
 ?>
 <script src="<?= htmlspecialchars($footerRootPrefix, ENT_QUOTES, 'UTF-8') ?>assets/js/cookie-consent.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/cookie-consent.js') ?>" defer></script>
+<script src="<?= htmlspecialchars($footerRootPrefix, ENT_QUOTES, 'UTF-8') ?>assets/js/footer-info.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/footer-info.js') ?>" defer></script>
 <script>
 window.athinaPwa = {
     serviceWorkerUrl: <?= json_encode($footerRootPrefix . 'sw.js') ?>
