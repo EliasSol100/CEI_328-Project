@@ -20,6 +20,7 @@ $GLOBALS['header_user_role'] = $role;
     <link rel="stylesheet" href="assets/styling/info_pages.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/info_pages.css') ?>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/translations.js') ?>" defer></script>
+    <?php include __DIR__ . '/include/pwa_head.php'; ?>
 </head>
 <body class="site-page"<?= app_translate_page_title_attrs('FAQ - Creations by Athina', 'Συχνές Ερωτήσεις - Creations by Athina') ?>>
 <?php

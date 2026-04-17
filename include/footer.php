@@ -149,3 +149,9 @@ $cookieRootPrefix = $footerRootPrefix;
 include __DIR__ . '/cookie_consent.php';
 ?>
 <script src="<?= htmlspecialchars($footerRootPrefix, ENT_QUOTES, 'UTF-8') ?>assets/js/cookie-consent.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/cookie-consent.js') ?>" defer></script>
+<script>
+window.athinaPwa = {
+    serviceWorkerUrl: <?= json_encode($footerRootPrefix . 'sw.js') ?>
+};
+</script>
+<script src="<?= htmlspecialchars($footerRootPrefix, ENT_QUOTES, 'UTF-8') ?>assets/js/pwa.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/pwa.js') ?>" defer></script>
