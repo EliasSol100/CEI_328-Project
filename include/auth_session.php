@@ -643,6 +643,20 @@ if (!function_exists('app_auth_bootstrap')) {
     }
 }
 
+if (!function_exists('app_auth_two_factor_code_ttl_seconds')) {
+    function app_auth_two_factor_code_ttl_seconds(): int
+    {
+        return 20 * 60;
+    }
+}
+
+if (!function_exists('app_auth_two_factor_resend_cooldown_seconds')) {
+    function app_auth_two_factor_resend_cooldown_seconds(): int
+    {
+        return 60;
+    }
+}
+
 if (!function_exists('app_auth_start_two_factor_challenge')) {
     function app_auth_start_two_factor_challenge(array $userRow, string $loginIdentifier, bool $rememberRequested): array
     {
@@ -680,8 +694,8 @@ if (!function_exists('app_auth_start_two_factor_challenge')) {
             'login_identifier' => trim($loginIdentifier),
             'remember_requested' => $rememberRequested ? 1 : 0,
             'code_hash' => password_hash($code, PASSWORD_DEFAULT),
-            'expires_at' => time() + 600,
-            'resend_available_at' => time() + 60,
+            'expires_at' => time() + app_auth_two_factor_code_ttl_seconds(),
+            'resend_available_at' => time() + app_auth_two_factor_resend_cooldown_seconds(),
             'attempt_count' => 0,
             'max_attempts' => 5,
         ];

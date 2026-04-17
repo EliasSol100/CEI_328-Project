@@ -61,12 +61,15 @@ if (!function_exists('app_auth_send_plaintext_email')) {
 if (!function_exists('app_auth_send_two_factor_code_email')) {
     function app_auth_send_two_factor_code_email(string $toEmail, string $toName, string $code): array
     {
+        $validMinutes = function_exists('app_auth_two_factor_code_ttl_seconds')
+            ? max(1, (int)floor(app_auth_two_factor_code_ttl_seconds() / 60))
+            : 20;
         $subject = 'Athina E-Shop Login Verification Code';
         $body =
             "Hello,\n\n" .
             "Use the following verification code to complete your login:\n\n" .
             $code . "\n\n" .
-            "This code is valid for 10 minutes.\n\n" .
+            "This code is valid for {$validMinutes} minutes.\n\n" .
             "If you did not try to sign in, you can safely ignore this email.\n\n" .
             "Athina E-Shop";
 
