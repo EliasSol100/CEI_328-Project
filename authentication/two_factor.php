@@ -79,7 +79,11 @@ if (!$pending) {
 
 $maskedEmail = (string)($pending['masked_email'] ?? app_auth_mask_email((string)($pending['email'] ?? '')));
 $rememberRequested = !empty($pending['remember_requested']);
+$secondsUntilExpiry = max(0, (int)($pending['expires_at'] ?? 0) - time());
 $secondsUntilResend = max(0, (int)($pending['resend_available_at'] ?? 0) - time());
+$twoFactorExpirySeconds = function_exists('app_auth_two_factor_code_ttl_seconds')
+    ? app_auth_two_factor_code_ttl_seconds()
+    : 20 * 60;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -116,6 +120,19 @@ $secondsUntilResend = max(0, (int)($pending['resend_available_at'] ?? 0) - time(
             <form action="two_factor.php" method="post">
                 <?= app_csrf_input() ?>
 
+                <div id="two-factor-timer"
+                     class="two-factor-timer mb-3"
+                     data-expiry-seconds="<?= (int)$secondsUntilExpiry ?>"
+                     data-expiry-total="<?= (int)$twoFactorExpirySeconds ?>">
+                    <div class="two-factor-timer-copy">
+                        <span class="two-factor-timer-label">Code expires in</span>
+                        <strong id="two-factor-expiry-text">00:00</strong>
+                    </div>
+                    <div class="two-factor-timer-bar" aria-hidden="true">
+                        <span id="two-factor-expiry-bar"></span>
+                    </div>
+                </div>
+
                 <div class="form-group mb-3">
                     <label for="two_factor_code">Verification Code</label>
                     <input
@@ -148,14 +165,21 @@ $secondsUntilResend = max(0, (int)($pending['resend_available_at'] ?? 0) - time(
                 </div>
 
                 <div class="wizard-actions mb-2">
-                    <button type="submit" name="verify_code" class="btn btn-success w-100">
+                    <button type="submit" name="verify_code" id="verify-code-btn" class="btn btn-success w-100" <?= $secondsUntilExpiry <= 0 ? 'disabled' : '' ?>>
                         Verify Code
                     </button>
                 </div>
 
                 <div class="d-flex gap-2 mt-3">
-                    <button type="submit" name="resend_code" class="btn btn-outline-secondary flex-fill" formnovalidate <?= $secondsUntilResend > 0 ? 'disabled' : '' ?>>
-                        <?= $secondsUntilResend > 0 ? 'Resend in ' . $secondsUntilResend . 's' : 'Resend Code' ?>
+                    <button type="submit"
+                            name="resend_code"
+                            id="resend-code-btn"
+                            class="btn btn-outline-secondary flex-fill"
+                            formnovalidate
+                            data-wait-seconds="<?= (int)$secondsUntilResend ?>"
+                            data-default-label="Resend Code"
+                            <?= $secondsUntilResend > 0 ? 'disabled' : '' ?>>
+                        <?= $secondsUntilResend > 0 ? 'Resend in ' . $secondsUntilResend : 'Resend Code' ?>
                     </button>
                     <button type="submit" name="cancel" class="btn btn-outline-danger flex-fill" formnovalidate>
                         Back to Login
@@ -164,6 +188,74 @@ $secondsUntilResend = max(0, (int)($pending['resend_available_at'] ?? 0) - time(
             </form>
         </div>
     </div>
+
+    <script>
+        (function () {
+            var timerContainer = document.getElementById('two-factor-timer');
+            var expiryText = document.getElementById('two-factor-expiry-text');
+            var expiryBar = document.getElementById('two-factor-expiry-bar');
+            var verifyBtn = document.getElementById('verify-code-btn');
+            var codeInput = document.getElementById('two_factor_code');
+            var resendBtn = document.getElementById('resend-code-btn');
+
+            if (!timerContainer || !expiryText || !expiryBar || !resendBtn) {
+                return;
+            }
+
+            var expiryRemaining = parseInt(timerContainer.getAttribute('data-expiry-seconds') || '0', 10);
+            var expiryTotal = parseInt(timerContainer.getAttribute('data-expiry-total') || '1200', 10);
+            var resendRemaining = parseInt(resendBtn.getAttribute('data-wait-seconds') || '0', 10);
+            var resendDefaultLabel = resendBtn.getAttribute('data-default-label') || 'Resend Code';
+
+            function pad(value) {
+                return String(value).padStart(2, '0');
+            }
+
+            function formatTime(seconds) {
+                var minutes = Math.floor(seconds / 60);
+                var remainder = seconds % 60;
+                return pad(minutes) + ':' + pad(remainder);
+            }
+
+            function updateExpiry() {
+                if (expiryRemaining <= 0) {
+                    expiryText.textContent = '00:00';
+                    expiryBar.style.width = '0%';
+                    timerContainer.classList.add('is-expired');
+                    if (verifyBtn) {
+                        verifyBtn.disabled = true;
+                    }
+                    if (codeInput) {
+                        codeInput.disabled = true;
+                    }
+                    return;
+                }
+
+                expiryText.textContent = formatTime(expiryRemaining);
+                expiryBar.style.width = Math.max(0, Math.min(100, (expiryRemaining / Math.max(1, expiryTotal)) * 100)) + '%';
+                expiryRemaining--;
+                window.setTimeout(updateExpiry, 1000);
+            }
+
+            function updateResend() {
+                if (resendRemaining <= 0) {
+                    resendBtn.textContent = resendDefaultLabel;
+                    resendBtn.disabled = false;
+                    resendBtn.classList.remove('is-waiting');
+                    return;
+                }
+
+                resendBtn.textContent = 'Resend in ' + resendRemaining;
+                resendBtn.disabled = true;
+                resendBtn.classList.add('is-waiting');
+                resendRemaining--;
+                window.setTimeout(updateResend, 1000);
+            }
+
+            updateExpiry();
+            updateResend();
+        })();
+    </script>
 
 </body>
 </html>

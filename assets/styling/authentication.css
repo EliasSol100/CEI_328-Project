@@ -125,6 +125,59 @@ label {
     border: 1px solid #bbf7d0;
 }
 
+.two-factor-timer {
+    padding: 14px 16px;
+    border-radius: 14px;
+    border: 1px solid #e9d5ff;
+    background: linear-gradient(180deg, #fdf7ff 0%, #fff 100%);
+}
+
+.two-factor-timer-copy {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.two-factor-timer-label {
+    font-size: 0.88rem;
+    color: #6b7280;
+}
+
+.two-factor-timer strong {
+    font-size: 1rem;
+    color: #111827;
+    letter-spacing: 0.08em;
+    font-variant-numeric: tabular-nums;
+}
+
+.two-factor-timer-bar {
+    height: 8px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: #f3e8ff;
+}
+
+.two-factor-timer-bar span {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #a855f7, #ec4899);
+    transition: width 1s linear;
+}
+
+.two-factor-timer.is-expired {
+    border-color: #fecaca;
+    background: linear-gradient(180deg, #fff7f7 0%, #fff 100%);
+}
+
+.two-factor-timer.is-expired .two-factor-timer-label,
+.two-factor-timer.is-expired strong {
+    color: #b91c1c;
+}
+
 /* Buttons */
 .wizard-actions {
     margin-top: 10px;
