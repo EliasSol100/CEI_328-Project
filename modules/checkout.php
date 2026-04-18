@@ -1057,7 +1057,6 @@ if (file_exists($headerPath)) {
                         <label class="option-label"><input type="radio" name="payment_method" value="stripe" <?= (($formData['payment_method'] ?? $defaultPaymentMethod) === 'stripe') ? 'checked' : '' ?> <?= empty($availablePaymentMethods['stripe']) ? 'disabled' : '' ?> required> <span data-translate="checkoutPaymentStripe">Credit Card (Stripe)</span><?= empty($availablePaymentMethods['stripe']) ? ' <em' . app_translate_text_attrs('(Not configured)', '(Δεν έχει ρυθμιστεί)') . '>(Not configured)</em>' : '' ?></label>
                         <label class="option-label"><input type="radio" name="payment_method" value="paypal" <?= (($formData['payment_method'] ?? $defaultPaymentMethod) === 'paypal') ? 'checked' : '' ?> <?= empty($availablePaymentMethods['paypal']) ? 'disabled' : '' ?>> <span data-translate="checkoutPaymentPaypal">PayPal</span><?= empty($availablePaymentMethods['paypal']) ? ' <em' . app_translate_text_attrs('(Not configured)', '(Δεν έχει ρυθμιστεί)') . '>(Not configured)</em>' : '' ?></label>
                     </div>
-                    <span class="form-helper"<?= app_translate_text_attrs('Successful payments redirect to the confirmation page automatically. If a payment is cancelled or fails, the customer will be sent to the checkout failed page.', 'Οι επιτυχημένες πληρωμές μεταφέρουν αυτόματα στη σελίδα επιβεβαίωσης. Αν μια πληρωμή ακυρωθεί ή αποτύχει, ο πελάτης θα μεταφερθεί στη σελίδα αποτυχημένου checkout.') ?>>Successful payments redirect to the confirmation page automatically. If a payment is cancelled or fails, the customer will be sent to the checkout failed page.</span>
                     <?php if (isset($errors['payment_method'])): ?><span class="error"><?= $errors['payment_method'] ?></span><?php endif; ?>
                 </fieldset>
 
@@ -1860,4 +1859,3 @@ if (file_exists($footerPath)) {
     echo "</body></html>";
 }
 ?>
-
