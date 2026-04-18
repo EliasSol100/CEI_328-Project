@@ -1800,10 +1800,15 @@ if (file_exists($headerPath)) {
 
     function toggleAkisPointWrapper() {
         if (!akisPointWrapper) return;
+        var isPickup = selectedMode() === 'pickup';
         var isAkis = courierEl && courierEl.value === 'akis_express';
-        akisPointWrapper.style.display = isAkis ? '' : 'none';
+        var shouldShow = isAkis && isPickup;
+        akisPointWrapper.style.display = shouldShow ? '' : 'none';
         var sel = document.getElementById('akis_pickup_point');
-        if (sel) sel.required = isAkis;
+        if (sel) {
+            sel.required = shouldShow;
+            sel.disabled = !shouldShow;
+        }
     }
 
     if (courierEl) {
@@ -1822,7 +1827,10 @@ if (file_exists($headerPath)) {
     });
 
     modeEls.forEach(function (el) {
-        el.addEventListener('change', updateCourierMap);
+        el.addEventListener('change', function () {
+            updateCourierMap();
+            toggleAkisPointWrapper();
+        });
     });
 
     if (postalEl) {
