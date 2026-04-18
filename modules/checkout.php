@@ -191,6 +191,26 @@ function checkoutIsCourierAllowed(string $country, string $courierCode, array $c
     return array_key_exists($courierCode, $allowed);
 }
 
+function checkoutSanitizePickupPoint($value): string {
+    $value = strip_tags(trim((string)$value));
+
+    $withoutControls = preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $value);
+    if (is_string($withoutControls)) {
+        $value = $withoutControls;
+    }
+
+    $normalizedSpaces = preg_replace('/\s+/u', ' ', $value);
+    if (is_string($normalizedSpaces)) {
+        $value = trim($normalizedSpaces);
+    }
+
+    if (function_exists('mb_substr')) {
+        return mb_substr($value, 0, 160, 'UTF-8');
+    }
+
+    return substr($value, 0, 160);
+}
+
 function checkoutShippingCost(
     string $country,
     string $speed,
@@ -473,6 +493,9 @@ if (!isset($formData['fulfillment_mode']) || !in_array((string)$formData['fulfil
 if (!isset($formData['shipping_label'])) {
     $formData['shipping_label'] = '';
 }
+if (!isset($formData['boxnow_locker_location'])) {
+    $formData['boxnow_locker_location'] = '';
+}
 if (!isset($formData['shipping_country']) || trim((string)$formData['shipping_country']) === '') {
     $fallbackCountry = trim((string)($defaultAddress['country'] ?? '')) !== ''
         ? (string)$defaultAddress['country']
@@ -667,6 +690,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors['courier'] = 'Selected courier is not available for the chosen country.';
         }
 
+        $pickupPoint = '';
+        if ($fulfillmentMode === 'pickup') {
+            if ($courier === 'boxnow') {
+                $pickupPoint = checkoutSanitizePickupPoint($_POST['boxnow_locker_location'] ?? '');
+                $_POST['boxnow_locker_location'] = $pickupPoint;
+                $formData['boxnow_locker_location'] = $pickupPoint;
+
+                $pickupPointLength = function_exists('mb_strlen') ? mb_strlen($pickupPoint, 'UTF-8') : strlen($pickupPoint);
+                if ($pickupPoint === '') {
+                    $errors['boxnow_locker_location'] = 'BoxNow locker area is required.';
+                } elseif ($pickupPointLength < 2) {
+                    $errors['boxnow_locker_location'] = 'Enter at least 2 characters for the BoxNow locker area.';
+                }
+            } elseif ($courier === 'akis_express') {
+                $pickupPoint = checkoutSanitizePickupPoint($_POST['akis_pickup_point'] ?? '');
+                $_POST['akis_pickup_point'] = $pickupPoint;
+                $formData['akis_pickup_point'] = $pickupPoint;
+
+                if ($pickupPoint === '') {
+                    $errors['akis_pickup_point'] = 'Akis Express pickup point is required.';
+                }
+            }
+        }
+
         if (!$isLoggedIn) {
             if (empty($_POST['full_name'])) {
                 $errors['full_name'] = 'Full name is required';
@@ -776,6 +823,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'shipping_label' => trim((string)($_POST['shipping_label'] ?? '')),
                     'courier' => $courier,
                     'fulfillment_mode' => $fulfillmentMode,
+                    'pickup_point' => $pickupPoint,
                     'total_amount' => $totalAmount,
                     'cart_count' => $cartCount,
                     'site_title' => $system_title,
@@ -960,7 +1008,7 @@ if (file_exists($headerPath)) {
                     </div>
                     <div class="form-group" id="akis-point-wrapper" style="display:none;">
                         <label data-translate="checkoutPickupPointLabel">Επιλέξτε Σημείο Παραλαβής Akis Express *</label>
-                        <select id="akis_pickup_point" name="akis_pickup_point">
+                        <select id="akis_pickup_point" name="akis_pickup_point" class="<?= isset($errors['akis_pickup_point'])?'error-field':'' ?>">
                             <option value="" data-translate="checkoutPickupPointPlaceholder">Επιλέξτε Πόλη</option>
                             <option>Αγία Βαρβάρα (Αντιπρόσωπος)</option>
                             <option>Αγία Νάπα (Αντιπρόσωπος)</option>
@@ -1040,6 +1088,26 @@ if (file_exists($headerPath)) {
                             <option>Χοιροκοιτία (Αντιπρόσωπος)</option>
                             <option>Χρυσοπολίτισσα</option>
                         </select>
+                        <?php if (isset($errors['akis_pickup_point'])): ?><span class="error"><?= $errors['akis_pickup_point'] ?></span><?php endif; ?>
+                    </div>
+                    <div class="form-group" id="boxnow-locker-wrapper" style="display:none;">
+                        <label for="boxnow_locker_location" data-translate="checkoutBoxNowLockerLabel">BoxNow locker area *</label>
+                        <input
+                            type="text"
+                            id="boxnow_locker_location"
+                            name="boxnow_locker_location"
+                            value="<?= htmlspecialchars($formData['boxnow_locker_location']??'') ?>"
+                            class="<?= isset($errors['boxnow_locker_location'])?'error-field':'' ?>"
+                            maxlength="160"
+                            autocomplete="off"
+                            data-translate-placeholder="checkoutBoxNowLockerPlaceholder"
+                            placeholder="e.g. Strovolos, Latsia, Finikoudes"
+                        >
+                        <span class="form-helper">
+                            <span data-translate="checkoutBoxNowLockerHelp">Open the BoxNow locker finder, choose the nearest locker that suits you, then write the area or locker name here.</span>
+                            <a href="https://boxnow.cy/en/locker-finder" target="_blank" rel="noopener noreferrer" data-translate="checkoutBoxNowLockerLink">Open BoxNow locker finder</a>
+                        </span>
+                        <?php if (isset($errors['boxnow_locker_location'])): ?><span class="error"><?= $errors['boxnow_locker_location'] ?></span><?php endif; ?>
                     </div>
                     <div class="form-group">
                         <label data-translate="checkoutSpeed">Speed</label>
@@ -1775,6 +1843,7 @@ if (file_exists($headerPath)) {
         applyPostalRule();
         updateTotals();
         updateCourierMap();
+        togglePickupPointWrappers();
     }
 
     if (useSavedAddressEl) {
@@ -1792,22 +1861,35 @@ if (file_exists($headerPath)) {
             applyPostalRule();
             updateTotals();
             updateCourierMap();
-            toggleAkisPointWrapper();
+            togglePickupPointWrappers();
         });
     }
 
     var akisPointWrapper = document.getElementById('akis-point-wrapper');
+    var boxNowLockerWrapper = document.getElementById('boxnow-locker-wrapper');
+    var boxNowLockerInput = document.getElementById('boxnow_locker_location');
 
-    function toggleAkisPointWrapper() {
-        if (!akisPointWrapper) return;
+    function togglePickupPointWrappers() {
         var isPickup = selectedMode() === 'pickup';
-        var isAkis = courierEl && courierEl.value === 'akis_express';
-        var shouldShow = isAkis && isPickup;
-        akisPointWrapper.style.display = shouldShow ? '' : 'none';
+        var courier = courierEl ? courierEl.value : '';
+        var showAkis = isPickup && courier === 'akis_express';
+        var showBoxNow = isPickup && courier === 'boxnow';
         var sel = document.getElementById('akis_pickup_point');
+
+        if (akisPointWrapper) {
+            akisPointWrapper.style.display = showAkis ? '' : 'none';
+        }
         if (sel) {
-            sel.required = shouldShow;
-            sel.disabled = !shouldShow;
+            sel.required = showAkis;
+            sel.disabled = !showAkis;
+        }
+
+        if (boxNowLockerWrapper) {
+            boxNowLockerWrapper.style.display = showBoxNow ? '' : 'none';
+        }
+        if (boxNowLockerInput) {
+            boxNowLockerInput.required = showBoxNow;
+            boxNowLockerInput.disabled = !showBoxNow;
         }
     }
 
@@ -1815,7 +1897,7 @@ if (file_exists($headerPath)) {
         courierEl.addEventListener('change', function () {
             updateTotals();
             updateCourierMap();
-            toggleAkisPointWrapper();
+            togglePickupPointWrappers();
         });
     }
 
@@ -1829,7 +1911,7 @@ if (file_exists($headerPath)) {
     modeEls.forEach(function (el) {
         el.addEventListener('change', function () {
             updateCourierMap();
-            toggleAkisPointWrapper();
+            togglePickupPointWrappers();
         });
     });
 
@@ -1854,7 +1936,7 @@ if (file_exists($headerPath)) {
     updateSpeedLabels();
     applyPostalRule();
     updateTotals();
-    toggleAkisPointWrapper();
+    togglePickupPointWrappers();
     applySavedAddress(false);
     updateCourierMap();
 })();

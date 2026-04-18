@@ -68,6 +68,7 @@ function ensureOrderShippingSchema(mysqli $conn): void {
         'courierCode' => "ALTER TABLE orders ADD COLUMN courierCode VARCHAR(60) NULL AFTER shippingLabel",
         'shippingPriority' => "ALTER TABLE orders ADD COLUMN shippingPriority VARCHAR(20) NULL AFTER courierCode",
         'fulfillmentMode' => "ALTER TABLE orders ADD COLUMN fulfillmentMode VARCHAR(20) NULL AFTER shippingPriority",
+        'pickupPoint' => "ALTER TABLE orders ADD COLUMN pickupPoint VARCHAR(180) NULL AFTER fulfillmentMode",
     ];
 
     foreach ($requiredColumns as $columnName => $alterSql) {
@@ -383,8 +384,11 @@ function placeOrder(mysqli $conn, array $input): array {
     $courier = trim((string)($input['courier'] ?? ''));
     $shippingPriority = trim((string)($input['shipping_priority'] ?? 'standard'));
     $fulfillmentMode = strtolower(trim((string)($input['fulfillment_mode'] ?? 'delivery')));
+    $pickupPoint = trim((string)($input['pickup_point'] ?? ''));
+    $pickupPoint = function_exists('mb_substr') ? mb_substr($pickupPoint, 0, 180, 'UTF-8') : substr($pickupPoint, 0, 180);
     if ($fulfillmentMode !== 'pickup') {
         $fulfillmentMode = 'delivery';
+        $pickupPoint = '';
     }
 
     // 1) Order header
@@ -392,14 +396,14 @@ function placeOrder(mysqli $conn, array $input): array {
         "INSERT INTO orders (
             orderNumber, userID, isGuestFlag, email, status,
             subtotal, discountTotal, shippingCost, totalAmount,
-            shippingAddress, shippingCity, shippingPostalCode, shippingCountry, shippingLabel, courierCode, shippingPriority, fulfillmentMode
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            shippingAddress, shippingCity, shippingPostalCode, shippingCountry, shippingLabel, courierCode, shippingPriority, fulfillmentMode, pickupPoint
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
     if (!$stmt) {
         throw new Exception('Failed to prepare order insert: ' . $conn->error);
     }
     $stmt->bind_param(
-        "siissddddssssssss",
+        "siissddddsssssssss",
         $orderNumber,
         $userID,
         $isGuestFlag,
@@ -416,7 +420,8 @@ function placeOrder(mysqli $conn, array $input): array {
         $shippingLabel,
         $courier,
         $shippingPriority,
-        $fulfillmentMode
+        $fulfillmentMode,
+        $pickupPoint
     );
     if (!$stmt->execute()) {
         throw new Exception('Failed to insert order header: ' . $stmt->error);
@@ -589,6 +594,7 @@ function placeOrder(mysqli $conn, array $input): array {
         'courier' => $courier,
         'shipping_priority' => $shippingPriority,
         'fulfillment_mode' => $fulfillmentMode,
+        'pickup_point' => $pickupPoint,
     ]);
 
     return [
@@ -628,6 +634,7 @@ function sendOrderConfirmationEmail(array $payload): array {
     $courier = courierLabelFromCode(trim((string)($payload['courier'] ?? '')));
     $shippingPriority = trim((string)($payload['shipping_priority'] ?? 'standard'));
     $fulfillmentMode = strtolower(trim((string)($payload['fulfillment_mode'] ?? 'delivery')));
+    $pickupPoint = trim((string)($payload['pickup_point'] ?? ''));
     $deliveryLabel = $fulfillmentMode === 'pickup' ? 'Pickup Point' : 'Delivery';
     $items = is_array($payload['items'] ?? null) ? $payload['items'] : [];
     $shippingLine = trim($shippingAddress . ', ' . $shippingCity . ', ' . $shippingPostalCode . ', ' . $shippingCountry, " ,");
@@ -658,6 +665,7 @@ function sendOrderConfirmationEmail(array $payload): array {
         "Shipping: €" . number_format($shippingCost, 2) . "\n" .
         "Delivery Option: {$deliveryLabel}\n" .
         "Courier: " . ($courier !== '' ? "{$courier} ({$shippingPriority})" : 'Not specified') . "\n" .
+        ($pickupPoint !== '' ? "Pickup Point: {$pickupPoint}\n" : '') .
         ($shippingLabel !== '' ? "Address Label: {$shippingLabel}\n" : '') .
         "Shipping Address: " . $shippingLine . "\n" .
         "Total Paid: €" . number_format($total, 2) . "\n\n" .
@@ -737,6 +745,7 @@ function sendAdminOrderNotificationEmail(mysqli $conn, array $payload): array {
     $courier = courierLabelFromCode(trim((string)($payload['courier'] ?? '')));
     $shippingPriority = trim((string)($payload['shipping_priority'] ?? 'standard'));
     $fulfillmentMode = strtolower(trim((string)($payload['fulfillment_mode'] ?? 'delivery')));
+    $pickupPoint = trim((string)($payload['pickup_point'] ?? ''));
     $deliveryLabel = $fulfillmentMode === 'pickup' ? 'Pickup Point' : 'Delivery';
     $shippingLine = trim($shippingAddress . ', ' . $shippingCity . ', ' . $shippingPostalCode . ', ' . $shippingCountry, " ,");
     if ($shippingLine === '') {
@@ -773,6 +782,7 @@ function sendAdminOrderNotificationEmail(mysqli $conn, array $payload): array {
         "Shipping: €" . number_format($shippingCost, 2) . "\n" .
         "Delivery Option: {$deliveryLabel}\n" .
         "Courier: " . ($courier !== '' ? "{$courier} ({$shippingPriority})" : 'Not specified') . "\n" .
+        ($pickupPoint !== '' ? "Pickup Point: {$pickupPoint}\n" : '') .
         ($shippingLabel !== '' ? "Address Label: {$shippingLabel}\n" : '') .
         "Shipping Address: " . $shippingLine . "\n" .
         "Customer email: " . ($customerEmail !== '' ? $customerEmail : 'Guest checkout') . "\n\n" .

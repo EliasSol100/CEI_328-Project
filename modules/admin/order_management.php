@@ -54,6 +54,7 @@ function ensureOrderShippingSchema(mysqli $conn): void {
         'courierCode' => "ALTER TABLE orders ADD COLUMN courierCode VARCHAR(60) NULL AFTER shippingLabel",
         'shippingPriority' => "ALTER TABLE orders ADD COLUMN shippingPriority VARCHAR(20) NULL AFTER courierCode",
         'fulfillmentMode' => "ALTER TABLE orders ADD COLUMN fulfillmentMode VARCHAR(20) NULL AFTER shippingPriority",
+        'pickupPoint' => "ALTER TABLE orders ADD COLUMN pickupPoint VARCHAR(180) NULL AFTER fulfillmentMode",
     ];
 
     foreach ($requiredColumns as $columnName => $alterSql) {
@@ -214,6 +215,7 @@ function fetchOrderStatusContext(mysqli $conn, int $orderId): ?array {
             o.shippingPostalCode,
             o.shippingCountry,
             o.shippingLabel,
+            o.pickupPoint,
             o.courierCode,
             o.shippingPriority,
             COALESCE(NULLIF(u.full_name, ''), 'Customer') AS customerName,
@@ -256,6 +258,7 @@ function sendOrderStatusEmails(mysqli $conn, array $orderContext, string $status
     $shippingCity = trim((string)($orderContext['shippingCity'] ?? ''));
     $shippingPostal = trim((string)($orderContext['shippingPostalCode'] ?? ''));
     $shippingCountry = trim((string)($orderContext['shippingCountry'] ?? ''));
+    $pickupPoint = trim((string)($orderContext['pickupPoint'] ?? ''));
 
     $shippingLine = trim($shippingAddress . ', ' . $shippingCity . ', ' . $shippingPostal . ', ' . $shippingCountry, " ,");
     if ($shippingLine === '') {
@@ -270,6 +273,7 @@ function sendOrderStatusEmails(mysqli $conn, array $orderContext, string $status
         "Status: {$statusLabel}\n" .
         "Courier: {$courierLabel} ({$shippingPriority})\n" .
         "Tracking Number: {$trackingCode}\n" .
+        ($pickupPoint !== '' ? "Pickup Point: {$pickupPoint}\n" : '') .
         "Shipping Address: {$shippingLine}\n\n" .
         "Thank you,\nAthina E-Shop";
 
@@ -362,6 +366,7 @@ function buildOrderShippingLine(array $orderContext): string {
     $shippingPostal = trim((string)($orderContext['shippingPostalCode'] ?? ''));
     $shippingCountry = trim((string)($orderContext['shippingCountry'] ?? ''));
     $shippingLabel = trim((string)($orderContext['shippingLabel'] ?? ''));
+    $pickupPoint = trim((string)($orderContext['pickupPoint'] ?? ''));
 
     $parts = array_filter([
         $shippingAddress,
@@ -372,6 +377,9 @@ function buildOrderShippingLine(array $orderContext): string {
 
     if ($shippingLabel !== '') {
         $parts[] = $shippingLabel;
+    }
+    if ($pickupPoint !== '') {
+        $parts[] = 'Pickup: ' . $pickupPoint;
     }
 
     return !empty($parts) ? implode(', ', $parts) : 'Not provided';
@@ -787,22 +795,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $shippingCountry = trim((string)($_POST['shippingCountry'] ?? ''));
             $shippingPostalCode = trim((string)($_POST['shippingPostalCode'] ?? ''));
             $shippingLabel = trim((string)($_POST['shippingLabel'] ?? ''));
+            $pickupPoint = trim((string)($_POST['pickupPoint'] ?? ''));
+            $pickupPoint = function_exists('mb_substr') ? mb_substr($pickupPoint, 0, 180, 'UTF-8') : substr($pickupPoint, 0, 180);
 
             $updateStmt = mysqli_prepare(
                 $conn,
                 "UPDATE orders
-                 SET shippingAddress = ?, shippingCity = ?, shippingCountry = ?, shippingPostalCode = ?, shippingLabel = ?
+                 SET shippingAddress = ?, shippingCity = ?, shippingCountry = ?, shippingPostalCode = ?, shippingLabel = ?, pickupPoint = ?
                  WHERE orderID = ?"
             );
             if ($updateStmt) {
                 mysqli_stmt_bind_param(
                     $updateStmt,
-                    'sssssi',
+                    'ssssssi',
                     $shippingAddress,
                     $shippingCity,
                     $shippingCountry,
                     $shippingPostalCode,
                     $shippingLabel,
+                    $pickupPoint,
                     $orderID
                 );
                 mysqli_stmt_execute($updateStmt);
@@ -909,6 +920,7 @@ if (isset($_GET['view'])) {
             o.shippingPostalCode,
             o.shippingCountry,
             o.shippingLabel,
+            o.pickupPoint,
             o.courierCode,
             o.shippingPriority,
             COALESCE(NULLIF(u.full_name, ""), "Guest") AS customer,
@@ -1073,6 +1085,7 @@ $receiptStatuses = ['paid', 'completed', 'captured', 'succeeded'];
           if ($shippingLabelText === '') {
               $shippingLabelText = fallbackShippingLabelForUser($conn, (int)($viewOrder['userID'] ?? 0));
           }
+          $pickupPointText = trim((string)($viewOrder['pickupPoint'] ?? ''));
           $shippingAddressLine = trim((string)($viewOrder['shippingAddress'] ?? ''));
           $shippingCityLine = trim((string)($viewOrder['shippingCity'] ?? ''));
           $shippingCountryLine = trim((string)($viewOrder['shippingCountry'] ?? ''));
@@ -1083,6 +1096,7 @@ $receiptStatuses = ['paid', 'completed', 'captured', 'succeeded'];
               $shippingPostcodeLine,
               $shippingCountryLine,
               $shippingLabelText,
+              $pickupPointText !== '' ? 'Pickup: ' . $pickupPointText : '',
           ], static function ($value) { return $value !== ''; });
           $shippingAddressText = !empty($shippingAddressBits) ? implode(', ', $shippingAddressBits) : 'Not provided';
         ?>
@@ -1142,6 +1156,7 @@ $receiptStatuses = ['paid', 'completed', 'captured', 'succeeded'];
             <p class="text-sm text-muted">Country: <?= htmlspecialchars($shippingCountryLine !== '' ? $shippingCountryLine : '-') ?></p>
             <p class="text-sm text-muted">Postcode: <?= htmlspecialchars($shippingPostcodeLine !== '' ? $shippingPostcodeLine : '-') ?></p>
             <p class="text-sm text-muted">Label: <?= htmlspecialchars($shippingLabelText !== '' ? $shippingLabelText : 'None') ?></p>
+            <p class="text-sm text-muted">Pickup point: <?= htmlspecialchars($pickupPointText !== '' ? $pickupPointText : 'None') ?></p>
             <form id="shipping-edit-form" method="POST" data-ignore-unsaved-warning style="display:none;margin-top:10px;">
               <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['admin_order_token']) ?>">
               <input type="hidden" name="action" value="update_shipping">
@@ -1168,6 +1183,10 @@ $receiptStatuses = ['paid', 'completed', 'captured', 'succeeded'];
               <div class="form-group" style="margin-bottom:10px;">
                 <label class="form-label">Label</label>
                 <input type="text" name="shippingLabel" class="form-input" value="<?= htmlspecialchars($shippingLabelText) ?>" placeholder="e.g. apartment">
+              </div>
+              <div class="form-group" style="margin-bottom:10px;">
+                <label class="form-label">Pickup point</label>
+                <input type="text" name="pickupPoint" class="form-input" value="<?= htmlspecialchars($pickupPointText) ?>" maxlength="180" placeholder="e.g. BoxNow Strovolos">
               </div>
               <button type="submit" class="btn-primary btn-sm"><i class="fas fa-save"></i> Save Shipping</button>
             </form>
