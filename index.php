@@ -369,6 +369,8 @@ $homepageSettings = app_homepage_load_settings($conn);
                                     <img
                                         class="product-image-display"
                                         src="modules/admin/ajax/product_image.php?id=<?= $primaryImage ?>"
+                                        loading="lazy"
+                                        decoding="async"
                                         alt="<?= htmlspecialchars($product['nameEN']) ?>">
                                 </a>
                             <?php else: ?>
@@ -443,6 +445,8 @@ $homepageSettings = app_homepage_load_settings($conn);
                                     <img
                                         class="product-image-display"
                                         src="modules/admin/ajax/product_image.php?id=<?= $primaryImage ?>"
+                                        loading="lazy"
+                                        decoding="async"
                                         alt="<?= htmlspecialchars($product['nameEN']) ?>">
                                 </a>
                             <?php else: ?>

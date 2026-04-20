@@ -755,7 +755,7 @@ if ($vpRes) {
                         </p>
                         <?php endif; ?>
 
-                        <?php foreach ($products as $p):
+                        <?php foreach ($products as $productIndex => $p):
                             $pid       = (int)$p['productID'];
                             $inWishlist = in_array($pid, $wishlistedIDs, true);
                             $isOutStock = ((string)$p['cartStatus'] === 'out_of_stock') || ((int)$p['inventory'] <= 0 && (string)$p['cartStatus'] !== 'made_to_order');
@@ -814,8 +814,17 @@ if ($vpRes) {
                                 <div id="carousel-<?= $pid ?>" class="carousel slide shop-carousel" data-bs-ride="carousel" data-bs-interval="2000">
                                     <div class="carousel-inner">
                                         <?php foreach ($allSlides as $cidx => $slide): ?>
+                                        <?php
+                                            $shouldEagerLoad = $productIndex < 3 && $cidx < 2;
+                                            $loadingMode = $shouldEagerLoad ? 'eager' : 'lazy';
+                                            $fetchPriority = $shouldEagerLoad && $cidx === 0 ? 'high' : 'low';
+                                        ?>
                                         <div class="carousel-item <?= $cidx === 0 ? 'active' : '' ?>">
-                                            <img src="<?= htmlspecialchars($slide['src']) ?>" alt="<?= htmlspecialchars($p['nameEN']) ?>">
+                                            <img src="<?= htmlspecialchars($slide['src']) ?>"
+                                                 alt="<?= htmlspecialchars($p['nameEN']) ?>"
+                                                 loading="<?= $loadingMode ?>"
+                                                 decoding="async"
+                                                 fetchpriority="<?= $fetchPriority ?>">
                                         </div>
                                         <?php endforeach; ?>
                                     </div>

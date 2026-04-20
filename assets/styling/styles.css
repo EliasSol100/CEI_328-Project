@@ -1196,6 +1196,73 @@ body.account-page .footer {
     text-decoration: underline;
 }
 
+@supports (content-visibility: auto) {
+    body.site-page.is-long-scroll-page .shop-collection,
+    body.site-page.is-long-scroll-page .selling-fast,
+    body.site-page.is-long-scroll-page .best-sellers,
+    body.site-page.is-long-scroll-page .follow-journey,
+    body.site-page.is-long-scroll-page .features,
+    body.site-page.is-long-scroll-page .view-all-section,
+    body.site-page.is-long-scroll-page .reviews-section,
+    body.site-page.is-long-scroll-page .footer-legal-summary,
+    body.site-page.is-long-scroll-page .product-card,
+    body.site-page.is-long-scroll-page .shop-product-card,
+    body.site-page.is-long-scroll-page .info-card,
+    body.site-page.is-long-scroll-page .faq-item,
+    body.site-page.is-long-scroll-page .review-card {
+        content-visibility: auto;
+    }
+
+    body.site-page.is-long-scroll-page .shop-collection,
+    body.site-page.is-long-scroll-page .selling-fast,
+    body.site-page.is-long-scroll-page .best-sellers,
+    body.site-page.is-long-scroll-page .follow-journey,
+    body.site-page.is-long-scroll-page .features {
+        contain-intrinsic-size: 820px;
+        contain-intrinsic-size: auto 820px;
+    }
+
+    body.site-page.is-long-scroll-page .view-all-section {
+        contain-intrinsic-size: 180px;
+        contain-intrinsic-size: auto 180px;
+    }
+
+    body.site-page.is-long-scroll-page .reviews-section {
+        contain-intrinsic-size: 1120px;
+        contain-intrinsic-size: auto 1120px;
+    }
+
+    body.site-page.is-long-scroll-page .footer-legal-summary {
+        contain-intrinsic-size: 520px;
+        contain-intrinsic-size: auto 520px;
+    }
+
+    body.site-page.is-long-scroll-page .product-card {
+        contain-intrinsic-size: 520px;
+        contain-intrinsic-size: auto 520px;
+    }
+
+    body.site-page.is-long-scroll-page .shop-product-card {
+        contain-intrinsic-size: 600px;
+        contain-intrinsic-size: auto 600px;
+    }
+
+    body.site-page.is-long-scroll-page .info-card {
+        contain-intrinsic-size: 320px;
+        contain-intrinsic-size: auto 320px;
+    }
+
+    body.site-page.is-long-scroll-page .faq-item {
+        contain-intrinsic-size: 180px;
+        contain-intrinsic-size: auto 180px;
+    }
+
+    body.site-page.is-long-scroll-page .review-card {
+        contain-intrinsic-size: 260px;
+        contain-intrinsic-size: auto 260px;
+    }
+}
+
 /* Responsive Design */
 @media (max-width: 1024px) {
     .products-grid {
