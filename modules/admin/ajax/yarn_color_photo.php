@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../../../include/security.php';
+require_once __DIR__ . '/../../../include/image_storage.php';
 
 header('Content-Type: application/json; charset=utf-8');
 app_require_csrf(true, 'Invalid CSRF token.');
@@ -86,25 +87,18 @@ if ($action === 'upload') {
         exit;
     }
 
-    $ext = [
-        'image/jpeg' => 'jpg',
-        'image/png' => 'png',
-        'image/gif' => 'gif',
-        'image/webp' => 'webp',
-    ][$mimeType] ?? 'jpg';
-
-    $filename = 'type' . $typeID . '_color' . $colorID . '.' . $ext;
+    $filename = 'type' . $typeID . '_color' . $colorID . '.jpg';
     $destPath = $uploadDir . $filename;
 
-    foreach (['jpg', 'png', 'gif', 'webp'] as $oldExt) {
+    foreach (['jpg', 'png', 'gif', 'webp', 'jpeg'] as $oldExt) {
         $old = $uploadDir . 'type' . $typeID . '_color' . $colorID . '.' . $oldExt;
         if ($old !== $destPath && is_file($old)) {
             @unlink($old);
         }
     }
 
-    if (!move_uploaded_file($tmpName, $destPath)) {
-        echo json_encode(['ok' => false, 'error' => 'Failed to save file']);
+    if (!app_image_convert_file_to_jpeg($tmpName, $destPath, 1200, 1200, 84)) {
+        echo json_encode(['ok' => false, 'error' => 'Failed to convert file to JPG']);
         exit;
     }
 

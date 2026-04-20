@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/security.php';
+require_once __DIR__ . '/image_storage.php';
 require_once __DIR__ . '/../authentication/database.php';
 
 if (!function_exists('app_homepage_project_root')) {
@@ -266,6 +267,9 @@ if (!function_exists('app_homepage_asset_exists')) {
 if (!function_exists('app_homepage_resolve_asset')) {
     function app_homepage_resolve_asset(string $path, string $fallback = ''): string
     {
+        $path = app_image_prefer_optimized_asset_path($path);
+        $fallback = app_image_prefer_optimized_asset_path($fallback);
+
         if (app_homepage_asset_exists($path)) {
             return $path;
         }
@@ -281,7 +285,7 @@ if (!function_exists('app_homepage_resolve_asset')) {
 if (!function_exists('app_homepage_asset_url')) {
     function app_homepage_asset_url(string $path, string $prefix = ''): string
     {
-        $path = trim($path);
+        $path = trim(app_image_prefer_optimized_asset_path($path));
         if ($path === '') {
             return $path;
         }
@@ -324,10 +328,10 @@ if (!function_exists('app_homepage_create_gd_image_resource')) {
 }
 
 if (!function_exists('app_homepage_write_gd_image_resource')) {
-    function app_homepage_write_gd_image_resource($image, string $mimeType, string $targetPath): void
+    function app_homepage_write_gd_image_resource($image, string $targetPath, string $outputMime = 'image/jpeg'): void
     {
         $ok = false;
-        switch ($mimeType) {
+        switch ($outputMime) {
             case 'image/jpeg':
                 $ok = @imagejpeg($image, $targetPath, 92);
                 break;
@@ -442,7 +446,7 @@ if (!function_exists('app_homepage_expand_hero_asset')) {
             $writePath = $targetPath . '.tmp';
         }
 
-        app_homepage_write_gd_image_resource($canvas, $mimeType, $writePath);
+        app_homepage_write_gd_image_resource($canvas, $writePath, 'image/jpeg');
 
         if ($replaceOriginal) {
             @unlink($targetPath);
@@ -462,7 +466,7 @@ if (!function_exists('app_homepage_expand_hero_asset')) {
 if (!function_exists('app_homepage_normalize_local_hero_asset')) {
     function app_homepage_normalize_local_hero_asset(string $path): string
     {
-        $path = trim($path);
+        $path = trim(app_image_prefer_optimized_asset_path($path));
         if ($path === '' || app_homepage_is_remote_asset($path)) {
             return $path;
         }
@@ -614,14 +618,15 @@ if (!function_exists('app_homepage_save_uploaded_asset')) {
             throw new InvalidArgumentException($spec['label'] . ' must be JPG, PNG, GIF, or WEBP.');
         }
 
+        $isHeaderLogoUpload = $configKey === 'homepage_header_logo_path';
         $extensions = [
             'image/jpeg' => 'jpg',
             'image/png' => 'png',
             'image/gif' => 'gif',
             'image/webp' => 'webp',
         ];
-        $extension = $extensions[$mimeType] ?? null;
-        if ($extension === null) {
+        $sourceExtension = $extensions[$mimeType] ?? null;
+        if ($sourceExtension === null) {
             throw new InvalidArgumentException($spec['label'] . ' uses an unsupported image format.');
         }
 
@@ -638,14 +643,29 @@ if (!function_exists('app_homepage_save_uploaded_asset')) {
             }
         }
 
-        $fileName = $baseName . '.' . $extension;
+        $targetExtension = $isHeaderLogoUpload ? $sourceExtension : 'jpg';
+        $fileName = $baseName . '.' . $targetExtension;
         $targetPath = $uploadDir . DIRECTORY_SEPARATOR . $fileName;
-        if (!move_uploaded_file($tmpName, $targetPath)) {
-            throw new RuntimeException('Could not save ' . $spec['label'] . '.');
+
+        if ($isHeaderLogoUpload) {
+            if (!move_uploaded_file($tmpName, $targetPath)) {
+                throw new RuntimeException('Could not save ' . $spec['label'] . '.');
+            }
+        } else {
+            $maxWidth = (int)$spec['width'];
+            $maxHeight = (int)$spec['height'];
+            if ($configKey === 'homepage_hero_image') {
+                $maxWidth = app_homepage_hero_canvas_width();
+                $maxHeight = app_homepage_hero_canvas_height();
+            }
+
+            if (!app_image_convert_file_to_jpeg($tmpName, $targetPath, $maxWidth, $maxHeight, 84)) {
+                throw new RuntimeException('Could not convert ' . $spec['label'] . ' to JPG.');
+            }
         }
 
         if ($configKey === 'homepage_hero_image' && $width === app_homepage_hero_safe_width() && $height === app_homepage_hero_canvas_height()) {
-            app_homepage_expand_hero_asset($targetPath, $targetPath, $mimeType, $width, $height);
+            app_homepage_expand_hero_asset($targetPath, $targetPath, 'image/jpeg', $width, $height);
         }
 
         return 'uploads/assets/images/homepage/' . $fileName;

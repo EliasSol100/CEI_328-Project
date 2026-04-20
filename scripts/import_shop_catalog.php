@@ -4,6 +4,7 @@ declare(strict_types=1);
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
 require_once __DIR__ . '/../authentication/database.php';
+require_once __DIR__ . '/../include/image_storage.php';
 require_once __DIR__ . '/../include/product_option_helpers.php';
 if (!defined('CUSTOM_ORDERS_DIRECT')) {
     define('CUSTOM_ORDERS_DIRECT', true);
@@ -287,6 +288,24 @@ function catalogCopyAsset(string $sourcePath, string $relativeTargetPath): strin
     }
 
     return $relativeTargetPath;
+}
+
+function catalogCopyAssetAsJpeg(string $sourcePath, string $relativeTargetPath, int $maxWidth = 1600, int $maxHeight = 1600, int $quality = 82): string
+{
+    if (!is_file($sourcePath)) {
+        throw new RuntimeException("Asset not found: {$sourcePath}");
+    }
+
+    $normalizedTarget = ltrim(str_replace('\\', '/', $relativeTargetPath), '/');
+    $normalizedTarget = (string)preg_replace('/\.(png|gif|webp|jpe?g)$/i', '.jpg', $normalizedTarget);
+    $destinationPath = dirname(__DIR__) . '/' . $normalizedTarget;
+    catalogEnsureDirectory(dirname($destinationPath));
+
+    if (!app_image_convert_file_to_jpeg($sourcePath, $destinationPath, $maxWidth, $maxHeight, $quality)) {
+        throw new RuntimeException("Could not convert asset to JPG: {$normalizedTarget}");
+    }
+
+    return $normalizedTarget;
 }
 
 function catalogInsertVariation(mysqli $conn, int $productId, array $variation): int
@@ -1295,11 +1314,10 @@ try {
                 if ($sourcePath === null) {
                     continue;
                 }
-                $extension = strtolower((string)pathinfo($sourcePath, PATHINFO_EXTENSION));
                 $fileBaseName = catalogSlugify((string)pathinfo((string)$colorImageRelativePath, PATHINFO_FILENAME));
-                $fileName = sprintf('%02d-%s.%s', $imageIndex + 1, $fileBaseName, $extension !== '' ? $extension : 'jpg');
+                $fileName = sprintf('%02d-%s.jpg', $imageIndex + 1, $fileBaseName);
                 $relativeTarget = 'uploads/assets/images/products/' . $skuSlug . '/colors/' . catalogSlugify($colorName) . '/' . $fileName;
-                $storedPath = catalogCopyAsset($sourcePath, $relativeTarget);
+                $storedPath = catalogCopyAssetAsJpeg($sourcePath, $relativeTarget, 1600, 1600, 82);
                 catalogInsertProductColorPhoto($conn, $productId, $colorId, $storedPath, ($colorIndex * 100) + $imageIndex);
             }
         }
@@ -1321,11 +1339,10 @@ try {
                     if ($sourcePath === null) {
                         continue;
                     }
-                    $extension = strtolower((string)pathinfo($sourcePath, PATHINFO_EXTENSION));
                     $fileBaseName = catalogSlugify((string)pathinfo((string)$variationImageRelativePath, PATHINFO_FILENAME));
-                    $fileName = sprintf('%02d-%s.%s', $imageIndex + 1, $fileBaseName, $extension !== '' ? $extension : 'jpg');
+                    $fileName = sprintf('%02d-%s.jpg', $imageIndex + 1, $fileBaseName);
                     $relativeTarget = 'uploads/assets/images/products/' . $skuSlug . '/' . $variationSlug . '/' . $fileName;
-                    $storedPath = catalogCopyAsset($sourcePath, $relativeTarget);
+                    $storedPath = catalogCopyAssetAsJpeg($sourcePath, $relativeTarget, 1600, 1600, 82);
                     catalogInsertVariationPhoto($conn, $variationId, $storedPath, $imageIndex);
                     $variationPhotoCount++;
                 }

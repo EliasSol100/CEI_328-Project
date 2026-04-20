@@ -34,8 +34,15 @@ if (!app_allowed_image_mime($mimeType)) {
 
 header('Content-Type: ' . $mimeType);
 header('X-Content-Type-Options: nosniff');
-// Avoid stale broken thumbnails after DB imports or photo replacements.
-header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
-header('Pragma: no-cache');
-header('Expires: 0');
+$etag = '"' . sha1($data) . '"';
+if (trim((string)($_SERVER['HTTP_IF_NONE_MATCH'] ?? '')) === $etag) {
+    header('ETag: ' . $etag);
+    header('Cache-Control: public, max-age=604800, immutable');
+    http_response_code(304);
+    exit;
+}
+
+header('Content-Length: ' . strlen($data));
+header('ETag: ' . $etag);
+header('Cache-Control: public, max-age=604800, immutable');
 echo $data;
