@@ -953,7 +953,12 @@ include __DIR__ . "/include/header.php";
                 <div class="carousel-inner" id="product-carousel-inner">
                     <?php foreach ($photos as $idx => $src): ?>
                     <div class="carousel-item <?= $idx === 0 ? 'active' : '' ?>">
-                        <img src="<?= htmlspecialchars($src) ?>" class="product-carousel-image d-block w-100" alt="<?= htmlspecialchars((string)$product['nameEN']) ?>">
+                        <img src="<?= htmlspecialchars($src) ?>"
+                             class="product-carousel-image d-block w-100"
+                             alt="<?= htmlspecialchars((string)$product['nameEN']) ?>"
+                             loading="<?= $idx === 0 ? 'eager' : 'lazy' ?>"
+                             decoding="async"
+                             fetchpriority="<?= $idx === 0 ? 'high' : 'low' ?>">
                     </div>
                     <?php endforeach; ?>
                 </div>
