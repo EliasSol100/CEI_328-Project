@@ -2,6 +2,7 @@
 require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/../../include/security.php';
+require_once __DIR__ . '/../../include/image_storage.php';
 
 $current_page = 'stock_availability';
 $flash = '';
@@ -204,11 +205,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $finfo    = new finfo(FILEINFO_MIME_TYPE);
                 $mimeType = (string)($finfo->file((string)$file['tmp_name']) ?: '');
                 if (app_allowed_image_mime($mimeType) && $file['size'] <= 2 * 1024 * 1024) {
-                    $ext      = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'][$mimeType];
-                    $filename = 'type' . $typeID . '_color' . $colorID . '.' . $ext;
+                    $filename = 'type' . $typeID . '_color' . $colorID . '.jpg';
                     $destDir  = __DIR__ . '/../../assets/yarn_colors/';
                     if (!is_dir($destDir)) mkdir($destDir, 0755, true);
-                    if (move_uploaded_file($file['tmp_name'], $destDir . $filename)) {
+                    foreach (['jpg', 'jpeg', 'png', 'gif', 'webp'] as $candidateExt) {
+                        $existing = $destDir . 'type' . $typeID . '_color' . $colorID . '.' . $candidateExt;
+                        if (is_file($existing) && basename($existing) !== $filename) {
+                            @unlink($existing);
+                        }
+                    }
+                    if (app_image_convert_file_to_jpeg((string)$file['tmp_name'], $destDir . $filename, 1200, 1200, 84)) {
                         $photoPath = 'assets/yarn_colors/' . $filename;
                     }
                 }

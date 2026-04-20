@@ -2,6 +2,7 @@
 require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/../../include/security.php';
+require_once __DIR__ . '/../../include/image_storage.php';
 require_once __DIR__ . '/../../include/made_to_order_access.php';
 
 $current_page = 'product_management';
@@ -137,7 +138,11 @@ function productMgmtReadUploadedImageBlob(array $files, int $index): ?string
     }
 
     $photoData = file_get_contents($tmpName);
-    return is_string($photoData) ? $photoData : null;
+    if (!is_string($photoData) || $photoData === '') {
+        return null;
+    }
+
+    return app_image_optimize_photo_blob_for_storage($photoData, 1400, 1400, 78);
 }
 
 /* ── Handle POST actions ── */

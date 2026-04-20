@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../../../include/security.php';
+require_once __DIR__ . '/../../../include/image_storage.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -36,39 +37,18 @@ if ($action === 'upload' && $productID > 0 && $colorID > 0) {
         exit;
     }
 
-    $sourceData = file_get_contents($tmpName);
-    $src = is_string($sourceData) ? imagecreatefromstring($sourceData) : false;
-    if ($src === false) {
-        echo json_encode(['ok' => false, 'error' => 'Invalid image']);
-        exit;
-    }
-
     $dir = __DIR__ . '/../../../assets/product_color_photos/';
     if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
-        imagedestroy($src);
         echo json_encode(['ok' => false, 'error' => 'Could not create upload directory']);
         exit;
     }
 
     $filename = 'pcp_' . $productID . '_' . $colorID . '_' . uniqid('', true) . '.jpg';
     $dest = $dir . $filename;
-
-    $ow = imagesx($src);
-    $oh = imagesy($src);
-    $maxW = 800;
-    if ($ow > $maxW) {
-        $nw = $maxW;
-        $nh = (int)round($oh * $maxW / max(1, $ow));
-    } else {
-        $nw = $ow;
-        $nh = $oh;
+    if (!app_image_convert_file_to_jpeg($tmpName, $dest, 800, 800, 84)) {
+        echo json_encode(['ok' => false, 'error' => 'Could not convert image to JPG']);
+        exit;
     }
-
-    $dst = imagecreatetruecolor($nw, $nh);
-    imagecopyresampled($dst, $src, 0, 0, 0, 0, $nw, $nh, $ow, $oh);
-    imagejpeg($dst, $dest, 85);
-    imagedestroy($src);
-    imagedestroy($dst);
 
     $photoPath = 'assets/product_color_photos/' . $filename;
 

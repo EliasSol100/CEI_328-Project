@@ -3,6 +3,7 @@ session_start();
 require_once "authentication/database.php";
 require_once "authentication/get_config.php";
 require_once "include/security.php";
+require_once "include/image_storage.php";
 require_once "include/product_option_helpers.php";
 require_once "include/translation_helpers.php";
 require_once __DIR__ . '/include/made_to_order_access.php';
@@ -553,7 +554,10 @@ $colorPhotosByProduct = [];
 $cpRes = $conn->query("SELECT productID, photoPath FROM product_color_photos ORDER BY productID, sortOrder ASC");
 if ($cpRes) {
     while ($row = $cpRes->fetch_assoc()) {
-        $colorPhotosByProduct[(int)$row['productID']][] = $row['photoPath'];
+        $path = app_image_prefer_optimized_asset_path((string)($row['photoPath'] ?? ''));
+        if ($path !== '') {
+            $colorPhotosByProduct[(int)$row['productID']][] = $path;
+        }
     }
 }
 
@@ -566,7 +570,10 @@ $vpRes = $conn->query("
 ");
 if ($vpRes) {
     while ($row = $vpRes->fetch_assoc()) {
-        $variationPhotosByProduct[(int)$row['productID']][] = $row['photoPath'];
+        $path = app_image_prefer_optimized_asset_path((string)($row['photoPath'] ?? ''));
+        if ($path !== '') {
+            $variationPhotosByProduct[(int)$row['productID']][] = $path;
+        }
     }
 }
 ?>

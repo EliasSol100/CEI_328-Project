@@ -3,6 +3,7 @@ session_start();
 require_once __DIR__ . "/authentication/database.php";
 require_once __DIR__ . "/authentication/get_config.php";
 require_once __DIR__ . "/include/security.php";
+require_once __DIR__ . "/include/image_storage.php";
 require_once __DIR__ . "/include/product_option_helpers.php";
 require_once __DIR__ . "/include/translation_helpers.php";
 require_once __DIR__ . "/include/made_to_order_access.php";
@@ -550,7 +551,7 @@ if (empty($photos) && productPageCanQueryCustomOrderPhoto($conn)) {
 
         $customPhotoPath = trim((string)($customPhotoRow["photoReferencePath"] ?? ""));
         if ($customPhotoPath !== "") {
-            $relativePhotoPath = ltrim(str_replace("\\", "/", $customPhotoPath), "/");
+            $relativePhotoPath = app_image_prefer_optimized_asset_path(ltrim(str_replace("\\", "/", $customPhotoPath), "/"));
             $absolutePhotoPath = __DIR__ . "/" . $relativePhotoPath;
             if (is_file($absolutePhotoPath)) {
                 $photos[] = $relativePhotoPath;
@@ -579,7 +580,7 @@ if ($cpStmt) {
     $cpRes = $cpStmt->get_result();
     while ($cpRes && ($row = $cpRes->fetch_assoc())) {
         $colorId = (int)($row['colorID'] ?? 0);
-        $photoPath = trim((string)($row['photoPath'] ?? ''));
+        $photoPath = trim(app_image_prefer_optimized_asset_path((string)($row['photoPath'] ?? '')));
         $colorName = trim((string)($row['colorName'] ?? ''));
         if ($colorId <= 0 || $photoPath === '') {
             continue;
@@ -628,7 +629,7 @@ if ($variationStmt) {
             "colorName" => trim((string)($row["colorName"] ?? "")),
             "price" => isset($row["price"]) ? (float)$row["price"] : null,
             "stock" => (int)($row["stock"] ?? 0),
-            "photoPath" => $row["photoPath"] ?? null,
+            "photoPath" => app_image_prefer_optimized_asset_path((string)($row["photoPath"] ?? '')),
         ];
     }
     $variationStmt->close();
@@ -649,7 +650,7 @@ if ($variationPhotoStmt) {
     $variationPhotoRes = $variationPhotoStmt->get_result();
     while ($variationPhotoRes && ($row = $variationPhotoRes->fetch_assoc())) {
         $variationId = (int)($row["variationID"] ?? 0);
-        $photoPath = trim((string)($row["photoPath"] ?? ""));
+        $photoPath = trim(app_image_prefer_optimized_asset_path((string)($row["photoPath"] ?? "")));
         if ($variationId > 0 && $photoPath !== "") {
             $variationPhotos[$variationId][] = $photoPath;
         }
@@ -781,6 +782,9 @@ if ($csRow) {
         $csPhotoStmt->execute();
         $csPhotoRes = $csPhotoStmt->get_result();
         while ($csPhotoRes && ($csPhotoRow = $csPhotoRes->fetch_assoc())) {
+            if (!empty($csPhotoRow['photoPath'])) {
+                $csPhotoRow['photoPath'] = app_image_prefer_optimized_asset_path((string)$csPhotoRow['photoPath']);
+            }
             $colorSchemePhotos[] = $csPhotoRow;
         }
         $csPhotoStmt->close();
