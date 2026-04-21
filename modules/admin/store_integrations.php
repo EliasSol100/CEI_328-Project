@@ -20,6 +20,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $formSection = trim((string)($_POST['form_section'] ?? ''));
 
     if ($formSection === 'payments') {
+        $stripeMode = strtolower(trim((string)($_POST['stripe_mode'] ?? 'live')));
+        if (!in_array($stripeMode, ['live', 'sandbox'], true)) {
+            $stripeMode = 'live';
+        }
+
         $paypalMode = strtolower(trim((string)($_POST['paypal_mode'] ?? 'live')));
         if (!in_array($paypalMode, ['live', 'sandbox'], true)) {
             $paypalMode = 'live';
@@ -28,6 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $saved = app_system_config_set_many($conn, [
             'stripe_publishable_key' => trim((string)($_POST['stripe_publishable_key'] ?? '')),
             'stripe_secret_key' => trim((string)($_POST['stripe_secret_key'] ?? '')),
+            'stripe_mode' => $stripeMode,
             'stripe_webhook_secret' => trim((string)($_POST['stripe_webhook_secret'] ?? '')),
             'paypal_client_id' => trim((string)($_POST['paypal_client_id'] ?? '')),
             'paypal_client_secret' => trim((string)($_POST['paypal_client_secret'] ?? '')),
@@ -66,11 +72,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $stripePublishableKey = app_integration_setting($conn, 'STRIPE_PUBLISHABLE_KEY', 'stripe_publishable_key', '');
 $stripeSecretKey = app_integration_setting($conn, 'STRIPE_SECRET_KEY', 'stripe_secret_key', '');
+$stripeMode = strtolower(app_integration_setting($conn, 'STRIPE_MODE', 'stripe_mode', 'live'));
 $stripeWebhookSecret = app_integration_setting($conn, 'STRIPE_WEBHOOK_SECRET', 'stripe_webhook_secret', '');
 $paypalClientId = app_integration_setting($conn, 'PAYPAL_CLIENT_ID', 'paypal_client_id', '');
 $paypalClientSecret = app_integration_setting($conn, 'PAYPAL_CLIENT_SECRET', 'paypal_client_secret', '');
 $paypalWebhookId = app_integration_setting($conn, 'PAYPAL_WEBHOOK_ID', 'paypal_webhook_id', '');
 $paypalMode = strtolower(app_integration_setting($conn, 'PAYPAL_MODE', 'paypal_mode', 'live'));
+if (!in_array($stripeMode, ['live', 'sandbox'], true)) {
+    $stripeMode = 'live';
+}
 if (!in_array($paypalMode, ['live', 'sandbox'], true)) {
     $paypalMode = 'live';
 }
@@ -155,13 +165,24 @@ $facebookConfigured = !empty($facebookConfig['enabled']);
                   <span><span class="status-dot <?= $stripeConfigured ? 'dot-ok' : 'dot-off' ?>"></span><span class="text-sm <?= $stripeConfigured ? '' : 'text-muted' ?>"><?= $stripeConfigured ? 'Configured' : 'Not configured' ?></span></span>
                 </div>
                 <p class="text-sm text-muted" style="margin-bottom:16px;">
-                  Stripe Checkout on this website needs the secret key. The publishable key can also be stored here, while the webhook signing secret is optional.
+                  Stripe Checkout on this website needs the secret key. Set the mode to match your Stripe keys, and keep the webhook signing secret optional unless you want background confirmation.
                 </p>
 
-                <div class="form-group">
-                  <label class="form-label" for="stripe_publishable_key">Stripe Publishable Key</label>
-                  <input id="stripe_publishable_key" name="stripe_publishable_key" class="form-input" type="text" autocomplete="off" placeholder="pk_live_... or pk_test_..." value="<?= htmlspecialchars($stripePublishableKey) ?>">
-                  <div class="form-hint">Optional for this checkout flow, but useful to keep in the store settings.</div>
+                <div class="form-grid-2">
+                  <div class="form-group">
+                    <label class="form-label" for="stripe_publishable_key">Stripe Publishable Key</label>
+                    <input id="stripe_publishable_key" name="stripe_publishable_key" class="form-input" type="text" autocomplete="off" placeholder="pk_live_... or pk_test_..." value="<?= htmlspecialchars($stripePublishableKey) ?>">
+                    <div class="form-hint">Optional for this checkout flow, but useful to keep in the store settings.</div>
+                  </div>
+
+                  <div class="form-group">
+                    <label class="form-label" for="stripe_mode">Stripe Mode</label>
+                    <select id="stripe_mode" name="stripe_mode" class="form-input">
+                      <option value="live" <?= $stripeMode === 'live' ? 'selected' : '' ?>>Live</option>
+                      <option value="sandbox" <?= $stripeMode === 'sandbox' ? 'selected' : '' ?>>Sandbox</option>
+                    </select>
+                    <div class="form-hint">Use <strong>live</strong> with <code>pk_live_</code> and <code>sk_live_</code> keys, or <strong>sandbox</strong> with <code>pk_test_</code> and <code>sk_test_</code> keys.</div>
+                  </div>
                 </div>
 
                 <div class="form-group" style="margin-bottom:0;">
