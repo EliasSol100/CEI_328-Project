@@ -37,12 +37,12 @@ if (!function_exists('app_image_is_convertible_content_asset')) {
             return false;
         }
 
-        if (!preg_match('/\.(png|gif|webp)$/i', $relativePath)) {
+        if (!preg_match('/\.(png|gif|webp|jpeg)$/i', $relativePath)) {
             return false;
         }
 
         $baseName = basename($relativePath);
-        if (in_array($baseName, ['athina-eshop-logo.png', 'header-logo.png', 'en.png', 'gr.png', 'icon-192.png', 'icon-512.png'], true)) {
+        if (in_array($baseName, ['athina-eshop-logo.png', 'en.png', 'gr.png', 'icon-192.png', 'icon-512.png'], true)) {
             return false;
         }
 
@@ -72,7 +72,7 @@ if (!function_exists('app_image_prefer_optimized_asset_path')) {
             return $path;
         }
 
-        $candidate = preg_replace('/\.(png|gif|webp)$/i', '.jpg', app_image_relative_asset_path($path));
+        $candidate = preg_replace('/\.(png|gif|webp|jpe?g)$/i', '.jpg', app_image_relative_asset_path($path));
         if (!is_string($candidate) || $candidate === '') {
             return $path;
         }
@@ -229,7 +229,7 @@ if (!function_exists('app_image_convert_local_content_asset_to_jpg')) {
             return $path;
         }
 
-        $targetRelative = preg_replace('/\.(png|gif|webp)$/i', '.jpg', $normalizedPath);
+        $targetRelative = preg_replace('/\.(png|gif|webp|jpe?g)$/i', '.jpg', $normalizedPath);
         if (!is_string($targetRelative) || $targetRelative === '') {
             return $path;
         }
