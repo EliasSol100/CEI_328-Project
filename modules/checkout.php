@@ -865,7 +865,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
                 $_SESSION['pending_checkout_payment'] = $pendingPayment;
 
-                header('Location: ' . (string)$gatewayStart['redirect_url']);
+                header('Location: ' . (string)$gatewayStart['redirect_url'], true, 303);
                 exit;
             } catch (Throwable $e) {
                 $providerLabel = $paymentMethod === 'paypal'
