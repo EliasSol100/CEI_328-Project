@@ -124,7 +124,7 @@ $facebookConfigured = !empty($facebookConfig['enabled']);
           Google and Facebook login will stay unavailable until both the client ID/app ID and secret are saved here and the redirect URLs below are also added in the provider dashboards.
         </p>
         <p class="alert-text">
-          For the most reliable checkout flow, also add the Stripe webhook signing secret and the PayPal webhook ID after creating webhook endpoints in the payment provider dashboards.
+          Checkout can work with the main Stripe and PayPal keys only. The Stripe webhook signing secret and PayPal webhook ID are optional extras for background confirmation if a buyer closes the payment window before returning.
         </p>
       </div>
 
@@ -155,7 +155,7 @@ $facebookConfigured = !empty($facebookConfig['enabled']);
                   <span><span class="status-dot <?= $stripeConfigured ? 'dot-ok' : 'dot-off' ?>"></span><span class="text-sm <?= $stripeConfigured ? '' : 'text-muted' ?>"><?= $stripeConfigured ? 'Configured' : 'Not configured' ?></span></span>
                 </div>
                 <p class="text-sm text-muted" style="margin-bottom:16px;">
-                  Stripe Checkout on this website needs the secret key. The publishable key is optional here, but it can be stored for future client-side Stripe features.
+                  Stripe Checkout on this website needs the secret key. The publishable key can also be stored here, while the webhook signing secret is optional.
                 </p>
 
                 <div class="form-group">
@@ -173,7 +173,7 @@ $facebookConfigured = !empty($facebookConfig['enabled']);
                 <div class="form-group" style="margin-top:16px;">
                   <label class="form-label" for="stripe_webhook_secret">Stripe Webhook Signing Secret</label>
                   <input id="stripe_webhook_secret" name="stripe_webhook_secret" class="form-input" type="password" autocomplete="off" placeholder="whsec_..." value="<?= htmlspecialchars($stripeWebhookSecret) ?>">
-                  <div class="form-hint">Recommended for production so paid Stripe sessions can still be finalized if the customer never returns to the success page.</div>
+                  <div class="form-hint">Optional. Add it if you want Stripe webhooks to finalize paid sessions in the background when a customer never returns to the success page.</div>
                 </div>
 
                 <div class="form-group" style="margin-bottom:0;">
@@ -222,7 +222,7 @@ $facebookConfigured = !empty($facebookConfig['enabled']);
                 <div class="form-group" style="margin-top:16px;">
                   <label class="form-label" for="paypal_webhook_id">PayPal Webhook ID</label>
                   <input id="paypal_webhook_id" name="paypal_webhook_id" class="form-input" type="text" autocomplete="off" placeholder="PayPal webhook ID" value="<?= htmlspecialchars($paypalWebhookId) ?>">
-                  <div class="form-hint">Recommended for production so approved PayPal orders can be captured and finalized safely through webhook confirmation.</div>
+                  <div class="form-hint">Optional. Add it if you want PayPal webhook events to confirm or recover paid orders in the background.</div>
                 </div>
 
                 <div class="form-group" style="margin-bottom:0;">

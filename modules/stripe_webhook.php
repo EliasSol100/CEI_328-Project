@@ -37,6 +37,14 @@ $payload = file_get_contents('php://input');
 $payload = is_string($payload) ? $payload : '';
 $signatureHeader = trim((string)($_SERVER['HTTP_STRIPE_SIGNATURE'] ?? ''));
 
+if (!payment_gateway_stripe_webhook_is_configured($conn)) {
+    stripeWebhookRespond(200, [
+        'ok' => true,
+        'ignored' => true,
+        'reason' => 'webhook_not_configured',
+    ]);
+}
+
 try {
     $event = payment_gateway_verify_stripe_webhook_event($conn, $payload, $signatureHeader);
 } catch (Throwable $e) {

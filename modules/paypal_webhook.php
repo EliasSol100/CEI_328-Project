@@ -52,6 +52,14 @@ if (!$conn || $conn->connect_error) {
 $payload = file_get_contents('php://input');
 $payload = is_string($payload) ? $payload : '';
 
+if (!payment_gateway_paypal_webhook_is_configured($conn)) {
+    paypalWebhookRespond(200, [
+        'ok' => true,
+        'ignored' => true,
+        'reason' => 'webhook_not_configured',
+    ]);
+}
+
 try {
     $event = payment_gateway_verify_paypal_webhook_event($conn, $_SERVER, $payload);
 } catch (Throwable $e) {
