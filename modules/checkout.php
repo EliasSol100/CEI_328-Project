@@ -844,7 +844,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'line_item_name' => 'Creations by Athina Order',
                         'line_item_description' => 'Checkout for ' . max(1, (int)$cartCount) . ' handmade item(s)',
                     ]);
-                } else {
+                } elseif ($paymentMethod === 'paypal') {
                     $gatewayStart = payment_gateway_create_paypal_order($conn, [
                         'checkout_token' => (string)$pendingPayment['checkout_token'],
                         'total_amount' => $totalAmount,
@@ -852,6 +852,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'line_item_name' => 'Creations by Athina Order',
                         'site_title' => $system_title,
                     ]);
+                } else {
+                    throw new RuntimeException('Selected payment method is not supported.');
                 }
 
                 $pendingPayment['gateway_reference'] = (string)$gatewayStart['gateway_reference'];
@@ -866,8 +868,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 header('Location: ' . (string)$gatewayStart['redirect_url']);
                 exit;
             } catch (Throwable $e) {
-                $error = 'Payment could not be started: ' . $e->getMessage();
-                error_log("Checkout payment start error: " . $e->getMessage());
+                $providerLabel = $paymentMethod === 'paypal'
+                    ? 'PayPal'
+                    : ($paymentMethod === 'stripe' ? 'Stripe' : 'Selected payment method');
+                $error = $providerLabel . ' payment could not be started: ' . $e->getMessage();
+                error_log("Checkout payment start error ({$paymentMethod}): " . $e->getMessage());
             }
         }
     }
