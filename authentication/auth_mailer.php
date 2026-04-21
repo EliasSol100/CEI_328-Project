@@ -29,14 +29,6 @@ if (!function_exists('app_auth_send_plaintext_email')) {
             $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
             $mail->Port = 587;
             $mail->Timeout = 20;
-            $mail->SMTPOptions = [
-                'ssl' => [
-                    'verify_peer' => false,
-                    'verify_peer_name' => false,
-                    'allow_self_signed' => true,
-                ],
-            ];
-
             $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
             $mail->addAddress($toEmail, trim($toName) !== '' ? $toName : 'Customer');
             $mail->CharSet = 'UTF-8';

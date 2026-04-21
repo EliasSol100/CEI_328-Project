@@ -692,14 +692,6 @@ function sendOrderConfirmationEmail(array $payload): array {
             $mail->SMTPSecure = $transport['secure'];
             $mail->Port = (int)$transport['port'];
             $mail->Timeout = 20;
-            $mail->SMTPOptions = [
-                'ssl' => [
-                    'verify_peer' => false,
-                    'verify_peer_name' => false,
-                    'allow_self_signed' => true,
-                ],
-            ];
-
             $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
             $mail->addAddress($toEmail, $customerName);
             $mail->CharSet = 'UTF-8';
@@ -809,14 +801,6 @@ function sendAdminOrderNotificationEmail(mysqli $conn, array $payload): array {
                 $mail->SMTPSecure = $transport['secure'];
                 $mail->Port = (int)$transport['port'];
                 $mail->Timeout = 20;
-                $mail->SMTPOptions = [
-                    'ssl' => [
-                        'verify_peer' => false,
-                        'verify_peer_name' => false,
-                        'allow_self_signed' => true,
-                    ],
-                ];
-
                 $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
                 $mail->addAddress($admin['email'], $admin['name'] !== '' ? $admin['name'] : 'Admin');
                 $mail->CharSet = 'UTF-8';
