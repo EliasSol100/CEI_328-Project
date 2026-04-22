@@ -39,7 +39,7 @@ if (!isset($_GET['code'])) {
 
 $code = trim((string)$_GET['code']);
 
-$tokenUrl = 'https://graph.facebook.com/v18.0/oauth/access_token?' . http_build_query([
+$tokenUrl = 'https://graph.facebook.com/v21.0/oauth/access_token?' . http_build_query([
     'client_id' => $appId,
     'redirect_uri' => $redirectUri,
     'client_secret' => $appSecret,
@@ -58,7 +58,7 @@ if (!is_array($tokenData) || empty($tokenData['access_token'])) {
     exit();
 }
 
-$userInfoRequest = curl_init('https://graph.facebook.com/me?fields=id,name,email&access_token=' . urlencode((string)$tokenData['access_token']));
+$userInfoRequest = curl_init('https://graph.facebook.com/v21.0/me?fields=id,name,email&access_token=' . urlencode((string)$tokenData['access_token']));
 curl_setopt($userInfoRequest, CURLOPT_RETURNTRANSFER, true);
 $userInfoResponse = curl_exec($userInfoRequest);
 curl_close($userInfoRequest);
@@ -70,12 +70,6 @@ $email = trim((string)($userInfo['email'] ?? ''));
 
 if ($facebookId === '') {
     $_SESSION["registration_error"] = "Facebook did not return a valid account ID.";
-    header("Location: " . $redirectPage);
-    exit();
-}
-
-if ($email === '') {
-    $_SESSION["registration_error"] = "We couldn't retrieve your email from Facebook. Please make sure the app requests the email permission or register with your email address.";
     header("Location: " . $redirectPage);
     exit();
 }
@@ -100,6 +94,12 @@ if (!$user) {
         $user = $result ? $result->fetch_assoc() : null;
         $stmt->close();
     }
+}
+
+if ($email === '' && !$user) {
+    $_SESSION["registration_error"] = "We couldn't retrieve your email from Facebook. Please make sure your Facebook account has an email address available or register with your email address first.";
+    header("Location: " . $redirectPage);
+    exit();
 }
 
 if ($user) {

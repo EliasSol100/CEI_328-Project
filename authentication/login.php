@@ -226,11 +226,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
                     redirect_uri: <?= json_encode($facebookRedirectUri, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
                     response_type: 'code',
                     auth_type: 'rerequest',
-                    scope: 'email',
                     state: <?= json_encode($facebookState, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>
                 });
 
-                window.location.href = 'https://www.facebook.com/v18.0/dialog/oauth?' + params.toString();
+                window.location.href = 'https://www.facebook.com/v21.0/dialog/oauth?' + params.toString();
             });
         }
 
