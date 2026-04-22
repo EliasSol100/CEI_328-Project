@@ -209,21 +209,28 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
                     <?php foreach ($sessionItems as $item): ?>
                         <li>
                             <div class="wishlist-item-main">
-                                <?php if (!empty($item["image"])): ?>
-                                    <img class="wishlist-thumb"
-                                         src="<?= htmlspecialchars($item["image"]) ?>"
-                                         alt="<?= htmlspecialchars($item["name"]) ?>">
-                                <?php elseif (!empty($item["imageID"])): ?>
-                                    <img class="wishlist-thumb"
-                                         src="modules/admin/ajax/product_image.php?id=<?= (int)$item["imageID"] ?>"
-                                         alt="<?= htmlspecialchars($item["name"]) ?>">
-                                <?php else: ?>
-                                    <div class="wishlist-thumb placeholder"><i class="fas fa-image"></i></div>
+                                <?php $sessionProductHref = !empty($item["productID"]) ? 'product.php?id=' . (int)$item["productID"] : ''; ?>
+                                <?php if ($sessionProductHref !== ''): ?>
+                                    <a class="wishlist-item-link" href="<?= htmlspecialchars($sessionProductHref) ?>">
                                 <?php endif; ?>
-                                <div class="wishlist-item-info">
-                                    <strong<?= app_translate_text_attrs((string)$item["name"], (string)$item["name"]) ?>><?= htmlspecialchars($item["name"]) ?></strong>
-                                    <span>&euro;<?= number_format((float)$item["price"], 0) ?></span>
-                                </div>
+                                    <?php if (!empty($item["image"])): ?>
+                                        <img class="wishlist-thumb"
+                                             src="<?= htmlspecialchars($item["image"]) ?>"
+                                             alt="<?= htmlspecialchars($item["name"]) ?>">
+                                    <?php elseif (!empty($item["imageID"])): ?>
+                                        <img class="wishlist-thumb"
+                                             src="modules/admin/ajax/product_image.php?id=<?= (int)$item["imageID"] ?>"
+                                             alt="<?= htmlspecialchars($item["name"]) ?>">
+                                    <?php else: ?>
+                                        <div class="wishlist-thumb placeholder"><i class="fas fa-image"></i></div>
+                                    <?php endif; ?>
+                                    <div class="wishlist-item-info">
+                                        <strong<?= app_translate_text_attrs((string)$item["name"], (string)$item["name"]) ?>><?= htmlspecialchars($item["name"]) ?></strong>
+                                        <span>&euro;<?= number_format((float)$item["price"], 0) ?></span>
+                                    </div>
+                                <?php if ($sessionProductHref !== ''): ?>
+                                    </a>
+                                <?php endif; ?>
                             </div>
                             <form method="post" action="wishlist.php">
                                 <?= app_csrf_input() ?>
@@ -237,17 +244,19 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
                     <?php foreach ($dbItems as $item): ?>
                         <li>
                             <div class="wishlist-item-main">
-                                <?php if (!empty($item["imageID"])): ?>
-                                    <img class="wishlist-thumb"
-                                         src="modules/admin/ajax/product_image.php?id=<?= (int)$item["imageID"] ?>"
-                                         alt="<?= htmlspecialchars($item["name"]) ?>">
-                                <?php else: ?>
-                                    <div class="wishlist-thumb placeholder"><i class="fas fa-image"></i></div>
-                                <?php endif; ?>
-                                <div class="wishlist-item-info">
-                                    <strong<?= app_translate_text_attrs((string)$item["name"], (string)$item["name"]) ?>><?= htmlspecialchars($item["name"]) ?></strong>
-                                    <span>&euro;<?= number_format((float)$item["price"], 0) ?></span>
-                                </div>
+                                <a class="wishlist-item-link" href="product.php?id=<?= (int)$item["productID"] ?>">
+                                    <?php if (!empty($item["imageID"])): ?>
+                                        <img class="wishlist-thumb"
+                                             src="modules/admin/ajax/product_image.php?id=<?= (int)$item["imageID"] ?>"
+                                             alt="<?= htmlspecialchars($item["name"]) ?>">
+                                    <?php else: ?>
+                                        <div class="wishlist-thumb placeholder"><i class="fas fa-image"></i></div>
+                                    <?php endif; ?>
+                                    <div class="wishlist-item-info">
+                                        <strong<?= app_translate_text_attrs((string)$item["name"], (string)$item["name"]) ?>><?= htmlspecialchars($item["name"]) ?></strong>
+                                        <span>&euro;<?= number_format((float)$item["price"], 0) ?></span>
+                                    </div>
+                                </a>
                             </div>
                             <form method="post" action="wishlist.php">
                                 <?= app_csrf_input() ?>

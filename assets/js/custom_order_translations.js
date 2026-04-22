@@ -1,11 +1,23 @@
 (function () {
     function readStoredLanguage() {
-        if (typeof window.appPreferenceStorageAllowed === 'function' && !window.appPreferenceStorageAllowed()) {
-            return null;
+        if (typeof window.appCurrentLanguage === 'function') {
+            var activeLanguage = window.appCurrentLanguage();
+            if (activeLanguage) {
+                return activeLanguage;
+            }
         }
 
         try {
-            return window.localStorage.getItem('language');
+            var localValue = window.localStorage.getItem('language');
+            if (localValue) {
+                return localValue;
+            }
+        } catch (error) {
+            // Ignore localStorage access issues silently.
+        }
+
+        try {
+            return window.sessionStorage.getItem('language');
         } catch (error) {
             return null;
         }
