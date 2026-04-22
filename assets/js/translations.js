@@ -757,20 +757,33 @@ function canUsePreferenceStorage() {
     return Boolean(consent && consent.preferences);
 }
 
-function readPreferenceStorage(key) {
-    if (!canUsePreferenceStorage()) {
-        return null;
-    }
-
+function readSessionPreferenceStorage(key) {
     try {
-        return window.localStorage.getItem(key);
+        return window.sessionStorage.getItem(key);
     } catch (error) {
         return null;
     }
 }
 
+function readPreferenceStorage(key) {
+    if (canUsePreferenceStorage()) {
+        try {
+            const localValue = window.localStorage.getItem(key);
+            if (localValue !== null && localValue !== "") {
+                return localValue;
+            }
+        } catch (error) {
+            // Ignore localStorage access issues silently.
+        }
+    }
+
+    return readSessionPreferenceStorage(key);
+}
+
 function writePreferenceStorage(key, value) {
     try {
+        window.sessionStorage.setItem(key, value);
+
         if (canUsePreferenceStorage()) {
             window.localStorage.setItem(key, value);
             return;
@@ -782,7 +795,7 @@ function writePreferenceStorage(key, value) {
     }
 }
 
-function removePreferenceStorage(key) {
+function removePersistentPreferenceStorage(key) {
     try {
         window.localStorage.removeItem(key);
     } catch (error) {
@@ -920,7 +933,7 @@ window.appSetLanguage = setLanguage;
 
 document.addEventListener("app:cookieconsentchange", () => {
     if (!canUsePreferenceStorage()) {
-        removePreferenceStorage("language");
+        removePersistentPreferenceStorage("language");
     }
 });
 

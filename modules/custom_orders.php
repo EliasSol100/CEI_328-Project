@@ -12,6 +12,8 @@ if (!defined('INCLUDE_CHECK') && !defined('CUSTOM_ORDERS_DIRECT')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/../include/image_storage.php';
+
 /**
  * Allowed custom order statuses.
  *
@@ -871,11 +873,12 @@ function storeCustomOrderReferencePhoto(array $file): string
     $mimeType = (string)(mime_content_type($tmpPath) ?: '');
     $allowed = [
         'image/jpeg' => 'jpg',
-        'image/png' => 'png',
-        'image/webp' => 'webp',
+        'image/png' => 'jpg',
+        'image/webp' => 'jpg',
+        'image/gif' => 'jpg',
     ];
     if (!isset($allowed[$mimeType])) {
-        throw new InvalidArgumentException('Photo must be a JPG, PNG, or WEBP image.');
+        throw new InvalidArgumentException('Photo must be a JPG, PNG, WEBP, or GIF image.');
     }
 
     $maxBytes = 4 * 1024 * 1024;
@@ -890,11 +893,11 @@ function storeCustomOrderReferencePhoto(array $file): string
         throw new RuntimeException('Could not create the custom order upload folder.');
     }
 
-    // Use generated names so customer uploads do not collide or expose original filenames.
-    $filename = 'custom_order_' . date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.' . $allowed[$mimeType];
+    // Always normalize custom-order uploads to JPG for smaller files and consistent storage.
+    $filename = 'custom_order_' . date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.jpg';
     $targetPath = $targetDir . DIRECTORY_SEPARATOR . $filename;
-    if (!move_uploaded_file($tmpPath, $targetPath)) {
-        throw new RuntimeException('Could not save the uploaded photo.');
+    if (!app_image_convert_file_to_jpeg($tmpPath, $targetPath, 1600, 1600, 84)) {
+        throw new RuntimeException('Could not convert the uploaded photo to JPG.');
     }
 
     return $relativeDir . $filename;

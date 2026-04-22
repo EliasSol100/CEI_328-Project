@@ -422,7 +422,7 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
       </div>
       <div class="form-group">
         <label class="form-label">Reference Photo</label>
-        <input type="file" name="referencePhoto" class="form-input" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+        <input type="file" name="referencePhoto" class="form-input" accept=".jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif">
         <span class="form-hint">Optional. This photo can also be used as the first image on the private product.</span>
       </div>
       <div class="form-group">
@@ -480,7 +480,7 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
       </div>
       <div class="form-group">
         <label class="form-label">Reference Photo</label>
-        <input type="file" name="referencePhoto" class="form-input" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+        <input type="file" name="referencePhoto" class="form-input" accept=".jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif">
         <?php if (!empty($editOrder['photoReferencePath'])): ?>
           <?php $editPhotoUrl = '../../' . ltrim(str_replace('\\', '/', (string)$editOrder['photoReferencePath']), '/'); ?>
           <div class="text-sm text-muted custom-order-current-photo-label">Current photo:</div>
