@@ -95,7 +95,7 @@ if (!function_exists('app_apply_security_headers')) {
         header('Referrer-Policy: strict-origin-when-cross-origin');
         header('Permissions-Policy: camera=(), microphone=(), geolocation=(self)');
         header('Cross-Origin-Opener-Policy: same-origin-allow-popups');
-        header("Content-Security-Policy: base-uri 'self'; frame-ancestors 'self'; object-src 'none'; form-action 'self' https://www.paypal.com https://www.sandbox.paypal.com; upgrade-insecure-requests");
+        header("Content-Security-Policy: base-uri 'self'; frame-ancestors 'self'; object-src 'none'; form-action 'self' https://checkout.stripe.com https://www.paypal.com https://www.sandbox.paypal.com; upgrade-insecure-requests");
     }
 }
 

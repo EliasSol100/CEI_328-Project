@@ -618,18 +618,6 @@ if (!function_exists('app_homepage_save_uploaded_asset')) {
             throw new InvalidArgumentException($spec['label'] . ' must be JPG, PNG, GIF, or WEBP.');
         }
 
-        $isHeaderLogoUpload = $configKey === 'homepage_header_logo_path';
-        $extensions = [
-            'image/jpeg' => 'jpg',
-            'image/png' => 'png',
-            'image/gif' => 'gif',
-            'image/webp' => 'webp',
-        ];
-        $sourceExtension = $extensions[$mimeType] ?? null;
-        if ($sourceExtension === null) {
-            throw new InvalidArgumentException($spec['label'] . ' uses an unsupported image format.');
-        }
-
         $uploadDir = app_homepage_upload_dir();
         if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
             throw new RuntimeException('Could not create the homepage upload directory.');
@@ -643,25 +631,18 @@ if (!function_exists('app_homepage_save_uploaded_asset')) {
             }
         }
 
-        $targetExtension = $isHeaderLogoUpload ? $sourceExtension : 'jpg';
-        $fileName = $baseName . '.' . $targetExtension;
+        $fileName = $baseName . '.jpg';
         $targetPath = $uploadDir . DIRECTORY_SEPARATOR . $fileName;
 
-        if ($isHeaderLogoUpload) {
-            if (!move_uploaded_file($tmpName, $targetPath)) {
-                throw new RuntimeException('Could not save ' . $spec['label'] . '.');
-            }
-        } else {
-            $maxWidth = (int)$spec['width'];
-            $maxHeight = (int)$spec['height'];
-            if ($configKey === 'homepage_hero_image') {
-                $maxWidth = app_homepage_hero_canvas_width();
-                $maxHeight = app_homepage_hero_canvas_height();
-            }
+        $maxWidth = (int)$spec['width'];
+        $maxHeight = (int)$spec['height'];
+        if ($configKey === 'homepage_hero_image') {
+            $maxWidth = app_homepage_hero_canvas_width();
+            $maxHeight = app_homepage_hero_canvas_height();
+        }
 
-            if (!app_image_convert_file_to_jpeg($tmpName, $targetPath, $maxWidth, $maxHeight, 84)) {
-                throw new RuntimeException('Could not convert ' . $spec['label'] . ' to JPG.');
-            }
+        if (!app_image_convert_file_to_jpeg($tmpName, $targetPath, $maxWidth, $maxHeight, 84)) {
+            throw new RuntimeException('Could not convert ' . $spec['label'] . ' to JPG.');
         }
 
         if ($configKey === 'homepage_hero_image' && $width === app_homepage_hero_safe_width() && $height === app_homepage_hero_canvas_height()) {

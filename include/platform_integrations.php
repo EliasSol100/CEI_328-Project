@@ -8,6 +8,7 @@ if (!function_exists('app_platform_integrations_default_values')) {
         return [
             'stripe_publishable_key' => '',
             'stripe_secret_key' => 'your_stripe_secret_key',
+            'stripe_mode' => 'live',
             'stripe_webhook_secret' => '',
             'paypal_client_id' => 'your_paypal_client_id',
             'paypal_client_secret' => 'your_paypal_client_secret',

@@ -963,7 +963,7 @@ $statusFilterOptions = [
       <div class="form-group">
         <label class="form-label">Product Photos <span class="text-muted">(up to 4)</span></label>
         <input type="file" name="photos[]" class="form-input" accept="image/*" multiple>
-        <span class="form-hint">Hold Ctrl/Cmd to select multiple photos</span>
+        <span class="form-hint">Hold Ctrl/Cmd to select multiple photos. Uploaded product photos are optimized and stored as JPG automatically.</span>
       </div>
       <div class="form-grid-2">
         <div class="form-group">
@@ -1084,7 +1084,7 @@ $statusFilterOptions = [
         <?php endif; ?>
         <?php if (count($productPhotos) < 4): ?>
           <input type="file" name="photos[]" class="form-input" accept="image/*" multiple style="margin-top:8px;">
-          <span class="form-hint">Add up to <?= 4 - count($productPhotos) ?> more photo(s) — hold Ctrl/Cmd to select multiple</span>
+          <span class="form-hint">Add up to <?= 4 - count($productPhotos) ?> more photo(s) — hold Ctrl/Cmd to select multiple. Uploaded product photos are optimized and stored as JPG automatically.</span>
         <?php endif; ?>
       </div>
       <div class="form-grid-2">

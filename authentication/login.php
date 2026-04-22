@@ -37,49 +37,51 @@ $_SESSION['oauth_origin_google'] = 'login';
 $_SESSION['oauth_origin_facebook'] = 'login';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
-    app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
-
-    $password = (string)($_POST['password'] ?? '');
-    if ($loginInputValue === '' || $password === '') {
-        $loginError = 'Please enter both your email/username and password.';
+    if (!app_verify_csrf()) {
+        $loginError = 'Your login form expired. Please try again.';
     } else {
-        $stmt = $conn->prepare("SELECT *, userID AS id FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) LIMIT 1");
-        if (!$stmt) {
-            $loginError = 'Something went wrong. Please try again.';
+        $password = (string)($_POST['password'] ?? '');
+        if ($loginInputValue === '' || $password === '') {
+            $loginError = 'Please enter both your email/username and password.';
         } else {
-            $stmt->bind_param('ss', $loginInputValue, $loginInputValue);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $user = $result ? $result->fetch_assoc() : null;
-            $stmt->close();
-
-            if (!$user) {
-                $loginError = 'Email or username not found.';
-            } elseif (!password_verify($password, (string)($user['password'] ?? ''))) {
-                $loginError = 'Incorrect password.';
+            $stmt = $conn->prepare("SELECT *, userID AS id FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?) LIMIT 1");
+            if (!$stmt) {
+                $loginError = 'Something went wrong. Please try again.';
             } else {
-                $userId = (int)($user['id'] ?? 0);
-                $trustedBrowser = $userId > 0 && app_auth_is_trusted_browser($conn, $userId);
+                $stmt->bind_param('ss', $loginInputValue, $loginInputValue);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                $user = $result ? $result->fetch_assoc() : null;
+                $stmt->close();
 
-                if ($trustedBrowser) {
-                    $mode = $rememberMeChecked ? 'forever' : 'day';
-                    app_auth_clear_two_factor();
-                    app_auth_complete_login($conn, $user, $mode, [
-                        'login_identifier' => $loginInputValue,
-                        'keep_login_hint' => false,
-                    ]);
-                    header('Location: ' . app_auth_post_login_target($user, '../index.php'));
-                    exit();
+                if (!$user) {
+                    $loginError = 'Email or username not found.';
+                } elseif (!password_verify($password, (string)($user['password'] ?? ''))) {
+                    $loginError = 'Incorrect password.';
+                } else {
+                    $userId = (int)($user['id'] ?? 0);
+                    $trustedBrowser = $userId > 0 && app_auth_is_trusted_browser($conn, $userId);
+
+                    if ($trustedBrowser) {
+                        $mode = $rememberMeChecked ? 'forever' : 'day';
+                        app_auth_clear_two_factor();
+                        app_auth_complete_login($conn, $user, $mode, [
+                            'login_identifier' => $loginInputValue,
+                            'keep_login_hint' => false,
+                        ]);
+                        header('Location: ' . app_auth_post_login_target($user, '../index.php'));
+                        exit();
+                    }
+
+                    session_regenerate_id(true);
+                    $challenge = app_auth_start_two_factor_challenge($user, $loginInputValue, $rememberMeChecked);
+                    if (!empty($challenge['success'])) {
+                        header('Location: two_factor.php');
+                        exit();
+                    }
+
+                    $loginError = (string)($challenge['message'] ?? "We couldn't send your 2FA code right now. Please try again.");
                 }
-
-                session_regenerate_id(true);
-                $challenge = app_auth_start_two_factor_challenge($user, $loginInputValue, $rememberMeChecked);
-                if (!empty($challenge['success'])) {
-                    header('Location: two_factor.php');
-                    exit();
-                }
-
-                $loginError = (string)($challenge['message'] ?? "We couldn't send your 2FA code right now. Please try again.");
             }
         }
     }
@@ -224,11 +226,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
                     redirect_uri: <?= json_encode($facebookRedirectUri, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
                     response_type: 'code',
                     auth_type: 'rerequest',
-                    scope: 'email',
                     state: <?= json_encode($facebookState, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>
                 });
 
-                window.location.href = 'https://www.facebook.com/v18.0/dialog/oauth?' + params.toString();
+                window.location.href = 'https://www.facebook.com/v21.0/dialog/oauth?' + params.toString();
             });
         }
 

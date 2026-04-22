@@ -548,6 +548,7 @@ if (!function_exists('checkout_payment_finalize_paid_order')) {
             $shippingPostalCode = trim((string)($lockedPending['shipping_postal_code'] ?? ''));
             $shippingLabel = trim((string)($lockedPending['shipping_label'] ?? ''));
             $courier = trim((string)($lockedPending['courier'] ?? ''));
+            $pickupPoint = trim((string)($lockedPending['pickup_point'] ?? ''));
             $freeShippingThreshold = (float)($lockedPending['free_shipping_threshold'] ?? 0);
 
             $lockedLoyaltyBalance = ($isLoggedIn && $userId > 0)
@@ -591,6 +592,7 @@ if (!function_exists('checkout_payment_finalize_paid_order')) {
                 'courier' => $courier,
                 'shipping_priority' => $shippingSpeed,
                 'fulfillment_mode' => $fulfillmentMode,
+                'pickup_point' => $pickupPoint,
             ]);
 
             $orderId = (int)$placed['order_id'];
@@ -675,6 +677,7 @@ if (!function_exists('checkout_payment_finalize_paid_order')) {
                 'courier' => $courier,
                 'shipping_priority' => $shippingSpeed,
                 'fulfillment_mode' => $fulfillmentMode,
+                'pickup_point' => $pickupPoint,
                 'items' => $items,
             ]);
 

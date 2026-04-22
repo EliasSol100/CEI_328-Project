@@ -186,24 +186,95 @@ if (!function_exists('payment_gateway_server_header')) {
 if (!function_exists('payment_gateway_available_methods')) {
     function payment_gateway_available_methods(mysqli $conn): array
     {
-        $stripeSecret = payment_gateway_setting($conn, 'STRIPE_SECRET_KEY', 'stripe_secret_key', '');
+        $stripeConfig = payment_gateway_stripe_config($conn);
         $paypalClientId = payment_gateway_setting($conn, 'PAYPAL_CLIENT_ID', 'paypal_client_id', '');
         $paypalClientSecret = payment_gateway_setting($conn, 'PAYPAL_CLIENT_SECRET', 'paypal_client_secret', '');
 
         return [
-            'stripe' => $stripeSecret !== '',
+            'stripe' => trim((string)($stripeConfig['secret_key'] ?? '')) !== '',
             'paypal' => $paypalClientId !== '' && $paypalClientSecret !== '',
         ];
+    }
+}
+
+if (!function_exists('payment_gateway_stripe_config')) {
+    function payment_gateway_stripe_config(mysqli $conn): array
+    {
+        $mode = strtolower(payment_gateway_setting($conn, 'STRIPE_MODE', 'stripe_mode', 'live'));
+        if (!in_array($mode, ['live', 'sandbox'], true)) {
+            $mode = 'live';
+        }
+
+        return [
+            'publishable_key' => payment_gateway_setting($conn, 'STRIPE_PUBLISHABLE_KEY', 'stripe_publishable_key', ''),
+            'secret_key' => payment_gateway_setting($conn, 'STRIPE_SECRET_KEY', 'stripe_secret_key', ''),
+            'webhook_secret' => payment_gateway_setting($conn, 'STRIPE_WEBHOOK_SECRET', 'stripe_webhook_secret', ''),
+            'mode' => $mode,
+        ];
+    }
+}
+
+if (!function_exists('payment_gateway_assert_stripe_mode_matches_keys')) {
+    function payment_gateway_assert_stripe_mode_matches_keys(array $config): void
+    {
+        $mode = strtolower(trim((string)($config['mode'] ?? 'live')));
+        if (!in_array($mode, ['live', 'sandbox'], true)) {
+            $mode = 'live';
+        }
+
+        $expectedKeyFlavor = $mode === 'sandbox' ? 'test' : 'live';
+        $modeLabel = $mode === 'sandbox' ? 'sandbox' : 'live';
+        $oppositeModeLabel = $mode === 'sandbox' ? 'live' : 'sandbox';
+
+        $secretKey = trim((string)($config['secret_key'] ?? ''));
+        if ($secretKey === '') {
+            return;
+        }
+
+        if (preg_match('/^sk_(test|live)_/', $secretKey, $matches) === 1) {
+            $actualFlavor = strtolower((string)($matches[1] ?? ''));
+            if ($actualFlavor !== $expectedKeyFlavor) {
+                throw new RuntimeException(
+                    'Stripe mode is set to ' . $modeLabel . ', but the saved secret key looks like a '
+                    . $oppositeModeLabel . ' key. Switch Stripe mode or update the saved secret key.'
+                );
+            }
+        }
+    }
+}
+
+if (!function_exists('payment_gateway_stripe_webhook_secret')) {
+    function payment_gateway_stripe_webhook_secret(mysqli $conn): string
+    {
+        $config = payment_gateway_stripe_config($conn);
+        return trim((string)($config['webhook_secret'] ?? ''));
+    }
+}
+
+if (!function_exists('payment_gateway_stripe_webhook_is_configured')) {
+    function payment_gateway_stripe_webhook_is_configured(mysqli $conn): bool
+    {
+        return payment_gateway_stripe_webhook_secret($conn) !== '';
+    }
+}
+
+if (!function_exists('payment_gateway_paypal_webhook_is_configured')) {
+    function payment_gateway_paypal_webhook_is_configured(mysqli $conn): bool
+    {
+        $config = payment_gateway_paypal_config($conn);
+        return trim((string)($config['webhook_id'] ?? '')) !== '';
     }
 }
 
 if (!function_exists('payment_gateway_create_stripe_checkout_session')) {
     function payment_gateway_create_stripe_checkout_session(mysqli $conn, array $payload): array
     {
-        $secretKey = payment_gateway_setting($conn, 'STRIPE_SECRET_KEY', 'stripe_secret_key', '');
+        $stripeConfig = payment_gateway_stripe_config($conn);
+        $secretKey = trim((string)($stripeConfig['secret_key'] ?? ''));
         if ($secretKey === '') {
             throw new RuntimeException('Stripe is not configured yet. Add your Stripe secret key first.');
         }
+        payment_gateway_assert_stripe_mode_matches_keys($stripeConfig);
 
         $checkoutToken = trim((string)($payload['checkout_token'] ?? ''));
         if ($checkoutToken === '') {
@@ -267,10 +338,12 @@ if (!function_exists('payment_gateway_create_stripe_checkout_session')) {
 if (!function_exists('payment_gateway_fetch_stripe_checkout_session')) {
     function payment_gateway_fetch_stripe_checkout_session(mysqli $conn, string $sessionId): array
     {
-        $secretKey = payment_gateway_setting($conn, 'STRIPE_SECRET_KEY', 'stripe_secret_key', '');
+        $stripeConfig = payment_gateway_stripe_config($conn);
+        $secretKey = trim((string)($stripeConfig['secret_key'] ?? ''));
         if ($secretKey === '') {
             throw new RuntimeException('Stripe is not configured yet. Add your Stripe secret key first.');
         }
+        payment_gateway_assert_stripe_mode_matches_keys($stripeConfig);
 
         $response = payment_gateway_http_request(
             'GET',
@@ -448,7 +521,7 @@ if (!function_exists('payment_gateway_capture_paypal_order')) {
 if (!function_exists('payment_gateway_verify_stripe_webhook_event')) {
     function payment_gateway_verify_stripe_webhook_event(mysqli $conn, string $payload, string $signatureHeader): array
     {
-        $secret = payment_gateway_setting($conn, 'STRIPE_WEBHOOK_SECRET', 'stripe_webhook_secret', '');
+        $secret = payment_gateway_stripe_webhook_secret($conn);
         if ($secret === '') {
             throw new RuntimeException('Stripe webhook secret has not been configured.');
         }

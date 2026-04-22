@@ -20,6 +20,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $formSection = trim((string)($_POST['form_section'] ?? ''));
 
     if ($formSection === 'payments') {
+        $stripeMode = strtolower(trim((string)($_POST['stripe_mode'] ?? 'live')));
+        if (!in_array($stripeMode, ['live', 'sandbox'], true)) {
+            $stripeMode = 'live';
+        }
+
         $paypalMode = strtolower(trim((string)($_POST['paypal_mode'] ?? 'live')));
         if (!in_array($paypalMode, ['live', 'sandbox'], true)) {
             $paypalMode = 'live';
@@ -28,6 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $saved = app_system_config_set_many($conn, [
             'stripe_publishable_key' => trim((string)($_POST['stripe_publishable_key'] ?? '')),
             'stripe_secret_key' => trim((string)($_POST['stripe_secret_key'] ?? '')),
+            'stripe_mode' => $stripeMode,
             'stripe_webhook_secret' => trim((string)($_POST['stripe_webhook_secret'] ?? '')),
             'paypal_client_id' => trim((string)($_POST['paypal_client_id'] ?? '')),
             'paypal_client_secret' => trim((string)($_POST['paypal_client_secret'] ?? '')),
@@ -66,11 +72,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $stripePublishableKey = app_integration_setting($conn, 'STRIPE_PUBLISHABLE_KEY', 'stripe_publishable_key', '');
 $stripeSecretKey = app_integration_setting($conn, 'STRIPE_SECRET_KEY', 'stripe_secret_key', '');
+$stripeMode = strtolower(app_integration_setting($conn, 'STRIPE_MODE', 'stripe_mode', 'live'));
 $stripeWebhookSecret = app_integration_setting($conn, 'STRIPE_WEBHOOK_SECRET', 'stripe_webhook_secret', '');
 $paypalClientId = app_integration_setting($conn, 'PAYPAL_CLIENT_ID', 'paypal_client_id', '');
 $paypalClientSecret = app_integration_setting($conn, 'PAYPAL_CLIENT_SECRET', 'paypal_client_secret', '');
 $paypalWebhookId = app_integration_setting($conn, 'PAYPAL_WEBHOOK_ID', 'paypal_webhook_id', '');
 $paypalMode = strtolower(app_integration_setting($conn, 'PAYPAL_MODE', 'paypal_mode', 'live'));
+if (!in_array($stripeMode, ['live', 'sandbox'], true)) {
+    $stripeMode = 'live';
+}
 if (!in_array($paypalMode, ['live', 'sandbox'], true)) {
     $paypalMode = 'live';
 }
@@ -124,7 +134,7 @@ $facebookConfigured = !empty($facebookConfig['enabled']);
           Google and Facebook login will stay unavailable until both the client ID/app ID and secret are saved here and the redirect URLs below are also added in the provider dashboards.
         </p>
         <p class="alert-text">
-          For the most reliable checkout flow, also add the Stripe webhook signing secret and the PayPal webhook ID after creating webhook endpoints in the payment provider dashboards.
+          Checkout can work with the main Stripe and PayPal keys only. The Stripe webhook signing secret and PayPal webhook ID are optional extras for background confirmation if a buyer closes the payment window before returning.
         </p>
       </div>
 
@@ -155,13 +165,24 @@ $facebookConfigured = !empty($facebookConfig['enabled']);
                   <span><span class="status-dot <?= $stripeConfigured ? 'dot-ok' : 'dot-off' ?>"></span><span class="text-sm <?= $stripeConfigured ? '' : 'text-muted' ?>"><?= $stripeConfigured ? 'Configured' : 'Not configured' ?></span></span>
                 </div>
                 <p class="text-sm text-muted" style="margin-bottom:16px;">
-                  Stripe Checkout on this website needs the secret key. The publishable key is optional here, but it can be stored for future client-side Stripe features.
+                  Stripe Checkout on this website needs the secret key. Set the mode to match your Stripe keys, and keep the webhook signing secret optional unless you want background confirmation.
                 </p>
 
-                <div class="form-group">
-                  <label class="form-label" for="stripe_publishable_key">Stripe Publishable Key</label>
-                  <input id="stripe_publishable_key" name="stripe_publishable_key" class="form-input" type="text" autocomplete="off" placeholder="pk_live_... or pk_test_..." value="<?= htmlspecialchars($stripePublishableKey) ?>">
-                  <div class="form-hint">Optional for this checkout flow, but useful to keep in the store settings.</div>
+                <div class="form-grid-2">
+                  <div class="form-group">
+                    <label class="form-label" for="stripe_publishable_key">Stripe Publishable Key</label>
+                    <input id="stripe_publishable_key" name="stripe_publishable_key" class="form-input" type="text" autocomplete="off" placeholder="pk_live_... or pk_test_..." value="<?= htmlspecialchars($stripePublishableKey) ?>">
+                    <div class="form-hint">Optional for this checkout flow, but useful to keep in the store settings.</div>
+                  </div>
+
+                  <div class="form-group">
+                    <label class="form-label" for="stripe_mode">Stripe Mode</label>
+                    <select id="stripe_mode" name="stripe_mode" class="form-input">
+                      <option value="live" <?= $stripeMode === 'live' ? 'selected' : '' ?>>Live</option>
+                      <option value="sandbox" <?= $stripeMode === 'sandbox' ? 'selected' : '' ?>>Sandbox</option>
+                    </select>
+                    <div class="form-hint">Use <strong>live</strong> with <code>pk_live_</code> and <code>sk_live_</code> keys, or <strong>sandbox</strong> with <code>pk_test_</code> and <code>sk_test_</code> keys.</div>
+                  </div>
                 </div>
 
                 <div class="form-group" style="margin-bottom:0;">
@@ -173,7 +194,7 @@ $facebookConfigured = !empty($facebookConfig['enabled']);
                 <div class="form-group" style="margin-top:16px;">
                   <label class="form-label" for="stripe_webhook_secret">Stripe Webhook Signing Secret</label>
                   <input id="stripe_webhook_secret" name="stripe_webhook_secret" class="form-input" type="password" autocomplete="off" placeholder="whsec_..." value="<?= htmlspecialchars($stripeWebhookSecret) ?>">
-                  <div class="form-hint">Recommended for production so paid Stripe sessions can still be finalized if the customer never returns to the success page.</div>
+                  <div class="form-hint">Optional. Add it if you want Stripe webhooks to finalize paid sessions in the background when a customer never returns to the success page.</div>
                 </div>
 
                 <div class="form-group" style="margin-bottom:0;">
@@ -222,7 +243,7 @@ $facebookConfigured = !empty($facebookConfig['enabled']);
                 <div class="form-group" style="margin-top:16px;">
                   <label class="form-label" for="paypal_webhook_id">PayPal Webhook ID</label>
                   <input id="paypal_webhook_id" name="paypal_webhook_id" class="form-input" type="text" autocomplete="off" placeholder="PayPal webhook ID" value="<?= htmlspecialchars($paypalWebhookId) ?>">
-                  <div class="form-hint">Recommended for production so approved PayPal orders can be captured and finalized safely through webhook confirmation.</div>
+                  <div class="form-hint">Optional. Add it if you want PayPal webhook events to confirm or recover paid orders in the background.</div>
                 </div>
 
                 <div class="form-group" style="margin-bottom:0;">

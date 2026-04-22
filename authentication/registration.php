@@ -287,12 +287,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
             client_id: <?= json_encode($facebookAppId, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,    // ID εφαρμογής από Facebook Developers
             redirect_uri: <?= json_encode($facebookRedirectUri, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>, // Σελίδα που θα λάβει την απάντηση
             response_type: 'code',           // Ζητάμε authorization code
-            auth_type: 'rerequest',          // Ξαναζητάμε δικαιώματα αν τα είχε αρνηθεί παλιά
-            scope: 'email'
+            auth_type: 'rerequest'           // Ξαναζητάμε δικαιώματα αν τα είχε αρνηθεί παλιά
         });
 
         // Κατασκευάζουμε το URL και ανακατευθύνουμε τον browser
-        const fbAuthUrl = 'https://www.facebook.com/v18.0/dialog/oauth?' + params.toString();
+        const fbAuthUrl = 'https://www.facebook.com/v21.0/dialog/oauth?' + params.toString();
         window.location.href = fbAuthUrl;
     });
     </script>
@@ -326,11 +325,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
             client_id: <?= json_encode($facebookAppId, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
             redirect_uri: <?= json_encode($facebookRedirectUri, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>,
             response_type: 'code',
-            auth_type: 'rerequest',
-            scope: 'email'
+            auth_type: 'rerequest'
         });
 
-        window.location.href = 'https://www.facebook.com/v18.0/dialog/oauth?' + params.toString();
+        window.location.href = 'https://www.facebook.com/v21.0/dialog/oauth?' + params.toString();
     }, true);
     </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
