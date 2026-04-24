@@ -6,6 +6,7 @@ require_once __DIR__ . "/include/security.php";
 require_once __DIR__ . "/include/image_storage.php";
 require_once __DIR__ . "/include/product_option_helpers.php";
 require_once __DIR__ . "/include/translation_helpers.php";
+require_once __DIR__ . "/include/product_warnings.php";
 require_once __DIR__ . "/include/made_to_order_access.php";
 if (!defined('CUSTOM_ORDERS_DIRECT')) {
     define('CUSTOM_ORDERS_DIRECT', true);
@@ -272,7 +273,7 @@ $reviewInput = [
 ];
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
-    app_require_csrf(isset($_GET['coupon_preview']) && (string)$_GET['coupon_preview'] === '1', "Invalid request token. Please refresh and try again.");
+    app_require_csrf(false, "Invalid request token. Please refresh and try again.");
     $action = (string)($_POST["action"] ?? "");
 
     if ($action === "submit_review") {
@@ -477,45 +478,6 @@ if (!$isAdmin) {
 
 $baseProductPrice = (float)($product["basePrice"] ?? 0);
 $productCategory = trim((string)($product["category"] ?? ""));
-$storedCouponCode = normalizeCouponCode((string)($_SESSION["cart_coupon_code"] ?? ""));
-$initialCouponEvaluation = [
-    'valid' => false,
-    'coupon_code' => '',
-    'promotion_name' => '',
-    'discount_amount' => 0.0,
-    'discounted_price' => round(max(0, $baseProductPrice), 2),
-    'message' => '',
-];
-if ($storedCouponCode !== '') {
-    $initialCouponEvaluation = evaluateProductCoupon($conn, $baseProductPrice, $productCategory, $storedCouponCode);
-}
-
-if (isset($_GET['coupon_preview']) && (string)$_GET['coupon_preview'] === '1') {
-    header('Content-Type: application/json; charset=utf-8');
-    try {
-        $couponCode = normalizeCouponCode((string)($_POST['coupon_code'] ?? ''));
-        $selectedPrice = isset($_POST['selected_price']) && is_numeric($_POST['selected_price'])
-            ? (float)$_POST['selected_price']
-            : $baseProductPrice;
-        if ($selectedPrice < 0) {
-            $selectedPrice = $baseProductPrice;
-        }
-        $preview = evaluateProductCoupon($conn, $selectedPrice, $productCategory, $couponCode);
-        echo json_encode($preview, JSON_UNESCAPED_UNICODE);
-    } catch (Throwable $e) {
-        http_response_code(500);
-        echo json_encode([
-            'valid' => false,
-            'coupon_code' => normalizeCouponCode((string)($_POST['coupon_code'] ?? '')),
-            'promotion_name' => '',
-            'discount_amount' => 0.0,
-            'discounted_price' => round(max(0, $baseProductPrice), 2),
-            'message' => 'Coupon preview failed. Please try again.',
-            'error' => $e->getMessage(),
-        ], JSON_UNESCAPED_UNICODE);
-    }
-    exit;
-}
 
 $photos = [];
 $photoStmt = $conn->prepare("SELECT imageID FROM photos WHERE productID = ? ORDER BY imageID ASC");
@@ -734,6 +696,29 @@ foreach ($productColorChoices as $colorId => $colorChoice) {
 }
 
 $uniqueColors = array_values($uniqueColors);
+$colorCatalogue = [];
+$catalogRes = $conn->query("
+    SELECT c.colorID, c.colorName, c.globalInventoryAvailable, c.isActive,
+           COALESCE(yt.typeName, 'General') AS typeName,
+           MIN(cyt.photoPath) AS photoPath
+    FROM colors c
+    LEFT JOIN color_yarn_types cyt ON cyt.colorID = c.colorID
+    LEFT JOIN yarn_types yt ON yt.typeID = cyt.typeID
+    GROUP BY c.colorID, c.colorName, c.globalInventoryAvailable, c.isActive, yt.typeName
+    ORDER BY typeName ASC, c.colorName ASC
+");
+if ($catalogRes) {
+    while ($row = $catalogRes->fetch_assoc()) {
+        $colorCatalogue[] = [
+            'id' => (int)$row['colorID'],
+            'name' => (string)$row['colorName'],
+            'typeName' => (string)$row['typeName'],
+            'available' => (int)($row['isActive'] ?? 0) === 1 && (int)($row['globalInventoryAvailable'] ?? 0) > 0,
+            'stock' => (int)($row['globalInventoryAvailable'] ?? 0),
+            'photoPath' => trim(app_image_prefer_optimized_asset_path((string)($row['photoPath'] ?? ''))),
+        ];
+    }
+}
 $hasVariationPriceRange = count(array_unique(array_map(static fn($price): string => number_format((float)$price, 2, '.', ''), $variationPrices))) > 1;
 $variationMinPrice = !empty($variationPrices) ? min($variationPrices) : $baseProductPrice;
 $variationMaxPrice = !empty($variationPrices) ? max($variationPrices) : $baseProductPrice;
@@ -886,7 +871,9 @@ if ($reviewStatus === "saved") {
 }
 $defaultReviewRating = max(1, min(5, (int)$reviewInput["rating"]));
 $openReviewForm = $canWriteReview && (!empty($reviewErrors) || ((string)($_GET["write_review"] ?? "") === "1"));
-$couponFeedbackText = "If valid, the discount will be applied during checkout.";
+$storedCouponCode = '';
+$initialCouponEvaluation = ['valid' => false, 'discounted_price' => round(max(0, $baseProductPrice), 2)];
+$couponFeedbackText = '';
 $couponFeedbackIsError = false;
 if ($storedCouponCode !== '') {
     if (!empty($initialCouponEvaluation['valid'])) {
@@ -907,6 +894,7 @@ if ($storedCouponCode !== '') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= htmlspecialchars((string)$product["nameEN"]) ?> - <?= htmlspecialchars($systemTitle) ?></title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="assets/styling/styles.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/styles.css') ?>">
     <link rel="stylesheet" href="assets/styling/header.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/header.css') ?>">
     <link rel="stylesheet" href="assets/styling/product_details.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/product_details.css') ?>">
@@ -937,7 +925,6 @@ if ($storedCouponCode !== '') {
             display: inline;
         }
     </style>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <?php include __DIR__ . '/include/pwa_head.php'; ?>
 </head>
 <body class="site-page"<?= app_translate_page_title_attrs((string)$product["nameEN"] . ' - ' . $systemTitle, (string)(($product["nameGR"] ?: $product["nameEN"]) . ' - ' . $systemTitle)) ?>>
@@ -987,7 +974,7 @@ include __DIR__ . "/include/header.php";
                 <span<?= app_translate_text_attrs((int)($product["totalSales"] ?? 0) . ' sold', (int)($product["totalSales"] ?? 0) . ' πωλήθηκαν') ?>><?= (int)($product["totalSales"] ?? 0) ?> sold</span>
             </div>
 
-            <div class="price-row <?= !empty($initialCouponEvaluation['valid']) ? 'is-discounted' : '' ?>" id="price-row"
+            <div class="price-row" id="price-row"
                  data-base-price="<?= htmlspecialchars(number_format($baseProductPrice, 2, '.', '')) ?>"
                  data-range-min="<?= htmlspecialchars(number_format($variationMinPrice, 2, '.', '')) ?>"
                  data-range-max="<?= htmlspecialchars(number_format($variationMaxPrice, 2, '.', '')) ?>"
@@ -997,12 +984,17 @@ include __DIR__ . "/include/header.php";
                     <?php if ($hasVariationPriceRange): ?>
                         &euro;<?= number_format($variationMinPrice, 2) ?> - &euro;<?= number_format($variationMaxPrice, 2) ?>
                     <?php else: ?>
-                        &euro;<?= number_format(!empty($initialCouponEvaluation['valid']) ? (float)$initialCouponEvaluation['discounted_price'] : $baseProductPrice, 2) ?>
+                        &euro;<?= number_format($baseProductPrice, 2) ?>
                     <?php endif; ?>
                 </span>
             </div>
 
-            <p class="desc-text"<?= app_translate_html_attrs(nl2br(htmlspecialchars((string)($product["descriptionEN"] ?: "Handmade item by Creations by Athina."))), nl2br(htmlspecialchars((string)($product["descriptionGR"] ?: $product["descriptionEN"] ?: "Χειροποίητο προϊόν από το Creations by Athina.")))) ?>><?= nl2br(htmlspecialchars((string)($product["descriptionEN"] ?: "Handmade item by Creations by Athina."))) ?></p>
+            <?php
+                $descriptionEnHtml = app_product_description_html((string)($product["descriptionEN"] ?? ''), "Handmade item by Creations by Athina.");
+                $descriptionElHtml = app_product_description_html((string)($product["descriptionGR"] ?: $product["descriptionEN"] ?: ''), "Χειροποίητο προϊόν από το Creations by Athina.");
+            ?>
+            <p class="desc-text"<?= app_translate_html_attrs($descriptionEnHtml, $descriptionElHtml) ?>><?= $descriptionEnHtml ?></p>
+            <?= app_product_warning_box_html() ?>
 
             <?php if (!empty($uniqueSizes)): ?>
                 <div class="option-label" data-translate="productSizeLabel">Size</div>
@@ -1033,6 +1025,13 @@ include __DIR__ . "/include/header.php";
                         </button>
                     <?php endforeach; ?>
                 </div>
+            <?php endif; ?>
+
+            <?php if (!empty($colorCatalogue)): ?>
+                <button type="button" class="color-catalogue-btn" id="open-color-catalogue">
+                    <i class="fas fa-palette"></i>
+                    <span data-translate="viewColorCatalogue">View colour catalogue</span>
+                </button>
             <?php endif; ?>
 
             <?php if ($customColorFields > 0): ?>
@@ -1145,16 +1144,6 @@ include __DIR__ . "/include/header.php";
                 <p class="gift-hint" data-translate="productGiftHint">Selected gift options and message will appear in Cart, Checkout and Receipt.</p>
             </div>
 
-            <div class="gift-box" style="margin-top:12px;">
-                <h3 data-translate="couponCode">Coupon Code</h3>
-                <input type="text" id="coupon-code" value="<?= htmlspecialchars($storedCouponCode) ?>" data-translate-placeholder="productCouponPlaceholder" placeholder="Enter coupon code (optional)" style="width:100%;min-height:42px;border:1px solid #d8cceb;border-radius:10px;padding:10px 12px;">
-                <div style="display:flex;gap:8px;margin-top:8px;">
-                    <button type="button" id="coupon-apply-btn" data-translate="apply" style="border:1px solid #8f54d9;background:#8f54d9;color:#fff;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;">Apply</button>
-                    <button type="button" id="coupon-remove-btn" data-translate="remove" style="border:1px solid #d6c7ea;background:#fff;color:#4b3569;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer;">Remove</button>
-                </div>
-                <p class="gift-hint" id="coupon-feedback" data-is-error="<?= $couponFeedbackIsError ? '1' : '0' ?>"><?= htmlspecialchars($couponFeedbackText) ?></p>
-            </div>
-
             <div class="action-row">
                 <button type="button" class="add-cart-btn" id="add-cart-btn">
                     <i class="fas fa-cart-plus"></i> <span data-translate="addToCart">Add to Cart</span>
@@ -1188,6 +1177,39 @@ include __DIR__ . "/include/header.php";
             </div>
         </section>
     </div>
+
+    <?php if (!empty($colorCatalogue)): ?>
+    <div class="color-catalogue-modal" id="color-catalogue-modal" aria-hidden="true">
+        <div class="color-catalogue-panel" role="dialog" aria-modal="true" aria-labelledby="color-catalogue-title">
+            <div class="color-catalogue-head">
+                <h2 id="color-catalogue-title" data-translate="colorCatalogue">Colour Catalogue</h2>
+                <button type="button" class="color-catalogue-close" id="close-color-catalogue" aria-label="Close colour catalogue">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="color-catalogue-grid">
+                <?php foreach ($colorCatalogue as $catalogueColor): ?>
+                <div class="color-catalogue-item <?= $catalogueColor['available'] ? '' : 'is-out' ?>">
+                    <?php if ($catalogueColor['photoPath'] !== ''): ?>
+                        <img src="<?= htmlspecialchars($catalogueColor['photoPath']) ?>" alt="<?= htmlspecialchars($catalogueColor['name']) ?>" loading="lazy">
+                    <?php else: ?>
+                        <span class="color-catalogue-swatch" style="background: <?= htmlspecialchars($colorHexMap[strtolower($catalogueColor['name'])] ?? '#ece6f6') ?>;"></span>
+                    <?php endif; ?>
+                    <div>
+                        <strong><?= htmlspecialchars($catalogueColor['name']) ?></strong>
+                        <span><?= htmlspecialchars($catalogueColor['typeName']) ?></span>
+                        <?php if ($catalogueColor['available']): ?>
+                            <em data-translate="inStock">In Stock</em>
+                        <?php else: ?>
+                            <em data-translate="outOfStock">Out of Stock</em>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <section class="reviews-section" id="customer-reviews">
         <div class="reviews-head">
@@ -1808,27 +1830,7 @@ include __DIR__ . "/include/header.php";
         }, 2200);
     }
 
-    var couponInput = document.getElementById("coupon-code");
-    var couponApplyBtn = document.getElementById("coupon-apply-btn");
-    var couponRemoveBtn = document.getElementById("coupon-remove-btn");
-    var couponFeedback = document.getElementById("coupon-feedback");
-    var appliedCouponCode = <?= json_encode(!empty($initialCouponEvaluation['valid']) ? $storedCouponCode : "") ?>;
-    function normalizeCouponInput() {
-        if (!couponInput) {
-            return "";
-        }
-        var code = String(couponInput.value || "").trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "");
-        couponInput.value = code;
-        return code;
-    }
-
-    function setCouponFeedback(message, isError) {
-        if (couponFeedback) {
-            couponFeedback.textContent = message;
-            couponFeedback.style.color = isError ? "#b42318" : "#6f5f85";
-        }
-    }
-
+    var appliedCouponCode = "";
     function parseJsonResponse(response) {
         return response.text().then(function (raw) {
             var clean = String(raw || "").replace(/^\uFEFF+/, "").trim();
@@ -1877,115 +1879,37 @@ include __DIR__ . "/include/header.php";
         return params.toString();
     }
 
-    function persistCoupon(action, code) {
-        var payload = { action: action || "remove_coupon" };
-        if (action === "set_coupon") {
-            payload.coupon_code = code || "";
-        }
-        return fetch("cart_api.php", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "X-CSRF-Token": window.APP_CSRF_TOKEN || ""
-            },
-            body: buildUrlEncodedPayload(payload)
-        })
-            .then(parseJsonResponse)
-            .then(function (data) {
-                if (!data || !data.success) {
-                    return false;
-                }
-                return true;
-            })
-            .catch(function () {
-                return false;
-            });
-    }
-
-    function validateCouponForProduct(code) {
-        var body = new URLSearchParams();
-        body.set("coupon_code", code || "");
-        body.set("selected_price", String(currentBasePrice || basePrice));
-        return fetch("product.php?id=" + encodeURIComponent(String(productId)) + "&coupon_preview=1", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "X-CSRF-Token": window.APP_CSRF_TOKEN || ""
-            },
-            body: body.toString()
-        })
-            .then(parseJsonResponse)
-            .catch(function () {
-                return {
-                    valid: false,
-                    message: t("productCouponNetworkError")
-                };
-            });
-    }
-
-    function applyCoupon() {
-        if (!couponInput) {
+    var colourCatalogueModal = document.getElementById("color-catalogue-modal");
+    var openColourCatalogueBtn = document.getElementById("open-color-catalogue");
+    var closeColourCatalogueBtn = document.getElementById("close-color-catalogue");
+    function setColourCatalogueOpen(open) {
+        if (!colourCatalogueModal) {
             return;
         }
-        var couponCode = normalizeCouponInput();
-        if (!couponCode) {
-            refreshDisplayedPrice(findSelectedVariation());
-            appliedCouponCode = "";
-            setCouponFeedback(t("productEnterCouponFirst"), true);
-            showToast(t("productEnterCouponFirst"), true);
-            persistCoupon("remove_coupon");
-            return;
-        }
-
-        validateCouponForProduct(couponCode).then(function (preview) {
-            if (!preview || !preview.valid) {
-                refreshDisplayedPrice(findSelectedVariation());
-                appliedCouponCode = "";
-                setCouponFeedback((preview && preview.message) || t("productInvalidCoupon"), true);
-                showToast((preview && preview.message) || t("productInvalidCoupon"), true);
-                persistCoupon("remove_coupon");
-                return;
+        colourCatalogueModal.classList.toggle("is-open", !!open);
+        colourCatalogueModal.setAttribute("aria-hidden", open ? "false" : "true");
+        document.body.style.overflow = open ? "hidden" : "";
+    }
+    if (openColourCatalogueBtn) {
+        openColourCatalogueBtn.addEventListener("click", function () {
+            setColourCatalogueOpen(true);
+        });
+    }
+    if (closeColourCatalogueBtn) {
+        closeColourCatalogueBtn.addEventListener("click", function () {
+            setColourCatalogueOpen(false);
+        });
+    }
+    if (colourCatalogueModal) {
+        colourCatalogueModal.addEventListener("click", function (event) {
+            if (event.target === colourCatalogueModal) {
+                setColourCatalogueOpen(false);
             }
-
-            persistCoupon("set_coupon", couponCode).then(function (saved) {
-                if (!saved) {
-                    setCouponFeedback(t("productCouponSaveFailed"), true);
-                    showToast(t("productCouldNotSaveCoupon"), true);
-                    return;
-                }
-                appliedCouponCode = couponCode;
-                renderPrice(Number(preview.discounted_price || currentBasePrice), true, currentBasePrice);
-                var amount = Number(preview.discount_amount || 0).toFixed(2);
-                var promoName = String(preview.promotion_name || couponCode);
-                setCouponFeedback(t("productValidCouponApplied", { name: promoName, amount: amount }), false);
-                showToast(t("productCouponAppliedSuccess"));
-            });
         });
-    }
-
-    function removeCoupon() {
-        if (couponInput) {
-            couponInput.value = "";
-        }
-        appliedCouponCode = "";
-        refreshDisplayedPrice(findSelectedVariation());
-        setCouponFeedback(t("productCouponRemoved"), false);
-        showToast(t("productCouponRemoved"));
-        persistCoupon("remove_coupon");
-    }
-
-    if (couponFeedback && couponFeedback.getAttribute("data-is-error") === "1") {
-        couponFeedback.style.color = "#b42318";
-    }
-
-    if (couponApplyBtn) {
-        couponApplyBtn.addEventListener("click", function () {
-            applyCoupon();
-        });
-    }
-    if (couponRemoveBtn) {
-        couponRemoveBtn.addEventListener("click", function () {
-            removeCoupon();
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") {
+                setColourCatalogueOpen(false);
+            }
         });
     }
 
@@ -2032,10 +1956,6 @@ include __DIR__ . "/include/header.php";
                     colorSchemeC: (csColorSchemeEnabled && csNumColors >= 3 && csSelectC) ? csSelectC.options[csSelectC.selectedIndex]?.text || "" : ""
                 }
             };
-            if (appliedCouponCode) {
-                payload.coupon_code = appliedCouponCode;
-            }
-
             if (hasSelectableVariations) {
                 payload.variation = {};
                 if (variationUsesColor && selectedColorId) {

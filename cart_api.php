@@ -5,10 +5,12 @@ session_start();
 require_once "authentication/database.php";
 require_once "include/security.php";
 require_once __DIR__ . '/include/product_option_helpers.php';
+require_once __DIR__ . '/include/coupon_helpers.php';
 require_once __DIR__ . '/include/made_to_order_access.php';
 header('Content-Type: application/json; charset=utf-8');
 
 app_product_options_ensure_schema($conn);
+app_coupon_ensure_schema($conn);
 
 /* =========================
    GET: Return cart OR variations for a product
@@ -66,16 +68,21 @@ try {
 
     $action = strtolower(trim((string)($payload['action'] ?? '')));
     if ($action === 'set_coupon') {
-        $couponCode = normalizeCouponCode((string)($payload['coupon_code'] ?? ''));
+        $couponCode = app_coupon_normalize_code((string)($payload['coupon_code'] ?? ''));
         if ($couponCode === '') {
             badRequest('Enter a coupon code.');
         }
-        $_SESSION['cart_coupon_code'] = $couponCode;
         $cart = &getOrInitCart();
+        $evaluation = app_coupon_evaluate_cart($conn, $cart['items'] ?? [], $couponCode);
+        if (empty($evaluation['valid'])) {
+            badRequest((string)($evaluation['message'] ?? 'Coupon code is invalid, expired, or not applicable to your cart.'));
+        }
+        $_SESSION['cart_coupon_code'] = $couponCode;
         echo json_encode([
             'success' => true,
-            'message' => 'Coupon saved for checkout.',
+            'message' => (string)$evaluation['message'],
             'coupon_code' => $couponCode,
+            'discount_amount' => (float)$evaluation['discount_amount'],
             'cart' => $cart,
         ], JSON_UNESCAPED_UNICODE);
         exit;
@@ -94,13 +101,6 @@ try {
 
     $productId = toInt($payload['product_id'] ?? null);
     $qty       = toInt($payload['quantity'] ?? null);
-    $couponCode = normalizeCouponCode((string)($payload['coupon_code'] ?? ''));
-    if ($couponCode !== '') {
-        $_SESSION['cart_coupon_code'] = $couponCode;
-    } elseif (array_key_exists('coupon_code', $payload)) {
-        unset($_SESSION['cart_coupon_code']);
-    }
-
     if ($productId === null || $productId <= 0) badRequest('Invalid product_id.');
     if ($qty === null || $qty <= 0) badRequest('Invalid quantity. Must be >= 1.');
 

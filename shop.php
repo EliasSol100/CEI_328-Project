@@ -31,7 +31,7 @@ if (isset($_SESSION["user"])) {
     $role     = $_SESSION["user"]["role"] ?? 'user';
 
     $stmt = $conn->prepare("
-        SELECT phone, country, city, address, postcode
+        SELECT phone, country, city, address, postcode, dob, is_verified
         FROM users
         WHERE userID = ?
     ");
@@ -53,12 +53,18 @@ if (isset($_SESSION["user"])) {
         !empty($user["country"]) &&
         !empty($user["city"]) &&
         !empty($user["address"]) &&
-        !empty($user["postcode"]);
+        !empty($user["postcode"]) &&
+        !empty($user["dob"]);
 
     $_SESSION["user"]["profile_complete"] = $fieldsComplete;
 
     if (!$fieldsComplete && $role !== 'admin') {
         header("Location: authentication/complete_profile.php");
+        exit();
+    }
+
+    if ($fieldsComplete && $role !== 'admin' && (int)($user["is_verified"] ?? 0) !== 1) {
+        header("Location: authentication/verify.php");
         exit();
     }
 
@@ -183,6 +189,29 @@ function shopProductTags(array $product): array
     }
 
     return array_values(array_unique($tags));
+}
+
+function shopColorSwatchHex(string $colorName): string
+{
+    $map = [
+        'sunshine yellow' => '#f8ea75',
+        'honey blend' => '#dda157',
+        'bluebell' => '#cad7ff',
+        'sugar pink' => '#f5dce8',
+        'lavender mist' => '#d6c9ff',
+        'blush pink' => '#ffdbe5',
+        'lemon yellow' => '#f8ea75',
+        'deep plum' => '#5b2a63',
+        'berry plum' => '#99566a',
+        'soft lilac' => '#d9dcfb',
+        'forest sage' => '#7f9d88',
+        'sky mist' => '#dce8ff',
+        'lavender cloud' => '#d7c5ff',
+        'mint frost' => '#d6f0ea',
+        'warm oatmeal' => '#ccb594',
+    ];
+    $key = strtolower(trim($colorName));
+    return $map[$key] ?? '#ece6f6';
 }
 
 // Backfill the Selling Fast flag on older databases before shop queries use it.
@@ -378,6 +407,44 @@ usort($categories, static function (string $left, string $right) use ($categoryL
     return strcasecmp($left, $right);
 });
 
+$materialOptions = [];
+$materialRes = $conn->query("
+    SELECT typeName AS material
+    FROM yarn_types
+    WHERE typeName IS NOT NULL AND TRIM(typeName) <> ''
+    UNION
+    SELECT DISTINCT materialType AS material
+    FROM products
+    WHERE materialType IS NOT NULL AND TRIM(materialType) <> ''
+      AND ({$categoryVisibilityWhere})
+    ORDER BY material ASC
+");
+if ($materialRes) {
+    while ($row = $materialRes->fetch_assoc()) {
+        $material = trim((string)($row['material'] ?? ''));
+        if ($material !== '') {
+            $materialOptions[] = $material;
+        }
+    }
+}
+
+$colorFilterOptions = [];
+$colorRes = $conn->query("
+    SELECT colorID, colorName, globalInventoryAvailable
+    FROM colors
+    WHERE isActive = 1
+    ORDER BY colorName ASC
+");
+if ($colorRes) {
+    while ($row = $colorRes->fetch_assoc()) {
+        $colorFilterOptions[(int)$row['colorID']] = [
+            'id' => (int)$row['colorID'],
+            'name' => (string)$row['colorName'],
+            'available' => (int)($row['globalInventoryAvailable'] ?? 0),
+        ];
+    }
+}
+
 // Price bounds from DB (all active/made_to_order products)
 $minPrice = 0;
 $maxPrice = 100;
@@ -433,13 +500,30 @@ $selectedTags = array_values(array_unique(array_intersect(
     array_map('strval', $selectedTags)
 )));
 
+$selectedMaterials = $_GET['materials'] ?? [];
+if (!is_array($selectedMaterials)) {
+    $selectedMaterials = [$selectedMaterials];
+}
+$selectedMaterials = array_values(array_unique(array_intersect(
+    $materialOptions,
+    array_map('strval', $selectedMaterials)
+)));
+
+$selectedColors = $_GET['colors'] ?? [];
+if (!is_array($selectedColors)) {
+    $selectedColors = [$selectedColors];
+}
+$selectedColors = array_values(array_unique(array_filter(array_map('intval', $selectedColors), static function (int $colorId) use ($colorFilterOptions): bool {
+    return $colorId > 0 && isset($colorFilterOptions[$colorId]);
+})));
+
 // ---------------------------------------------
 // Load products from DB (with active search + filters)
 // ---------------------------------------------
 $products = [];
 $sql = "
     SELECT p.productID, p.sku, p.nameEN, p.nameGR, p.basePrice, p.inventory,
-           p.cartStatus, p.category, p.hasVariants,
+           p.cartStatus, p.category, p.materialType, p.hasVariants,
            COALESCE(vstats.min_price, p.basePrice) AS displayMinPrice,
            COALESCE(vstats.max_price, p.basePrice) AS displayMaxPrice,
            CASE
@@ -494,6 +578,46 @@ if ($searchQuery !== '') {
     $bindValues[] = $like;
     $bindValues[] = $like;
     $bindValues[] = $like;
+}
+
+if (!empty($selectedMaterials)) {
+    $placeholders = implode(',', array_fill(0, count($selectedMaterials), '?'));
+    $sql .= " AND p.materialType IN ({$placeholders})";
+    $bindTypes .= str_repeat('s', count($selectedMaterials));
+    foreach ($selectedMaterials as $material) {
+        $bindValues[] = $material;
+    }
+}
+
+if (!empty($selectedColors)) {
+    $placeholders = implode(',', array_fill(0, count($selectedColors), '?'));
+    $sql .= " AND (
+        EXISTS (
+            SELECT 1
+            FROM product_variations pvf
+            JOIN colors cf ON cf.colorID = pvf.colorID
+            WHERE pvf.productID = p.productID
+              AND pvf.colorID IN ({$placeholders})
+              AND cf.isActive = 1
+              AND cf.globalInventoryAvailable > 0
+        )
+        OR EXISTS (
+            SELECT 1
+            FROM product_color_photos pcpf
+            JOIN colors cpf ON cpf.colorID = pcpf.colorID
+            WHERE pcpf.productID = p.productID
+              AND pcpf.colorID IN ({$placeholders})
+              AND cpf.isActive = 1
+              AND cpf.globalInventoryAvailable > 0
+        )
+    )";
+    $bindTypes .= str_repeat('i', count($selectedColors) * 2);
+    foreach ($selectedColors as $colorId) {
+        $bindValues[] = $colorId;
+    }
+    foreach ($selectedColors as $colorId) {
+        $bindValues[] = $colorId;
+    }
 }
 
 $sql .= " AND COALESCE(vstats.min_price, p.basePrice) <= ?";
@@ -583,11 +707,11 @@ if ($vpRes) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Creations by Athina - Shop</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="assets/styling/styles.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/styles.css') ?>">
     <link rel="stylesheet" href="assets/styling/header.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/header.css') ?>">
     <link rel="stylesheet" href="assets/styling/shopstyle.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/shopstyle.css') ?>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <style>
     .shop-carousel,
     .shop-carousel .carousel-inner,
@@ -615,6 +739,17 @@ if ($vpRes) {
     .shop-product-card:hover .shop-carousel .carousel-control-prev,
     .shop-product-card:hover .shop-carousel .carousel-control-next {
         opacity: 0.7;
+    }
+    .filter-color-dot {
+        width: 15px;
+        height: 15px;
+        border-radius: 50%;
+        border: 1px solid #d7c6eb;
+        box-shadow: inset 0 0 0 2px rgba(255,255,255,.8);
+        flex: 0 0 15px;
+    }
+    .filter-option.is-unavailable {
+        opacity: .48;
     }
     </style>
     <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/translations.js') ?>" defer></script>
@@ -706,6 +841,41 @@ if ($vpRes) {
                             <span id="price-max-label">&euro;<?= (float)$selectedPriceMax ?></span>
                         </div>
                     </div>
+
+                    <?php if (!empty($materialOptions)): ?>
+                    <div class="filter-group">
+                        <h4 data-translate="material">Material</h4>
+                        <div class="chip-row">
+                            <?php foreach ($materialOptions as $material): ?>
+                            <label class="tag-chip">
+                                <input type="checkbox"
+                                       name="materials[]"
+                                       value="<?= htmlspecialchars($material) ?>"
+                                       <?= in_array($material, $selectedMaterials, true) ? 'checked' : '' ?>>
+                                <span><?= htmlspecialchars($material) ?></span>
+                            </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+
+                    <?php if (!empty($colorFilterOptions)): ?>
+                    <div class="filter-group">
+                        <h4 data-translate="yarnColour">Yarn Colour</h4>
+                        <?php foreach ($colorFilterOptions as $colorOption): ?>
+                        <?php $colorAvailable = (int)$colorOption['available'] > 0; ?>
+                        <label class="filter-option <?= $colorAvailable ? '' : 'is-unavailable' ?>">
+                            <input type="checkbox"
+                                   name="colors[]"
+                                   value="<?= (int)$colorOption['id'] ?>"
+                                   <?= in_array((int)$colorOption['id'], $selectedColors, true) ? 'checked' : '' ?>
+                                   <?= $colorAvailable ? '' : 'disabled' ?>>
+                            <span class="filter-color-dot" style="background:<?= htmlspecialchars(shopColorSwatchHex((string)$colorOption['name'])) ?>;"></span>
+                            <span><?= htmlspecialchars((string)$colorOption['name']) ?></span>
+                        </label>
+                        <?php endforeach; ?>
+                    </div>
+                    <?php endif; ?>
 
                     <!-- TAGS -->
                     <div class="filter-group">
@@ -811,7 +981,7 @@ if ($vpRes) {
                                     }));
                                 ?>
                                 <?php if (!empty($allSlides)): ?>
-                                <div id="carousel-<?= $pid ?>" class="carousel slide shop-carousel" data-bs-ride="carousel" data-bs-interval="2000">
+                                <div id="carousel-<?= $pid ?>" class="carousel slide shop-carousel" data-bs-ride="false" data-bs-interval="1400">
                                     <div class="carousel-inner">
                                         <?php foreach ($allSlides as $cidx => $slide): ?>
                                         <?php
@@ -879,7 +1049,11 @@ if ($vpRes) {
                                         data-has-variants="<?= (int)$p['hasVariants'] ?>"
                                         data-requires-options="<?= $requiresOptionSelection ? 1 : 0 ?>"
                                         data-product-url="product.php?id=<?= $pid ?>">
-                                    <i class="fas fa-cart-plus"></i> <span data-translate="addToCart">Add to Cart</span>
+                                    <?php if ($requiresOptionSelection): ?>
+                                        <i class="fas fa-sliders-h"></i> <span data-translate="selectOptions">Select Options</span>
+                                    <?php else: ?>
+                                        <i class="fas fa-cart-plus"></i> <span data-translate="addToCart">Add to Cart</span>
+                                    <?php endif; ?>
                                 </button>
                             </div>
                         </article>
@@ -902,7 +1076,7 @@ if ($vpRes) {
 
         const searchInput = document.getElementById('shop-search-input');
         const categoryInputs = document.querySelectorAll('input[type="radio"][name="category"]');
-        const tagInputs = document.querySelectorAll('input[type="checkbox"][name="tags[]"]');
+        const tagInputs = document.querySelectorAll('input[type="checkbox"][name="tags[]"], input[type="checkbox"][name="materials[]"], input[type="checkbox"][name="colors[]"]');
         const priceRange = document.getElementById('price-range');
         const priceMaxLabel = document.getElementById('price-max-label');
         const clearBtn = document.getElementById('clear-filters-btn');
@@ -974,6 +1148,32 @@ if ($vpRes) {
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="assets/js/wishlist-live.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/wishlist-live.js') ?>" defer></script>
     <script>
+    document.querySelectorAll('.shop-carousel').forEach(carouselEl => {
+        const card = carouselEl.closest('.shop-product-card');
+        const slideCount = carouselEl.querySelectorAll('.carousel-item').length;
+        if (!card || slideCount < 2 || !window.bootstrap) return;
+
+        const carousel = bootstrap.Carousel.getOrCreateInstance(carouselEl, {
+            interval: 1400,
+            ride: false,
+            pause: false,
+            wrap: true,
+            touch: true
+        });
+        carousel.pause();
+
+        card.addEventListener('mouseenter', () => carousel.cycle());
+        card.addEventListener('mouseleave', () => {
+            carousel.pause();
+            carousel.to(0);
+        });
+        card.addEventListener('focusin', () => carousel.cycle());
+        card.addEventListener('focusout', () => {
+            carousel.pause();
+            carousel.to(0);
+        });
+    });
+
     document.querySelectorAll('.shop-product-card.is-clickable').forEach(card => {
         const productUrl = card.dataset.productUrl;
         if (!productUrl) return;

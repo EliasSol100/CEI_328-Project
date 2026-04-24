@@ -3,6 +3,9 @@ session_start();
 require_once "authentication/database.php";
 require_once "include/security.php";
 require_once "include/translation_helpers.php";
+require_once "include/coupon_helpers.php";
+
+app_coupon_ensure_schema($conn);
 
 function getCartLineAvailableStock(mysqli $conn, array $item): int {
     $productId = (int)($item['product']['id'] ?? $item['productID'] ?? 0);
@@ -50,6 +53,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'created_at' => gmdate('c'),
             'updated_at' => gmdate('c'),
         ];
+    }
+
+    if ($action === 'apply_coupon') {
+        $couponCode = app_coupon_normalize_code((string)($_POST['coupon_code'] ?? ''));
+        if ($couponCode === '') {
+            unset($_SESSION['cart_coupon_code']);
+            $_SESSION['cart_notice'] = [
+                'type' => 'error',
+                'message' => 'Enter a coupon code.'
+            ];
+        } else {
+            $evaluation = app_coupon_evaluate_cart($conn, $_SESSION['cart']['items'] ?? [], $couponCode);
+            if (!empty($evaluation['valid'])) {
+                $_SESSION['cart_coupon_code'] = $couponCode;
+                $_SESSION['cart_notice'] = [
+                    'type' => 'success',
+                    'message' => (string)$evaluation['message']
+                ];
+            } else {
+                unset($_SESSION['cart_coupon_code']);
+                $_SESSION['cart_notice'] = [
+                    'type' => 'error',
+                    'message' => (string)($evaluation['message'] ?? 'Coupon code is invalid, expired, or not applicable to your cart.')
+                ];
+            }
+        }
+        header('Location: cart.php');
+        exit();
+    }
+
+    if ($action === 'remove_coupon') {
+        unset($_SESSION['cart_coupon_code']);
+        $_SESSION['cart_notice'] = [
+            'type' => 'success',
+            'message' => 'Coupon removed.'
+        ];
+        header('Location: cart.php');
+        exit();
     }
 
     if ($action === 'remove' && $idx >= 0 && isset($_SESSION['cart']['items'][$idx])) {
@@ -121,6 +162,24 @@ if (!empty($items)) {
     $_SESSION['cart']['totals'] = $totals;
 }
 
+$cartCouponCode = app_coupon_normalize_code((string)($_SESSION['cart_coupon_code'] ?? ''));
+$cartCouponEvaluation = [
+    'valid' => false,
+    'coupon_code' => $cartCouponCode,
+    'promotion_name' => '',
+    'discount_amount' => 0.0,
+    'message' => '',
+];
+if ($cartCouponCode !== '' && !empty($items)) {
+    $cartCouponEvaluation = app_coupon_evaluate_cart($conn, $items, $cartCouponCode);
+    if (empty($cartCouponEvaluation['valid'])) {
+        unset($_SESSION['cart_coupon_code']);
+        $cartCouponCode = '';
+    }
+}
+$cartCouponDiscount = !empty($cartCouponEvaluation['valid']) ? (float)$cartCouponEvaluation['discount_amount'] : 0.0;
+$cartGrandTotal = max(0, (float)$totals['grand_total'] - $cartCouponDiscount);
+
 // Load one image per cart product (same style as wishlist/shop usage).
 $productImageMap = [];
 if (!empty($items)) {
@@ -189,7 +248,8 @@ unset($_SESSION['cart_notice']);
             </span>
         </h1>
         <?php if (!empty($cartNotice['message'])): ?>
-        <div style="margin:-16px 0 18px;padding:10px 12px;border-radius:10px;background:#ffe8e8;color:#8f1f1f;border:1px solid #f3c8c8;"<?= !empty($cartNotice['message']) && preg_match('/^Only (\d+) left in stock\.$/', (string)$cartNotice['message'], $cartNoticeMatch) ? app_translate_text_attrs('Only ' . (int)$cartNoticeMatch[1] . ' left in stock.', 'Μόνο ' . (int)$cartNoticeMatch[1] . ' έμειναν σε απόθεμα.') : '' ?>>
+        <?php $noticeIsSuccess = (string)($cartNotice['type'] ?? '') === 'success'; ?>
+        <div style="margin:-16px 0 18px;padding:10px 12px;border-radius:10px;background:<?= $noticeIsSuccess ? '#e9f8ef' : '#ffe8e8' ?>;color:<?= $noticeIsSuccess ? '#146c2e' : '#8f1f1f' ?>;border:1px solid <?= $noticeIsSuccess ? '#bfe8cb' : '#f3c8c8' ?>;"<?= !empty($cartNotice['message']) && preg_match('/^Only (\d+) left in stock\.$/', (string)$cartNotice['message'], $cartNoticeMatch) ? app_translate_text_attrs('Only ' . (int)$cartNoticeMatch[1] . ' left in stock.', 'Μόνο ' . (int)$cartNoticeMatch[1] . ' έμειναν σε απόθεμα.') : '' ?>>
             <?= htmlspecialchars((string)$cartNotice['message']) ?>
         </div>
         <?php endif; ?>
@@ -299,6 +359,32 @@ unset($_SESSION['cart_notice']);
                 </div>
                 <?php endif; ?>
 
+                <form method="post" action="cart.php" class="cart-coupon-form">
+                    <?= app_csrf_input() ?>
+                    <label for="cart-coupon-code" data-translate="couponCode">Coupon Code</label>
+                    <div class="cart-coupon-row">
+                        <input
+                            type="text"
+                            id="cart-coupon-code"
+                            name="coupon_code"
+                            value="<?= htmlspecialchars($cartCouponCode) ?>"
+                            data-translate-placeholder="cartCouponPlaceholder"
+                            placeholder="Enter coupon code">
+                        <button type="submit" name="action" value="apply_coupon" data-translate="apply">Apply</button>
+                    </div>
+                    <?php if ($cartCouponCode !== ''): ?>
+                    <button type="submit" name="action" value="remove_coupon" class="cart-coupon-remove" data-translate="remove">Remove</button>
+                    <?php endif; ?>
+                    <p data-translate="cartCouponHelp">Coupons are applied to your cart before checkout.</p>
+                </form>
+
+                <?php if ($cartCouponDiscount > 0): ?>
+                <div class="summary-row">
+                    <span data-translate="checkoutCouponDiscount">Coupon Discount</span>
+                    <span>-&euro;<?= number_format($cartCouponDiscount, 2) ?></span>
+                </div>
+                <?php endif; ?>
+
                 <div class="summary-row">
                     <span data-translate="shipping">Shipping</span>
                     <span style="color:#16a34a;font-weight:600;" data-translate="calculatedAtCheckout">Calculated at checkout</span>
@@ -306,7 +392,7 @@ unset($_SESSION['cart_notice']);
 
                 <div class="summary-row summary-total">
                     <span data-translate="total">Total</span>
-                    <span>€<?= number_format($totals['grand_total'], 2) ?></span>
+                    <span>&euro;<?= number_format($cartGrandTotal, 2) ?></span>
                 </div>
 
                 <a href="modules/checkout.php" class="btn-checkout" data-translate="proceedToCheckout">Proceed to Checkout</a>

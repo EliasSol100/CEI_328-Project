@@ -2,12 +2,8 @@
 session_start();
 require_once "database.php";
 require_once __DIR__ . "/../include/security.php";
-
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception;
-require '../PHPMailer-master/src/Exception.php';
-require '../PHPMailer-master/src/PHPMailer.php';
-require '../PHPMailer-master/src/SMTP.php';
+require_once __DIR__ . "/auth_mailer.php";
+require_once __DIR__ . "/../include/homepage_customization.php";
 
 $feedbackMessage = '';
 $feedbackClass   = 'danger';
@@ -51,64 +47,7 @@ if (!empty($userRow["is_verified"]) && (int)$userRow["is_verified"] === 1) {
 // ------------------------------------
 function generateEmailVerificationCode(mysqli $conn, int $userId, string $email): array
 {
-    // 6-digit random code
-    $newCode   = (string) random_int(100000, 999999);
-    $expiresAt = date('Y-m-d H:i:s', time() + 20 * 60); // now + 20 min
-
-    $stmt = $conn->prepare("
-        UPDATE users
-        SET verification_code = ?,
-            verification_expires_at = ?
-        WHERE userID = ?
-    ");
-    $stmt->bind_param("ssi", $newCode, $expiresAt, $userId);
-    $ok = $stmt->execute();
-    $stmt->close();
-
-    if (!$ok) {
-        return [
-            'success' => false,
-            'message' => "We couldn't create a new verification code right now. Please try again later.",
-        ];
-    }
-
-    // Send via PHPMailer
-    try {
-        $mail = new PHPMailer(true);
-        $mail->SMTPDebug = 0;
-        $mail->isSMTP();
-        $mail->Host       = 'premium245.web-hosting.com';
-        $mail->SMTPAuth   = true;
-        $mail->Username   = 'admin@festival-web.com';
-        $mail->Password   = '!g3$~8tYju*D';
-        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-        $mail->Port       = 587;
-        $mail->Timeout    = 20;
-
-        $mail->SMTPOptions = [
-            'ssl' => [
-                'verify_peer' => false,
-                'verify_peer_name' => false,
-                'allow_self_signed' => true,
-            ],
-        ];
-
-        $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
-        $mail->addAddress($email);
-        $mail->isHTML(false);
-        $subject = 'Athina E-Shop Email Verification Code';
-        $body = "Hello,\n\nYour verification code is: {$newCode}\n\nThis code is valid for 20 minutes.\n\nIf you did not request this, please ignore this email.";
-        $mail->Subject = $subject;
-        $mail->Body    = $body;
-
-        $mail->send();
-        return ['success' => true, 'message' => ''];
-    } catch (\Throwable $e) {
-        return [
-            'success' => false,
-            'message' => "We couldn't resend the verification code right now. Please try again later.",
-        ];
-    }
+    return app_auth_send_email_verification_code($conn, $userId, $email, (string)($_SESSION["full_name"] ?? ''));
 }
 
 function emailVerificationHasActiveCode(array $userRow): bool
@@ -320,6 +259,12 @@ if (!empty($userRow["verification_expires_at"])) {
         $remainingSeconds = max(0, $expiresTs - time());
     }
 }
+
+$verifyLogoPath = app_homepage_get_config_value($conn, 'homepage_header_logo_path', 'uploads/assets/images/homepage/header-logo.jpg');
+$verifyLogoUrl = app_homepage_asset_url($verifyLogoPath, '../');
+if ($verifyLogoUrl === '') {
+    $verifyLogoUrl = '../uploads/assets/images/homepage/header-logo.jpg';
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -337,7 +282,7 @@ if (!empty($userRow["verification_expires_at"])) {
     <div class="wizard-box">
         <div class="wizard-header">
             <div class="wizard-logo">
-                <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
+                <img src="<?= htmlspecialchars($verifyLogoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="Athina E-Shop Logo">
             </div>
             <h3 class="mt-2">Email Verification</h3>
             <p class="wizard-subtitle mb-0">

@@ -88,6 +88,11 @@ if ($isLoggedIn) {
         header("Location: authentication/complete_profile.php");
         exit();
     }
+
+    if ($fieldsComplete && !in_array(strtolower((string)$role), ['admin', 'administrator', 'superadmin'], true) && (int)($user["is_verified"] ?? 0) !== 1) {
+        header("Location: authentication/verify.php");
+        exit();
+    }
 }
 
 // Make name/initials available to header.php
@@ -214,6 +219,7 @@ $bestSellerSql = "
     WHERE p.cartStatus IN ('active', 'low_stock', 'out_of_stock', 'made_to_order')
       AND p.isSellingFast = 0
     GROUP BY p.productID
+    HAVING totalSales > 0
     ORDER BY totalSales DESC, rv.avg_rating DESC, p.productID DESC
     LIMIT 4
 ";
@@ -221,52 +227,6 @@ $bestSellerRes = $conn->query($bestSellerSql);
 if ($bestSellerRes) {
     while ($row = $bestSellerRes->fetch_assoc()) {
         $bestSellerProducts[] = $row;
-    }
-}
-
-if (count($bestSellerProducts) < 4) {
-    $bestSellerProducts = [];
-    $bestSellerFallbackSql = "
-        SELECT
-            p.productID,
-            p.nameEN,
-            p.nameGR,
-            p.basePrice,
-            p.inventory,
-            p.cartStatus,
-            GROUP_CONCAT(ph.imageID ORDER BY ph.imageID ASC SEPARATOR ',') AS imageIDs,
-            COALESCE(rv.review_count, 0) AS reviewCount,
-            COALESCE(rv.avg_rating, 0) AS avgRating,
-            CASE
-                WHEN pso.productID IS NULL THEN COALESCE(os.total_qty, 0)
-                ELSE pso.manual_total_sales + GREATEST(
-                    0,
-                    COALESCE(os.total_qty, 0) - COALESCE(pso.auto_sales_baseline, COALESCE(os.total_qty, 0))
-                )
-            END AS totalSales
-        FROM products p
-        LEFT JOIN photos ph ON ph.productID = p.productID
-        LEFT JOIN (
-            SELECT productID, SUM(quantity) AS total_qty
-            FROM order_items
-            GROUP BY productID
-        ) os ON os.productID = p.productID
-        LEFT JOIN product_sales_overrides pso ON pso.productID = p.productID
-        LEFT JOIN (
-            SELECT productID, COUNT(*) AS review_count, ROUND(AVG(rating), 1) AS avg_rating
-            FROM reviews
-            GROUP BY productID
-        ) rv ON rv.productID = p.productID
-        WHERE p.cartStatus IN ('active', 'low_stock', 'out_of_stock', 'made_to_order')
-        GROUP BY p.productID
-        ORDER BY totalSales DESC, rv.avg_rating DESC, p.productID DESC
-        LIMIT 4
-    ";
-    $bestSellerFallbackRes = $conn->query($bestSellerFallbackSql);
-    if ($bestSellerFallbackRes) {
-        while ($row = $bestSellerFallbackRes->fetch_assoc()) {
-            $bestSellerProducts[] = $row;
-        }
     }
 }
 
