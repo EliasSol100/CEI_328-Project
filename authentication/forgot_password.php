@@ -2,6 +2,7 @@
 session_start();
 require_once __DIR__ . "/database.php";
 require_once __DIR__ . "/../include/security.php";
+require_once __DIR__ . "/../include/auth_branding.php";
 
 // PHPMailer from project ROOT (one level above /authentication)
 require_once __DIR__ . "/../PHPMailer-master/src/Exception.php";
@@ -13,6 +14,7 @@ use PHPMailer\PHPMailer\Exception;
 
 $error   = "";
 $success = "";
+$authLogoUrl = app_auth_logo_url($conn, '../');
 
 /**
  * Helper: Build the reset link URL
@@ -173,7 +175,7 @@ if (isset($_POST["submit"])) {
     <div class="wizard-box">
         <div class="wizard-header text-center">
             <div class="wizard-logo">
-                <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
+                <img src="<?= htmlspecialchars($authLogoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="Creations by Athina logo">
             </div>
             <h3 class="mt-2">Password Recovery</h3>
             <p class="wizard-subtitle mb-0">

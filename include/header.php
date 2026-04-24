@@ -27,9 +27,16 @@ $rootPrefix = (
 $headerName  = $GLOBALS['header_user_full_name'] ?? ($_SESSION["user"]["full_name"] ?? "Guest");
 $headerRole  = $GLOBALS['header_user_role']      ?? ($_SESSION["user"]["role"] ?? "guest");
 $initials    = $GLOBALS['header_user_initials']  ?? null;
+$activePage = $activePage ?? '';
+$currentScriptName = basename((string)($_SERVER['SCRIPT_NAME'] ?? ''));
 $homepageSettings = isset($conn) && $conn instanceof mysqli ? app_homepage_load_settings($conn) : [];
 $headerLogoPath = (string)($homepageSettings['header_logo_path'] ?? '');
 $headerLogoUrl = app_homepage_asset_url($headerLogoPath, $rootPrefix);
+$isAuthArea = in_array($currentScriptName, ['login.php', 'registration.php', 'complete_profile.php', 'verify.php', 'forgot_password.php', 'reset_password.php', 'two_factor.php'], true);
+$isProfileArea = strpos($scriptName, '/profile/') !== false;
+$isCartPage = $activePage === 'cart' || $activePage === 'checkout' || $currentScriptName === 'cart.php';
+$isWishlistPage = $activePage === 'wishlist' || $currentScriptName === 'wishlist.php';
+$isAdminArea = strpos($scriptName, '/modules/admin/') !== false;
 
 // Fallback initials generation if not provided
 if ($isLoggedIn && !$initials) {
@@ -76,7 +83,7 @@ if ($isLoggedIn && !$initials) {
                 <?php if ($isLoggedIn && $isAdmin): ?>
                     <!-- ADMIN DASHBOARD BUTTON (visible only for admin roles) -->
                     <a href="<?php echo $rootPrefix; ?>modules/admin/dashboard.php"
-                       class="utility-icon admin-icon"
+                       class="utility-icon admin-icon<?= $isAdminArea ? ' is-active' : '' ?>"
                        aria-label="Admin Dashboard"
                        title="Admin Dashboard"<?= app_translate_aria_attrs('Admin Dashboard', 'Πίνακας διαχείρισης') ?><?= app_translate_title_attrs('Admin Dashboard', 'Πίνακας διαχείρισης') ?>>
                         <i class="fas fa-shield-halved"></i>
@@ -86,7 +93,7 @@ if ($isLoggedIn && !$initials) {
 
                 <?php if ($isLoggedIn): ?>
                     <!-- LOGGED-IN STATE: avatar + dropdown -->
-                    <div class="utility-icon user-dropdown-wrapper">
+                    <div class="utility-icon user-dropdown-wrapper<?= $isProfileArea ? ' is-active' : '' ?>">
                         <div class="user-avatar-circle dropdown-toggle"
                              tabindex="0"
                              aria-label="User menu">
@@ -116,7 +123,7 @@ if ($isLoggedIn && !$initials) {
                 <?php else: ?>
                     <!-- LOGGED-OUT STATE: login/register icon -->
                     <a href="<?php echo $rootPrefix; ?>authentication/login.php"
-                       class="utility-icon auth-icon"
+                       class="utility-icon auth-icon<?= $isAuthArea ? ' is-active' : '' ?>"
                        aria-label="Register or Login"
                        title="Login / Register"<?= app_translate_aria_attrs('Register or Login', 'Σύνδεση / Εγγραφή') ?><?= app_translate_title_attrs('Login / Register', 'Σύνδεση / Εγγραφή') ?>>
                         <i class="fas fa-user-plus"></i>
@@ -125,7 +132,7 @@ if ($isLoggedIn && !$initials) {
 
                 <!-- Cart icon -->
                 <?php $cartCount = (int)($_SESSION["cart"]["totals"]["items_count"] ?? 0); ?>
-                <a href="<?php echo $rootPrefix; ?>cart.php" class="utility-icon cart-icon" aria-label="Shopping cart"<?= app_translate_aria_attrs('Shopping cart', 'Καλάθι αγορών') ?>>
+                <a href="<?php echo $rootPrefix; ?>cart.php" class="utility-icon cart-icon<?= $isCartPage ? ' is-active' : '' ?>" aria-label="Shopping cart"<?= app_translate_aria_attrs('Shopping cart', 'Καλάθι αγορών') ?>>
                     <i class="fas fa-shopping-cart"></i>
                     <?php if ($cartCount > 0): ?>
                         <span class="cart-count"><?= $cartCount > 99 ? '99+' : $cartCount ?></span>
@@ -133,7 +140,7 @@ if ($isLoggedIn && !$initials) {
                 </a>
 
                 <!-- Wishlist icon -->
-                <a href="<?php echo $rootPrefix; ?>wishlist.php" class="utility-icon wishlist-icon" aria-label="Wishlist"<?= app_translate_aria_attrs('Wishlist', 'Λίστα επιθυμιών') ?>>
+                <a href="<?php echo $rootPrefix; ?>wishlist.php" class="utility-icon wishlist-icon<?= $isWishlistPage ? ' is-active' : '' ?>" aria-label="Wishlist"<?= app_translate_aria_attrs('Wishlist', 'Λίστα επιθυμιών') ?>>
                     <i class="fas fa-heart"></i>
                     <?php if ($wishlistCount > 0): ?>
                         <span class="wishlist-count"><?= $wishlistCount ?></span>
@@ -164,7 +171,7 @@ if ($isLoggedIn && !$initials) {
         const dropdown = wrapper ? wrapper.querySelector('.user-dropdown') : null;
         const nav = header.querySelector('.nav');
         const navToggle = header.querySelector('.mobile-nav-toggle');
-        const mobileBreakpoint = window.matchMedia('(max-width: 900px)');
+        const mobileBreakpoint = window.matchMedia('(max-width: 1080px)');
 
         function setMobileNavOpen(isOpen) {
             if (!nav || !navToggle) {

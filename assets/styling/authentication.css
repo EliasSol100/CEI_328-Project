@@ -47,6 +47,8 @@ body.registration_page {
 }
 
 .wizard-logo img {
+    width: auto;
+    max-width: 132px;
     max-height: 72px;
     object-fit: contain;
 }

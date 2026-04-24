@@ -1702,22 +1702,6 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 
-<!-- Fix header nav labels + hrefs when inside /profile/ -->
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-    const navLinks = document.querySelectorAll('header.header .nav a');
-
-    if (navLinks.length >= 4) {
-        navLinks[0].setAttribute('href', '../index.php');
-        navLinks[1].setAttribute('href', '../shop.php');
-        navLinks[2].setAttribute('href', '../about.php');
-        navLinks[3].setAttribute('href', '../contact.php');
-        // text itself is handled by translations.js via data-translate
-    }
-});
-</script>
-
-
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

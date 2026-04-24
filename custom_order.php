@@ -290,8 +290,8 @@ include __DIR__ . '/include/header.php';
     <section class="custom-order-hero">
         <div class="container">
             <span class="custom-order-kicker" data-co-text="customOrderKicker">Custom Crochet Service</span>
-            <h1 data-co-text="customOrderPageTitle">Custom Orders Start on Instagram</h1>
-            <p data-co-text="customOrderPageSubtitle">Message the shop on Instagram for the fastest back-and-forth about ideas, photos, colors, timing, and the final price. If you prefer, registered customers can also send a website request below.</p>
+            <h1 data-co-text="customOrderPageTitle">Custom Orders: Instagram Chat or Website Request</h1>
+            <p data-co-text="customOrderPageSubtitle">Start with the recommended Instagram chat for quick back-and-forth, or send a structured website request from your registered account. Once the details are approved, you receive a private checkout link.</p>
         </div>
     </section>
 
@@ -301,16 +301,20 @@ include __DIR__ . '/include/header.php';
                 <h2 data-co-text="customOrderHowItWorks">How It Works</h2>
                 <div class="custom-order-steps">
                     <div>
-                        <strong data-co-text="customOrderStep1Title">1. Message on Instagram</strong>
-                        <p data-co-text="customOrderStep1Text">This is recommended because it is easier to discuss inspiration photos, details, and small changes in a real chat.</p>
+                        <strong data-co-text="customOrderStep1Title">1. Recommended: chat on Instagram</strong>
+                        <p data-co-text="customOrderStep1Text">Use Instagram when you want the fastest discussion about photos, colors, size, timing, and small changes with the shop owner.</p>
                     </div>
                     <div>
                         <strong data-co-text="customOrderStep2Title">2. Or send a website request</strong>
-                        <p data-co-text="customOrderStep2Text">If you use the website form, you must be signed in so replies, offers, and private checkout links stay connected to your account.</p>
+                        <p data-co-text="customOrderStep2Text">If you prefer the form, sign in first and send your idea from the website so replies, offers, and links stay connected to your account.</p>
                     </div>
                     <div>
-                        <strong data-co-text="customOrderStep3Title">3. Receive a private checkout link</strong>
-                        <p data-co-text="customOrderStep3Text">When the custom piece is accepted and priced, Athina sends you a private shop link that only your account can open.</p>
+                        <strong data-co-text="customOrderStep3Title">3. Athina reviews the idea</strong>
+                        <p data-co-text="customOrderStep3Text">Athina can reply for more details, make an offer, accept the request, or let you know if the idea cannot be made.</p>
+                    </div>
+                    <div>
+                        <strong data-co-text="customOrderStep4Title">4. Receive a private checkout link</strong>
+                        <p data-co-text="customOrderStep4Text">When the custom piece is approved and priced, Athina sends you a private shop link that only your account can open.</p>
                     </div>
                 </div>
             </div>

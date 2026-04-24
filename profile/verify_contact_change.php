@@ -2,6 +2,7 @@
 session_start();
 require_once "../authentication/database.php";
 require_once "../include/security.php";
+require_once "../include/auth_branding.php";
 
 if (!isset($_SESSION["user"]) || !isset($_SESSION["user"]["id"])) {
     header("Location: ../authentication/login.php");
@@ -17,6 +18,7 @@ if (!$pending || $pending["user_id"] != $_SESSION["user"]["id"]) {
 $userId = (int) $_SESSION["user"]["id"];
 $successMessage = "";
 $errorMessage   = "";
+$authLogoUrl = app_auth_logo_url($conn, '../');
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     app_require_csrf(false, "Invalid request token. Please refresh and try again.");
@@ -87,7 +89,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 <div class="wizard-box verify-contact-box">
     <div class="wizard-header">
         <div class="wizard-logo">
-            <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
+            <img src="<?= htmlspecialchars($authLogoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="Creations by Athina logo">
         </div>
         <h3>Verify Contact Change</h3>
         <p class="wizard-subtitle">
