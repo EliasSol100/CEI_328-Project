@@ -301,7 +301,8 @@ include __DIR__ . '/include/header.php';
                 <h2 data-co-text="customOrderHowItWorks">How It Works</h2>
                 <p class="custom-order-guide-intro" data-co-text="customOrderGuideIntro">Choose the path that suits you best. Instagram is recommended for fast conversation, while the website request keeps the whole request connected to your account.</p>
 
-                <div class="custom-order-guide-section">
+                <div class="custom-order-guide-paths">
+                    <div class="custom-order-guide-section">
                     <h3 data-co-text="customOrderInstagramGuideTitle">Instagram steps</h3>
                     <ol class="custom-order-numbered-steps">
                         <li>
@@ -327,7 +328,7 @@ include __DIR__ . '/include/header.php';
                     </ol>
                 </div>
 
-                <div class="custom-order-guide-section">
+                    <div class="custom-order-guide-section">
                     <h3 data-co-text="customOrderWebsiteGuideTitle">Website request steps</h3>
                     <ol class="custom-order-numbered-steps">
                         <li>
@@ -355,6 +356,7 @@ include __DIR__ . '/include/header.php';
                             <p data-co-text="customOrderWebsiteStep6Text">If the offer works for you, accept it and use the private checkout link sent to your account.</p>
                         </li>
                     </ol>
+                    </div>
                 </div>
             </div>
 
