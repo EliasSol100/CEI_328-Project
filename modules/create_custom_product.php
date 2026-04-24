@@ -201,6 +201,13 @@ function createCustomProductFromRequest($conn, $customOrderId, $price = null, $d
             $insertStmt->close();
         }
 
+        attachCustomOrderReferencePhotoToProduct(
+            $conn,
+            $productId,
+            (string)($customOrder['photoReferencePath'] ?? ''),
+            $imageFiles
+        );
+
         $orderUpdate = $conn->prepare("
             UPDATE custom_orders
             SET
@@ -316,6 +323,65 @@ function generateAccessLink($productId, $method, $token, $password)
 }
 
 /**
+ * Attach the customer's reference photo to the private product when it has no
+ * photos yet. The uploaded request image is already normalized to JPG.
+ *
+ * @param mysqli $conn
+ * @param int    $productId
+ * @param string $photoReferencePath
+ * @param array  $imageFiles
+ * @return void
+ */
+function attachCustomOrderReferencePhotoToProduct(mysqli $conn, int $productId, string $photoReferencePath, array $imageFiles = []): void
+{
+    if ($productId <= 0) {
+        return;
+    }
+
+    $countStmt = $conn->prepare("SELECT COUNT(*) AS photo_count FROM photos WHERE productID = ?");
+    if ($countStmt) {
+        $countStmt->bind_param('i', $productId);
+        $countStmt->execute();
+        $countRes = $countStmt->get_result();
+        $countRow = $countRes ? $countRes->fetch_assoc() : null;
+        $countStmt->close();
+        if ((int)($countRow['photo_count'] ?? 0) > 0) {
+            return;
+        }
+    }
+
+    $candidateFiles = [];
+    foreach ($imageFiles as $imageFile) {
+        $candidateFiles[] = (string)$imageFile;
+    }
+    if (trim($photoReferencePath) !== '') {
+        $candidateFiles[] = dirname(__DIR__) . '/' . ltrim(str_replace('\\', '/', $photoReferencePath), '/');
+    }
+
+    foreach ($candidateFiles as $candidateFile) {
+        $candidateFile = trim($candidateFile);
+        if ($candidateFile === '' || !is_file($candidateFile)) {
+            continue;
+        }
+        $binary = file_get_contents($candidateFile);
+        if (!is_string($binary) || $binary === '') {
+            continue;
+        }
+        if (function_exists('app_image_optimize_photo_blob_for_storage')) {
+            $binary = app_image_optimize_photo_blob_for_storage($binary, 1400, 1400, 78);
+        }
+        $photoStmt = $conn->prepare("INSERT INTO photos (photo, productID) VALUES (?, ?)");
+        if (!$photoStmt) {
+            return;
+        }
+        $photoStmt->bind_param('si', $binary, $productId);
+        $photoStmt->execute();
+        $photoStmt->close();
+        return;
+    }
+}
+
+/**
  * Keep a mail helper available for future use, but the current admin flow
  * shares the link manually after the Instagram conversation is complete.
  *
@@ -327,7 +393,25 @@ function generateAccessLink($productId, $method, $token, $password)
  */
 function sendCustomProductAccessEmail($toEmail, $productId, $accessLink, $method)
 {
-    return false;
+    $toEmail = normalizeCustomerEmail((string)$toEmail);
+    if ($toEmail === '' || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+        return false;
+    }
+
+    $body =
+        "Hello,\n\n" .
+        "Your private made-to-order product is ready to purchase.\n\n" .
+        "Private checkout link:\n" . $accessLink . "\n\n" .
+        "For security, this link only works when you are signed in with {$toEmail}.\n\n" .
+        "Thank you,\nAthina E-Shop";
+
+    if (function_exists('sendCustomOrderPlainEmail')) {
+        return sendCustomOrderPlainEmail($toEmail, $toEmail, 'Your private custom order checkout link', $body);
+    }
+
+    require_once __DIR__ . '/../authentication/auth_mailer.php';
+    $result = app_auth_send_plaintext_email($toEmail, $toEmail, 'Your private custom order checkout link', $body);
+    return !empty($result['success']);
 }
 
 /**
