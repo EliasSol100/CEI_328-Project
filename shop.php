@@ -755,6 +755,7 @@ if ($vpRes) {
         opacity: 0.7;
     }
     .filter-color-dot {
+        display: inline-block;
         width: 15px;
         height: 15px;
         border-radius: 50%;

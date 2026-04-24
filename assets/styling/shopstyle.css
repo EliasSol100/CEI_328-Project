@@ -81,10 +81,17 @@
 }
 
 .filter-option {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 14px;
     color: var(--text-gray);
     margin-bottom: 8px;
+}
+
+.filter-option input[type="checkbox"] {
+    flex: 0 0 auto;
+    margin: 0;
 }
 
 .price-range-input {

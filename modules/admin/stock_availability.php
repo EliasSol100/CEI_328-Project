@@ -46,6 +46,33 @@ function ensureProductSalesOverridesSchema(mysqli $conn): void {
 
 ensureProductSalesOverridesSchema($conn);
 
+function stockColourSwatchHex(string $colorName): string
+{
+    $map = [
+        'sunshine yellow' => '#f8ea75',
+        'honey blend' => '#dda157',
+        'bluebell' => '#cad7ff',
+        'sugar pink' => '#f5dce8',
+        'lavender mist' => '#d6c9ff',
+        'blush pink' => '#ffdbe5',
+        'lemon yellow' => '#f8ea75',
+        'deep plum' => '#5b2a63',
+        'berry plum' => '#99566a',
+        'soft lilac' => '#d9dcfb',
+        'forest sage' => '#7f9d88',
+        'sky mist' => '#dce8ff',
+        'lavender cloud' => '#d7c5ff',
+        'mint frost' => '#d6f0ea',
+        'peach sorbet' => '#ffca9a',
+        'seafoam' => '#bce7da',
+        'lavender pop' => '#c8aaf8',
+        'snow white' => '#f4f3fb',
+        'warm oatmeal' => '#ccb594',
+    ];
+    $key = strtolower(trim($colorName));
+    return $map[$key] ?? '#ece6f6';
+}
+
 /* -- Handle POST: update product inventory / status -- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
@@ -491,13 +518,16 @@ $statusBadge = [
           <?php else: ?>
           <div id="colour-assign-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px">
             <?php foreach ($colours as $c): ?>
-            <?php $photoUrl = !empty($c['firstPhotoPath']) ? '../../' . htmlspecialchars($c['firstPhotoPath']) : null; ?>
+            <?php
+              $photoUrl = !empty($c['firstPhotoPath']) ? '../../' . htmlspecialchars($c['firstPhotoPath']) : null;
+              $swatchHex = stockColourSwatchHex((string)($c['colorName'] ?? ''));
+            ?>
             <label class="colour-assign-card" data-color-id="<?= $c['colorID'] ?>"
                    style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 8px;border:2px solid #e5e7eb;border-radius:10px;cursor:pointer;user-select:none;transition:border-color .15s">
               <?php if ($photoUrl): ?>
-              <img src="<?= $photoUrl ?>" alt="" style="width:52px;height:52px;object-fit:cover;border-radius:6px">
+              <img src="<?= $photoUrl ?>" alt="" class="colour-swatch-preview is-large" style="background:<?= htmlspecialchars($swatchHex) ?>">
               <?php else: ?>
-              <span style="display:block;width:52px;height:52px;background:#f3f4f6;border-radius:6px"></span>
+              <span class="colour-swatch-preview is-large" style="background:<?= htmlspecialchars($swatchHex) ?>"></span>
               <?php endif; ?>
               <span style="font-size:11px;font-weight:600;color:#374151;text-align:center"><?= htmlspecialchars($c['colorName']) ?></span>
               <span style="font-size:11px;color:#9ca3af">#<?= (int)$c['colorID'] ?></span>
@@ -602,15 +632,17 @@ $statusBadge = [
           </thead>
           <tbody>
             <?php foreach ($colours as $c): ?>
+            <?php $swatchHex = stockColourSwatchHex((string)($c['colorName'] ?? '')); ?>
             <tr>
               <!-- Thumbnail -->
               <td style="text-align:center;vertical-align:middle">
                 <?php if (!empty($c['firstPhotoPath'])): ?>
                 <img src="../../<?= htmlspecialchars($c['firstPhotoPath']) ?>"
                      alt=""
-                     style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb">
+                     class="colour-swatch-preview"
+                     style="background:<?= htmlspecialchars($swatchHex) ?>">
                 <?php else: ?>
-                <span style="display:inline-block;width:40px;height:40px;background:#f3f4f6;border-radius:6px;border:1px solid #e5e7eb"></span>
+                <span class="colour-swatch-preview" style="background:<?= htmlspecialchars($swatchHex) ?>"></span>
                 <?php endif; ?>
               </td>
               <!-- ID -->
