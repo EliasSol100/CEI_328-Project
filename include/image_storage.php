@@ -42,7 +42,7 @@ if (!function_exists('app_image_is_convertible_content_asset')) {
         }
 
         $baseName = basename($relativePath);
-        if (in_array($baseName, ['athina-eshop-logo.png', 'en.png', 'gr.png', 'icon-192.png', 'icon-512.png'], true)) {
+        if (in_array($baseName, ['athina-eshop-logo.png', 'icon-192.png', 'icon-512.png'], true)) {
             return false;
         }
 
