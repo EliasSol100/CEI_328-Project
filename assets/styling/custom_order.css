@@ -84,6 +84,7 @@
 .custom-order-guide {
     position: static;
     align-self: start;
+    grid-column: 1 / -1;
 }
 
 .custom-order-guide-intro {
@@ -93,15 +94,24 @@
     color: #6a647b;
 }
 
+.custom-order-guide-paths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+    align-items: start;
+}
+
 .custom-order-guide-section {
     display: grid;
     gap: 12px;
+    padding: 20px;
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.68);
+    border: 1px solid #eadffd;
 }
 
 .custom-order-guide-section + .custom-order-guide-section {
-    margin-top: 22px;
-    padding-top: 22px;
-    border-top: 1px solid #eadffd;
+    margin-top: 0;
 }
 
 .custom-order-guide-section h3 {
@@ -121,8 +131,8 @@
 
 .custom-order-numbered-steps li {
     position: relative;
-    padding: 16px 16px 16px 58px;
-    border-radius: 20px;
+    padding: 14px 14px 14px 54px;
+    border-radius: 18px;
     background: linear-gradient(180deg, #fff 0%, #faf5ff 100%);
     border: 1px solid #eadffd;
     counter-increment: custom-order-step;
@@ -155,9 +165,15 @@
 
 .custom-order-numbered-steps p {
     margin: 0;
-    font-size: 14px;
-    line-height: 1.6;
+    font-size: 13px;
+    line-height: 1.55;
     color: #6a647b;
+}
+
+.custom-order-layout-single .custom-order-info-card {
+    grid-column: 1 / -1;
+    width: min(100%, 920px);
+    justify-self: center;
 }
 
 .custom-order-steps {
@@ -712,6 +728,10 @@
         position: static;
     }
 
+    .custom-order-guide-paths {
+        grid-template-columns: 1fr;
+    }
+
     .custom-order-dashboard {
         grid-template-columns: 1fr;
     }
@@ -737,6 +757,10 @@
 
     .custom-order-card h2 {
         font-size: 26px;
+    }
+
+    .custom-order-guide-section {
+        padding: 16px;
     }
 
     .custom-order-meta,
