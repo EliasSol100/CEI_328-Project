@@ -319,12 +319,23 @@ if ($r) {
     }
 }
 
-/* -- Load colours with their yarn type photos -- */
+/* -- Load colours with yarn photos, falling back to product colour photos. -- */
 $colours = [];
 $r = mysqli_query($conn, "
     SELECT c.*,
-           GROUP_CONCAT(yt.typeName ORDER BY yt.typeName SEPARATOR ', ') AS typeNames,
-           MIN(cyt.photoPath) AS firstPhotoPath
+           GROUP_CONCAT(DISTINCT yt.typeName ORDER BY yt.typeName SEPARATOR ', ') AS typeNames,
+           COALESCE(
+             MIN(NULLIF(cyt.photoPath, '')),
+             (
+               SELECT pcp.photoPath
+               FROM product_color_photos pcp
+               WHERE pcp.colorID = c.colorID
+                 AND pcp.photoPath IS NOT NULL
+                 AND pcp.photoPath <> ''
+               ORDER BY pcp.sortOrder ASC, pcp.id ASC
+               LIMIT 1
+             )
+           ) AS firstPhotoPath
     FROM colors c
     LEFT JOIN color_yarn_types cyt ON cyt.colorID = c.colorID
     LEFT JOIN yarn_types yt ON yt.typeID = cyt.typeID
@@ -333,6 +344,7 @@ $r = mysqli_query($conn, "
 ");
 if ($r) {
     while ($row = mysqli_fetch_assoc($r)) {
+        $row['firstPhotoPath'] = app_image_prefer_optimized_asset_path((string)($row['firstPhotoPath'] ?? ''));
         $colours[] = $row;
     }
 }
