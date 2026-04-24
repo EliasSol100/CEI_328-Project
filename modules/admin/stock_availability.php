@@ -319,23 +319,11 @@ if ($r) {
     }
 }
 
-/* -- Load colours with yarn photos, falling back to product colour photos. -- */
+/* -- Load colours with yarn type labels. Colour previews stay as swatches here. -- */
 $colours = [];
 $r = mysqli_query($conn, "
     SELECT c.*,
-           GROUP_CONCAT(DISTINCT yt.typeName ORDER BY yt.typeName SEPARATOR ', ') AS typeNames,
-           COALESCE(
-             MIN(NULLIF(cyt.photoPath, '')),
-             (
-               SELECT pcp.photoPath
-               FROM product_color_photos pcp
-               WHERE pcp.colorID = c.colorID
-                 AND pcp.photoPath IS NOT NULL
-                 AND pcp.photoPath <> ''
-               ORDER BY pcp.sortOrder ASC, pcp.id ASC
-               LIMIT 1
-             )
-           ) AS firstPhotoPath
+           GROUP_CONCAT(DISTINCT yt.typeName ORDER BY yt.typeName SEPARATOR ', ') AS typeNames
     FROM colors c
     LEFT JOIN color_yarn_types cyt ON cyt.colorID = c.colorID
     LEFT JOIN yarn_types yt ON yt.typeID = cyt.typeID
@@ -344,7 +332,6 @@ $r = mysqli_query($conn, "
 ");
 if ($r) {
     while ($row = mysqli_fetch_assoc($r)) {
-        $row['firstPhotoPath'] = app_image_prefer_optimized_asset_path((string)($row['firstPhotoPath'] ?? ''));
         $colours[] = $row;
     }
 }
@@ -368,7 +355,7 @@ $statusBadge = [
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Stock & Availability – Athena Admin</title>
-  <link rel="stylesheet" href="assets/admin.css">
+  <link rel="stylesheet" href="assets/admin.css?v=<?= (int)@filemtime(__DIR__ . '/assets/admin.css') ?>">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
@@ -530,17 +517,10 @@ $statusBadge = [
           <?php else: ?>
           <div id="colour-assign-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px">
             <?php foreach ($colours as $c): ?>
-            <?php
-              $photoUrl = !empty($c['firstPhotoPath']) ? '../../' . htmlspecialchars($c['firstPhotoPath']) : null;
-              $swatchHex = stockColourSwatchHex((string)($c['colorName'] ?? ''));
-            ?>
+            <?php $swatchHex = stockColourSwatchHex((string)($c['colorName'] ?? '')); ?>
             <label class="colour-assign-card" data-color-id="<?= $c['colorID'] ?>"
                    style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 8px;border:2px solid #e5e7eb;border-radius:10px;cursor:pointer;user-select:none;transition:border-color .15s">
-              <?php if ($photoUrl): ?>
-              <img src="<?= $photoUrl ?>" alt="" class="colour-swatch-preview is-large" style="background:<?= htmlspecialchars($swatchHex) ?>">
-              <?php else: ?>
               <span class="colour-swatch-preview is-large" style="background:<?= htmlspecialchars($swatchHex) ?>"></span>
-              <?php endif; ?>
               <span style="font-size:11px;font-weight:600;color:#374151;text-align:center"><?= htmlspecialchars($c['colorName']) ?></span>
               <span style="font-size:11px;color:#9ca3af">#<?= (int)$c['colorID'] ?></span>
               <input type="checkbox" name="colorIDs[]" value="<?= $c['colorID'] ?>"
@@ -648,14 +628,7 @@ $statusBadge = [
             <tr>
               <!-- Thumbnail -->
               <td style="text-align:center;vertical-align:middle">
-                <?php if (!empty($c['firstPhotoPath'])): ?>
-                <img src="../../<?= htmlspecialchars($c['firstPhotoPath']) ?>"
-                     alt=""
-                     class="colour-swatch-preview"
-                     style="background:<?= htmlspecialchars($swatchHex) ?>">
-                <?php else: ?>
                 <span class="colour-swatch-preview" style="background:<?= htmlspecialchars($swatchHex) ?>"></span>
-                <?php endif; ?>
               </td>
               <!-- ID -->
               <td class="text-muted" style="font-size:13px"><?= (int)$c['colorID'] ?></td>
