@@ -936,7 +936,7 @@ include __DIR__ . "/include/header.php";
 <main class="product-page">
     <div class="product-wrap">
         <section class="product-gallery">
-            <div id="product-carousel" class="carousel slide" data-bs-ride="carousel" data-bs-interval="2000">
+            <div id="product-carousel" class="carousel slide" data-bs-ride="false" data-bs-interval="false">
                 <div class="carousel-inner" id="product-carousel-inner">
                     <?php foreach ($photos as $idx => $src): ?>
                     <div class="carousel-item <?= $idx === 0 ? 'active' : '' ?>">
@@ -1602,7 +1602,14 @@ include __DIR__ . "/include/header.php";
         });
         var el = document.getElementById('product-carousel');
         if (el && window.bootstrap) {
-            bootstrap.Carousel.getOrCreateInstance(el).to(0);
+            var carousel = bootstrap.Carousel.getOrCreateInstance(el, {
+                interval: false,
+                ride: false,
+                wrap: true,
+                touch: true
+            });
+            carousel.to(0);
+            carousel.pause();
         }
     }
 
@@ -1612,22 +1619,19 @@ include __DIR__ . "/include/header.php";
             return;
         }
 
-        var hasManualSelection = !!selectedSize || !!selectedColorId;
-        var carousel = bootstrap.Carousel.getOrCreateInstance(el);
-        if (hasManualSelection) {
-            el.setAttribute('data-bs-interval', 'false');
-            if (carousel._config) {
-                carousel._config.interval = false;
-            }
-            carousel.pause();
-            return;
-        }
-
-        el.setAttribute('data-bs-interval', '2000');
+        el.setAttribute('data-bs-ride', 'false');
+        el.setAttribute('data-bs-interval', 'false');
+        var carousel = bootstrap.Carousel.getOrCreateInstance(el, {
+            interval: false,
+            ride: false,
+            wrap: true,
+            touch: true
+        });
         if (carousel._config) {
-            carousel._config.interval = 2000;
+            carousel._config.interval = false;
+            carousel._config.ride = false;
         }
-        carousel.cycle();
+        carousel.pause();
     }
 
     function customFieldsComplete() {
