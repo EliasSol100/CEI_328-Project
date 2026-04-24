@@ -299,23 +299,62 @@ include __DIR__ . '/include/header.php';
         <div class="container custom-order-layout custom-order-layout-single">
             <div class="custom-order-card custom-order-guide">
                 <h2 data-co-text="customOrderHowItWorks">How It Works</h2>
-                <div class="custom-order-steps">
-                    <div>
-                        <strong data-co-text="customOrderStep1Title">1. Recommended: chat on Instagram</strong>
-                        <p data-co-text="customOrderStep1Text">Use Instagram when you want the fastest discussion about photos, colors, size, timing, and small changes with the shop owner.</p>
-                    </div>
-                    <div>
-                        <strong data-co-text="customOrderStep2Title">2. Or send a website request</strong>
-                        <p data-co-text="customOrderStep2Text">If you prefer the form, sign in first and send your idea from the website so replies, offers, and links stay connected to your account.</p>
-                    </div>
-                    <div>
-                        <strong data-co-text="customOrderStep3Title">3. Athina reviews the idea</strong>
-                        <p data-co-text="customOrderStep3Text">Athina can reply for more details, make an offer, accept the request, or let you know if the idea cannot be made.</p>
-                    </div>
-                    <div>
-                        <strong data-co-text="customOrderStep4Title">4. Receive a private checkout link</strong>
-                        <p data-co-text="customOrderStep4Text">When the custom piece is approved and priced, Athina sends you a private shop link that only your account can open.</p>
-                    </div>
+                <p class="custom-order-guide-intro" data-co-text="customOrderGuideIntro">Choose the path that suits you best. Instagram is recommended for fast conversation, while the website request keeps the whole request connected to your account.</p>
+
+                <div class="custom-order-guide-section">
+                    <h3 data-co-text="customOrderInstagramGuideTitle">Instagram steps</h3>
+                    <ol class="custom-order-numbered-steps">
+                        <li>
+                            <strong data-co-text="customOrderInstagramStep1Title">Open the Instagram chat</strong>
+                            <p data-co-text="customOrderInstagramStep1Text">Use the “Message on Instagram” button, or open the shop profile and start a direct message.</p>
+                        </li>
+                        <li>
+                            <strong data-co-text="customOrderInstagramStep2Title">Send your idea and references</strong>
+                            <p data-co-text="customOrderInstagramStep2Text">Tell Athina what you want, who it is for, and attach any inspiration photos, colors, or size examples.</p>
+                        </li>
+                        <li>
+                            <strong data-co-text="customOrderInstagramStep3Title">Discuss details in chat</strong>
+                            <p data-co-text="customOrderInstagramStep3Text">Agree on yarn, colors, size, deadline, small changes, and anything that affects the final price.</p>
+                        </li>
+                        <li>
+                            <strong data-co-text="customOrderInstagramStep4Title">Confirm the final offer</strong>
+                            <p data-co-text="customOrderInstagramStep4Text">When both sides agree, Athina prepares a private checkout product for your custom order.</p>
+                        </li>
+                        <li>
+                            <strong data-co-text="customOrderInstagramStep5Title">Pay through the private link</strong>
+                            <p data-co-text="customOrderInstagramStep5Text">Open the private shop link while signed in with your account, then complete checkout on the website.</p>
+                        </li>
+                    </ol>
+                </div>
+
+                <div class="custom-order-guide-section">
+                    <h3 data-co-text="customOrderWebsiteGuideTitle">Website request steps</h3>
+                    <ol class="custom-order-numbered-steps">
+                        <li>
+                            <strong data-co-text="customOrderWebsiteStep1Title">Sign in or create an account</strong>
+                            <p data-co-text="customOrderWebsiteStep1Text">A registered account is required so replies, offers, and private checkout links stay connected to you.</p>
+                        </li>
+                        <li>
+                            <strong data-co-text="customOrderWebsiteStep2Title">Complete and verify your profile</strong>
+                            <p data-co-text="customOrderWebsiteStep2Text">Make sure your profile details and email verification are finished before sending the request.</p>
+                        </li>
+                        <li>
+                            <strong data-co-text="customOrderWebsiteStep3Title">Fill in the request form</strong>
+                            <p data-co-text="customOrderWebsiteStep3Text">Add the idea title, product type, preferred size, colors, budget, deadline, and a clear description.</p>
+                        </li>
+                        <li>
+                            <strong data-co-text="customOrderWebsiteStep4Title">Attach a reference photo if needed</strong>
+                            <p data-co-text="customOrderWebsiteStep4Text">Photos are optional, but they help explain shapes, colors, characters, or styles more clearly.</p>
+                        </li>
+                        <li>
+                            <strong data-co-text="customOrderWebsiteStep5Title">Wait for Athina’s reply</strong>
+                            <p data-co-text="customOrderWebsiteStep5Text">Athina can ask for more details, make an offer, accept the idea, or decline it if it cannot be made.</p>
+                        </li>
+                        <li>
+                            <strong data-co-text="customOrderWebsiteStep6Title">Accept the offer and checkout</strong>
+                            <p data-co-text="customOrderWebsiteStep6Text">If the offer works for you, accept it and use the private checkout link sent to your account.</p>
+                        </li>
+                    </ol>
                 </div>
             </div>
 
@@ -327,85 +366,85 @@ include __DIR__ . '/include/header.php';
                     <div class="custom-order-alert error"><?= htmlspecialchars($errorMessage) ?></div>
                 <?php endif; ?>
 
-                <h2>Choose how to start</h2>
+                <h2 data-co-text="customOrderChooseTitle">Choose how to start</h2>
                 <div class="custom-order-info-list">
                     <div class="custom-order-info-item custom-order-recommended">
-                        <strong>Recommended: Instagram chat</strong>
-                        <p>Best when you want to share photos, compare colors, and agree details quickly with the shop owner.</p>
+                        <strong data-co-text="customOrderInstagramCardTitle">Recommended: Instagram chat</strong>
+                        <p data-co-text="customOrderInstagramCardText">Best when you want to share photos, compare colors, and agree details quickly with the shop owner.</p>
                         <a href="<?= htmlspecialchars($instagramUrl) ?>" target="_blank" rel="noopener noreferrer" class="custom-order-btn custom-order-instagram-btn">
                             <i class="fab fa-instagram"></i>
                             <span data-co-text="customOrderInstagramAction">Message on Instagram</span>
                         </a>
                     </div>
                     <div class="custom-order-info-item">
-                        <strong>Second option: website request</strong>
-                        <p>Send a structured request from your account. Athina can reply, ask for more details, make an offer, decline the idea, or send a private checkout product link.</p>
+                        <strong data-co-text="customOrderWebsiteCardTitle">Second option: website request</strong>
+                        <p data-co-text="customOrderWebsiteCardText">Send a structured request from your account. Athina can reply, ask for more details, make an offer, decline the idea, or send a private checkout product link.</p>
                     </div>
                 </div>
 
                 <div class="custom-order-cta-box" id="website-request">
-                    <h3>Website custom order request</h3>
+                    <h3 data-co-text="customOrderWebsiteFormTitle">Website custom order request</h3>
                     <?php if (!$isLoggedIn): ?>
-                        <p class="form-note">You need a registered account before using the website request form.</p>
+                        <p class="form-note" data-co-text="customOrderLoginRequiredNote">You need a registered account before using the website request form.</p>
                         <div class="custom-order-inline-actions">
                             <a href="<?= htmlspecialchars($loginHref) ?>" class="custom-order-secondary-btn" data-co-text="customOrderLoginAction">Sign In</a>
                             <a href="<?= htmlspecialchars($registerHref) ?>" class="custom-order-secondary-btn" data-co-text="customOrderRegisterAction">Create Account</a>
                         </div>
                     <?php elseif (!$isProfileComplete): ?>
-                        <div class="custom-order-alert info">Please complete your profile before sending a website custom order request.</div>
-                        <a href="authentication/complete_profile.php" class="custom-order-secondary-btn">Complete Profile</a>
+                        <div class="custom-order-alert info" data-co-text="customOrderCompleteProfileNote">Please complete your profile before sending a website custom order request.</div>
+                        <a href="authentication/complete_profile.php" class="custom-order-secondary-btn" data-co-text="customOrderCompleteProfileAction">Complete Profile</a>
                     <?php elseif (!$isVerified): ?>
-                        <div class="custom-order-alert info">Please verify your email before sending a website custom order request.</div>
-                        <a href="authentication/verify.php" class="custom-order-secondary-btn">Verify Email</a>
+                        <div class="custom-order-alert info" data-co-text="customOrderVerifyEmailNote">Please verify your email before sending a website custom order request.</div>
+                        <a href="authentication/verify.php" class="custom-order-secondary-btn" data-co-text="customOrderVerifyEmailAction">Verify Email</a>
                     <?php else: ?>
                         <form method="POST" enctype="multipart/form-data" class="custom-order-form">
                             <?= app_csrf_input() ?>
                             <input type="hidden" name="action" value="submit_custom_request">
                             <div class="form-grid">
                                 <div class="form-field">
-                                    <label for="project_title">Idea title</label>
-                                    <input type="text" id="project_title" name="project_title" maxlength="120" required placeholder="e.g. Pink bunny plushie">
+                                    <label for="project_title" data-co-text="customOrderIdeaTitleLabel">Idea title</label>
+                                    <input type="text" id="project_title" name="project_title" maxlength="120" required placeholder="e.g. Pink bunny plushie" data-co-placeholder="customOrderIdeaTitlePlaceholder">
                                 </div>
                                 <div class="form-field">
-                                    <label for="item_type">Product type</label>
-                                    <input type="text" id="item_type" name="item_type" maxlength="120" placeholder="Plushie, blanket, gift set...">
-                                </div>
-                            </div>
-                            <div class="form-grid">
-                                <div class="form-field">
-                                    <label for="size">Preferred size</label>
-                                    <input type="text" id="size" name="size" maxlength="120" placeholder="Small, medium, exact cm...">
-                                </div>
-                                <div class="form-field">
-                                    <label for="colours">Preferred colours</label>
-                                    <input type="text" id="colours" name="colours" maxlength="180" placeholder="Pink, cream, lavender...">
+                                    <label for="item_type" data-co-text="customOrderProductTypeLabel">Product type</label>
+                                    <input type="text" id="item_type" name="item_type" maxlength="120" placeholder="Plushie, blanket, gift set..." data-co-placeholder="customOrderProductTypePlaceholder">
                                 </div>
                             </div>
                             <div class="form-grid">
                                 <div class="form-field">
-                                    <label for="budget">Preferred budget</label>
-                                    <input type="text" id="budget" name="budget" maxlength="80" placeholder="Optional">
+                                    <label for="size" data-co-text="customOrderPreferredSizeLabel">Preferred size</label>
+                                    <input type="text" id="size" name="size" maxlength="120" placeholder="Small, medium, exact cm..." data-co-placeholder="customOrderPreferredSizePlaceholder">
                                 </div>
                                 <div class="form-field">
-                                    <label for="needed_by">Needed by</label>
+                                    <label for="colours" data-co-text="customOrderPreferredColoursLabel">Preferred colours</label>
+                                    <input type="text" id="colours" name="colours" maxlength="180" placeholder="Pink, cream, lavender..." data-co-placeholder="customOrderPreferredColoursPlaceholder">
+                                </div>
+                            </div>
+                            <div class="form-grid">
+                                <div class="form-field">
+                                    <label for="budget" data-co-text="customOrderPreferredBudgetLabel">Preferred budget</label>
+                                    <input type="text" id="budget" name="budget" maxlength="80" placeholder="Optional" data-co-placeholder="customOrderPreferredBudgetPlaceholder">
+                                </div>
+                                <div class="form-field">
+                                    <label for="needed_by" data-co-text="customOrderNeededByLabel">Needed by</label>
                                     <input type="date" id="needed_by" name="needed_by">
                                 </div>
                             </div>
                             <div class="form-field">
-                                <label for="details">Describe your idea</label>
-                                <textarea id="details" name="details" required placeholder="Tell Athina what you want, who it is for, preferred style, materials, and anything important."></textarea>
+                                <label for="details" data-co-text="customOrderDescribeIdeaLabel">Describe your idea</label>
+                                <textarea id="details" name="details" required placeholder="Tell Athina what you want, who it is for, preferred style, materials, and anything important." data-co-placeholder="customOrderDescribeIdeaPlaceholder"></textarea>
                             </div>
                             <div class="upload-panel">
                                 <div class="form-field">
-                                    <label for="referencePhoto">Reference photo</label>
+                                    <label for="referencePhoto" data-co-text="customOrderReferencePhotoLabel">Reference photo</label>
                                     <input type="file" id="referencePhoto" name="referencePhoto" accept=".jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif">
                                 </div>
-                                <p>Optional. Uploaded PNG, WEBP, or GIF files are converted to JPG automatically.</p>
+                                <p data-co-text="customOrderReferencePhotoHelp">Optional. Uploaded PNG, WEBP, or GIF files are converted to JPG automatically.</p>
                                 <div class="upload-preview" id="referencePreview"><img src="" alt="Reference preview"></div>
                             </div>
                             <button type="submit" class="custom-order-btn">
                                 <i class="fas fa-paper-plane"></i>
-                                Send Website Request
+                                <span data-co-text="customOrderSendWebsiteRequest">Send Website Request</span>
                             </button>
                         </form>
                     <?php endif; ?>
@@ -418,8 +457,8 @@ include __DIR__ . '/include/header.php';
             <aside class="custom-order-card">
                 <div class="discussion-card-header">
                     <div>
-                        <h2>Your Requests</h2>
-                        <p>Track website requests and replies from Athina.</p>
+                        <h2 data-co-text="customOrderYourRequestsTitle">Your Requests</h2>
+                        <p data-co-text="customOrderYourRequestsText">Track website requests and replies from Athina.</p>
                     </div>
                 </div>
                 <div class="custom-order-list">
@@ -438,7 +477,7 @@ include __DIR__ . '/include/header.php';
                             <div class="custom-order-list-bottom">
                                 <span><?= htmlspecialchars(coFormatDate((string)($orderRow['created_at'] ?? ''))) ?></span>
                                 <?php if ((int)($orderRow['pendingOfferCount'] ?? 0) > 0): ?>
-                                    <span class="custom-order-inline-badge">Offer ready</span>
+                                    <span class="custom-order-inline-badge" data-co-text="customOrderOfferReadyBadge">Offer ready</span>
                                 <?php endif; ?>
                             </div>
                         </a>
@@ -448,7 +487,7 @@ include __DIR__ . '/include/header.php';
 
             <section class="custom-order-card">
                 <?php if (!$selectedOrder): ?>
-                    <div class="empty-state">Choose a custom request to see the discussion.</div>
+                    <div class="empty-state" data-co-text="customOrderChooseRequestEmpty">Choose a custom request to see the discussion.</div>
                 <?php else: ?>
                     <?php
                     $selectedId = (int)$selectedOrder['customOrderID'];
@@ -460,31 +499,31 @@ include __DIR__ . '/include/header.php';
                     <div class="discussion-section-header">
                         <div>
                             <h2>Request #<?= $selectedId ?></h2>
-                            <p>Use this thread if Athina needs more information about your idea.</p>
+                            <p data-co-text="customOrderDiscussionHelp">Use this thread if Athina needs more information about your idea.</p>
                         </div>
                         <span class="custom-order-status-pill <?= coStatusClass($selectedStatus) ?>"><?= htmlspecialchars($selectedLabel) ?></span>
                     </div>
 
                     <div class="custom-order-summary">
                         <div class="custom-order-summary-item">
-                            <span>Agreed price</span>
+                            <span data-co-text="customOrderAgreedPriceLabel">Agreed price</span>
                             <strong><?= (float)($selectedOrder['agreedPrice'] ?? 0) > 0 ? 'EUR ' . number_format((float)$selectedOrder['agreedPrice'], 2) : '-' ?></strong>
                         </div>
                         <div class="custom-order-summary-item">
-                            <span>Target date</span>
+                            <span data-co-text="customOrderTargetDateLabel">Target date</span>
                             <strong><?= htmlspecialchars(coFormatDate((string)($selectedOrder['deadline'] ?? ''))) ?></strong>
                         </div>
                         <div class="custom-order-summary-item">
-                            <span>Private checkout</span>
-                            <strong><?= $privateCheckoutLink !== '' ? 'Ready' : '-' ?></strong>
+                            <span data-co-text="customOrderPrivateCheckoutLabel">Private checkout</span>
+                            <strong<?= $privateCheckoutLink !== '' ? ' data-co-text="customOrderReadyLabel"' : '' ?>><?= $privateCheckoutLink !== '' ? 'Ready' : '-' ?></strong>
                         </div>
                     </div>
 
                     <?php if ($privateCheckoutLink !== ''): ?>
                         <div class="custom-order-offer-card">
-                            <span class="offer-kicker">Private checkout link</span>
-                            <p class="offer-note">Your private custom product is ready. Open it while signed in with <?= htmlspecialchars($customerEmail) ?>.</p>
-                            <a href="<?= htmlspecialchars($privateCheckoutLink) ?>" class="custom-order-link">Open Private Product</a>
+                            <span class="offer-kicker" data-co-text="customOrderPrivateCheckoutLinkTitle">Private checkout link</span>
+                            <p class="offer-note"><span data-co-text="customOrderPrivateCheckoutReadyText">Your private custom product is ready. Open it while signed in with your account email.</span> <strong><?= htmlspecialchars($customerEmail) ?></strong></p>
+                            <a href="<?= htmlspecialchars($privateCheckoutLink) ?>" class="custom-order-link" data-co-text="customOrderOpenPrivateProduct">Open Private Product</a>
                         </div>
                     <?php endif; ?>
 
@@ -492,17 +531,17 @@ include __DIR__ . '/include/header.php';
                         <div class="custom-order-offer-card">
                             <div class="offer-card-head">
                                 <div>
-                                    <span class="offer-kicker">Offer awaiting your reply</span>
-                                    <h3>Review Athina's offer</h3>
+                                    <span class="offer-kicker" data-co-text="customOrderOfferAwaitingTitle">Offer awaiting your reply</span>
+                                    <h3 data-co-text="customOrderReviewOfferTitle">Review Athina's offer</h3>
                                 </div>
                             </div>
                             <div class="custom-order-offer-grid">
                                 <div>
-                                    <span>Price</span>
+                                    <span data-co-text="customOrderPriceLabel">Price</span>
                                     <strong>EUR <?= number_format((float)$activeOffer['offeredPrice'], 2) ?></strong>
                                 </div>
                                 <div>
-                                    <span>Target date</span>
+                                    <span data-co-text="customOrderTargetDateLabel">Target date</span>
                                     <strong><?= htmlspecialchars(coFormatDate((string)($activeOffer['proposedDeadline'] ?? ''))) ?></strong>
                                 </div>
                             </div>
@@ -516,7 +555,7 @@ include __DIR__ . '/include/header.php';
                                     <input type="hidden" name="customOrderID" value="<?= $selectedId ?>">
                                     <input type="hidden" name="offerID" value="<?= (int)$activeOffer['offerID'] ?>">
                                     <input type="hidden" name="decision" value="accept">
-                                    <button type="submit" class="custom-order-btn offer-accept-btn">Accept Offer</button>
+                                    <button type="submit" class="custom-order-btn offer-accept-btn" data-co-text="customOrderAcceptOfferAction">Accept Offer</button>
                                 </form>
                                 <form method="POST">
                                     <?= app_csrf_input() ?>
@@ -524,20 +563,20 @@ include __DIR__ . '/include/header.php';
                                     <input type="hidden" name="customOrderID" value="<?= $selectedId ?>">
                                     <input type="hidden" name="offerID" value="<?= (int)$activeOffer['offerID'] ?>">
                                     <input type="hidden" name="decision" value="decline">
-                                    <button type="submit" class="custom-order-secondary-btn">Decline Offer</button>
+                                    <button type="submit" class="custom-order-secondary-btn" data-co-text="customOrderDeclineOfferAction">Decline Offer</button>
                                 </form>
                             </div>
                         </div>
                     <?php elseif ($latestOffer): ?>
                         <div class="custom-order-offer-card is-history">
-                            <span class="offer-kicker">Latest offer</span>
+                            <span class="offer-kicker" data-co-text="customOrderLatestOfferTitle">Latest offer</span>
                             <div class="custom-order-offer-grid">
                                 <div>
-                                    <span>Price</span>
+                                    <span data-co-text="customOrderPriceLabel">Price</span>
                                     <strong>EUR <?= number_format((float)$latestOffer['offeredPrice'], 2) ?></strong>
                                 </div>
                                 <div>
-                                    <span>Status</span>
+                                    <span data-co-text="customOrderStatusLabel">Status</span>
                                     <strong><?= htmlspecialchars(ucwords(str_replace('_', ' ', (string)$latestOffer['offerStatus']))) ?></strong>
                                 </div>
                             </div>
@@ -545,21 +584,21 @@ include __DIR__ . '/include/header.php';
                     <?php endif; ?>
 
                     <div class="custom-order-request-text">
-                        <h3>Your request</h3>
+                        <h3 data-co-text="customOrderYourRequestTitle">Your request</h3>
                         <div><?= nl2br(htmlspecialchars((string)($selectedOrder['requestDescription'] ?? ''))) ?></div>
                     </div>
 
                     <?php if ($photoUrl !== ''): ?>
                         <div class="custom-order-reference">
-                            <h3>Reference photo</h3>
+                            <h3 data-co-text="customOrderReferencePhotoLabel">Reference photo</h3>
                             <img src="<?= htmlspecialchars($photoUrl) ?>" alt="Custom order reference">
                         </div>
                     <?php endif; ?>
 
                     <div class="custom-order-messages">
-                        <h3>Discussion</h3>
+                        <h3 data-co-text="customOrderDiscussionTitle">Discussion</h3>
                         <?php if (empty($selectedMessages)): ?>
-                            <div class="empty-state">No replies yet.</div>
+                            <div class="empty-state" data-co-text="customOrderNoRepliesYet">No replies yet.</div>
                         <?php else: ?>
                             <div class="message-thread">
                                 <?php foreach ($selectedMessages as $message): ?>
@@ -578,13 +617,13 @@ include __DIR__ . '/include/header.php';
 
                     <?php if (!in_array($selectedStatus, ['completed', 'cancelled'], true)): ?>
                         <div class="custom-order-reply">
-                            <h3>Reply to Athina</h3>
+                            <h3 data-co-text="customOrderReplyTitle">Reply to Athina</h3>
                             <form method="POST" class="custom-order-reply-form">
                                 <?= app_csrf_input() ?>
                                 <input type="hidden" name="action" value="customer_message">
                                 <input type="hidden" name="customOrderID" value="<?= $selectedId ?>">
-                                <textarea name="messageBody" required placeholder="Write your reply or extra information..."></textarea>
-                                <button type="submit" class="custom-order-btn">Send Reply</button>
+                                <textarea name="messageBody" required placeholder="Write your reply or extra information..." data-co-placeholder="customOrderReplyPlaceholder"></textarea>
+                                <button type="submit" class="custom-order-btn" data-co-text="customOrderSendReplyAction">Send Reply</button>
                             </form>
                         </div>
                     <?php endif; ?>
