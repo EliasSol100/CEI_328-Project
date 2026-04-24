@@ -6,8 +6,10 @@ require_once __DIR__ . "/../include/security.php";
 // Φορτώνουμε τη σύνδεση με τη βάση δεδομένων από το database.php
 require_once "database.php";
 require_once __DIR__ . "/../include/platform_integrations.php";
+require_once __DIR__ . "/../include/auth_branding.php";
 
 app_system_config_seed_defaults($conn, app_platform_integrations_default_values());
+$authLogoUrl = app_auth_logo_url($conn, '../');
 
 $googleOauthConfig = app_social_auth_config($conn, 'google');
 $facebookOauthConfig = app_social_auth_config($conn, 'facebook');
@@ -179,7 +181,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["manual_email"])) {
     <div class="wizard-box text-center">
         <div class="wizard-header">
             <div class="wizard-logo">
-                <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
+                <img src="<?= htmlspecialchars($authLogoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="Creations by Athina logo">
             </div>
             <h3 class="mt-2">Create Your Account</h3>
             <p class="wizard-subtitle mb-0">

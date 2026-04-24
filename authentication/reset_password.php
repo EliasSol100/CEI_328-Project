@@ -2,12 +2,14 @@
 session_start();
 require_once __DIR__ . "/database.php";
 require_once __DIR__ . "/../include/security.php";
+require_once __DIR__ . "/../include/auth_branding.php";
 
 $error        = "";
 $success      = "";
 $emailDisplay = ""; // for showing in UI
 $token        = "";
 $expiresAt    = null; // raw datetime from DB for countdown
+$authLogoUrl = app_auth_logo_url($conn, '../');
 
 // Helper: validate token and return row (email, expires_at)
 function findResetRecord(mysqli $conn, string $token): ?array {
@@ -192,7 +194,7 @@ $canShowResetForm = (!empty($token) && !empty($emailDisplay) && !empty($expiresA
     <div class="wizard-box">
         <div class="wizard-header text-center">
             <div class="wizard-logo">
-                <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
+                <img src="<?= htmlspecialchars($authLogoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="Creations by Athina logo">
             </div>
             <h3 class="mt-2">Set a New Password</h3>
             <p class="wizard-subtitle mb-0">

@@ -3,6 +3,7 @@ session_start();
 require_once "database.php";
 require_once __DIR__ . "/../include/security.php";
 require_once __DIR__ . "/../include/homepage_customization.php";
+require_once __DIR__ . "/../include/auth_branding.php";
 require_once __DIR__ . "/auth_mailer.php";
 
 /**
@@ -358,11 +359,7 @@ if (!empty($errors)) {
     }
 }
 
-$profileLogoPath = app_homepage_get_config_value($conn, 'homepage_header_logo_path', 'uploads/assets/images/homepage/header-logo.jpg');
-$profileLogoUrl = app_homepage_asset_url($profileLogoPath, '../');
-if ($profileLogoUrl === '') {
-    $profileLogoUrl = '../uploads/assets/images/homepage/header-logo.jpg';
-}
+$profileLogoUrl = app_auth_logo_url($conn, '../');
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -384,7 +381,7 @@ if ($profileLogoUrl === '') {
         <div class="wizard-header">
             <!-- Athina E-Shop crochet badge logo -->
             <div class="wizard-logo">
-                <img src="<?= htmlspecialchars($profileLogoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="Athina E-Shop Logo">
+                <img src="<?= htmlspecialchars($profileLogoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="Creations by Athina logo">
             </div>
 
             <h3 class="mt-2">Complete Your Profile</h3>

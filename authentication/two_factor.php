@@ -2,6 +2,7 @@
 session_start();
 require_once __DIR__ . '/../include/security.php';
 require_once __DIR__ . '/database.php';
+require_once __DIR__ . '/../include/auth_branding.php';
 
 $pending = app_auth_pending_two_factor();
 if (!$pending) {
@@ -84,6 +85,7 @@ $secondsUntilResend = max(0, (int)($pending['resend_available_at'] ?? 0) - time(
 $twoFactorExpirySeconds = function_exists('app_auth_two_factor_code_ttl_seconds')
     ? app_auth_two_factor_code_ttl_seconds()
     : 20 * 60;
+$authLogoUrl = app_auth_logo_url($conn, '../');
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -100,7 +102,7 @@ $twoFactorExpirySeconds = function_exists('app_auth_two_factor_code_ttl_seconds'
     <div class="wizard-box">
         <div class="wizard-header text-center">
             <div class="wizard-logo">
-                <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
+                <img src="<?= htmlspecialchars($authLogoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="Creations by Athina logo">
             </div>
             <h3 class="mt-2">Two-Factor Verification</h3>
             <p class="wizard-subtitle mb-0">

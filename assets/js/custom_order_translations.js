@@ -28,15 +28,17 @@
         en: {
             pageTitle: 'Creations by Athina - Custom Order',
             customOrderKicker: 'Custom Crochet Service',
-            customOrderPageTitle: 'Custom Orders Start on Instagram',
-            customOrderPageSubtitle: 'Message the shop on Instagram for the fastest back-and-forth about ideas, photos, colors, timing, and the final price. If you prefer, registered customers can also send a website request below.',
+            customOrderPageTitle: 'Custom Orders: Instagram Chat or Website Request',
+            customOrderPageSubtitle: 'Start with the recommended Instagram chat for quick back-and-forth, or send a structured website request from your registered account. Once the details are approved, you receive a private checkout link.',
             customOrderHowItWorks: 'How It Works',
-            customOrderStep1Title: '1. Message on Instagram',
-            customOrderStep1Text: 'This is recommended because it is easier to discuss inspiration photos, details, and small changes in a real chat.',
+            customOrderStep1Title: '1. Recommended: chat on Instagram',
+            customOrderStep1Text: 'Use Instagram when you want the fastest discussion about photos, colors, size, timing, and small changes with the shop owner.',
             customOrderStep2Title: '2. Or send a website request',
-            customOrderStep2Text: 'If you use the website form, you must be signed in so replies, offers, and private checkout links stay connected to your account.',
-            customOrderStep3Title: '3. Receive a private checkout link',
-            customOrderStep3Text: 'When the custom piece is accepted and priced, Athina sends you a private shop link that only your account can open.',
+            customOrderStep2Text: 'If you prefer the form, sign in first and send your idea from the website so replies, offers, and links stay connected to your account.',
+            customOrderStep3Title: '3. Athina reviews the idea',
+            customOrderStep3Text: 'Athina can reply for more details, make an offer, accept the request, or let you know if the idea cannot be made.',
+            customOrderStep4Title: '4. Receive a private checkout link',
+            customOrderStep4Text: 'When the custom piece is approved and priced, Athina sends you a private shop link that only your account can open.',
             customOrderReadyTitle: 'Before You Receive the Link',
             customOrderInfo1Title: 'Use the right account email',
             customOrderInfo1Text: 'The private custom product opens only when you sign in with the same email that the shop owner assigned to your order.',
@@ -74,6 +76,36 @@
             customOrderRegisterAction: 'Δημιουργία Λογαριασμού'
         }
     };
+
+    var customOrderChoiceCopy = {
+        en: {
+            customOrderPageTitle: 'Custom Orders: Instagram Chat or Website Request',
+            customOrderPageSubtitle: 'Start with the recommended Instagram chat for quick back-and-forth, or send a structured website request from your registered account. Once the details are approved, you receive a private checkout link.',
+            customOrderStep1Title: '1. Recommended: chat on Instagram',
+            customOrderStep1Text: 'Use Instagram when you want the fastest discussion about photos, colors, size, timing, and small changes with the shop owner.',
+            customOrderStep2Title: '2. Or send a website request',
+            customOrderStep2Text: 'If you prefer the form, sign in first and send your idea from the website so replies, offers, and links stay connected to your account.',
+            customOrderStep3Title: '3. Athina reviews the idea',
+            customOrderStep3Text: 'Athina can reply for more details, make an offer, accept the request, or let you know if the idea cannot be made.',
+            customOrderStep4Title: '4. Receive a private checkout link',
+            customOrderStep4Text: 'When the custom piece is approved and priced, Athina sends you a private shop link that only your account can open.'
+        },
+        el: {
+            customOrderPageTitle: 'Εξατομικευμένες παραγγελίες: Instagram ή αίτημα από το website',
+            customOrderPageSubtitle: 'Ξεκινήστε με το προτεινόμενο chat στο Instagram για γρήγορη συζήτηση ή στείλτε δομημένο αίτημα από τον λογαριασμό σας. Όταν εγκριθούν οι λεπτομέρειες, θα λάβετε ιδιωτικό checkout link.',
+            customOrderStep1Title: '1. Προτεινόμενο: chat στο Instagram',
+            customOrderStep1Text: 'Χρησιμοποιήστε το Instagram όταν θέλετε την πιο γρήγορη συζήτηση για φωτογραφίες, χρώματα, μέγεθος, χρόνο και μικρές αλλαγές με την ιδιοκτήτρια.',
+            customOrderStep2Title: '2. Ή στείλτε αίτημα από το website',
+            customOrderStep2Text: 'Αν προτιμάτε τη φόρμα, συνδεθείτε πρώτα και στείλτε την ιδέα σας από την ιστοσελίδα ώστε απαντήσεις, προσφορές και links να μένουν στον λογαριασμό σας.',
+            customOrderStep3Title: '3. Η Athina ελέγχει την ιδέα',
+            customOrderStep3Text: 'Η Athina μπορεί να απαντήσει για περισσότερες λεπτομέρειες, να κάνει προσφορά, να αποδεχτεί το αίτημα ή να ενημερώσει ότι η ιδέα δεν μπορεί να υλοποιηθεί.',
+            customOrderStep4Title: '4. Λάβετε ιδιωτικό checkout link',
+            customOrderStep4Text: 'Όταν το custom κομμάτι εγκριθεί και τιμολογηθεί, η Athina σας στέλνει ιδιωτικό shop link που ανοίγει μόνο από τον λογαριασμό σας.'
+        }
+    };
+
+    Object.assign(customOrderTranslations.en, customOrderChoiceCopy.en);
+    Object.assign(customOrderTranslations.el, customOrderChoiceCopy.el);
 
     function applyCustomOrderTranslations(lang) {
         var map = customOrderTranslations[lang] || customOrderTranslations.en;
