@@ -33,6 +33,9 @@ if (!function_exists('app_product_options_ensure_schema')) {
 
         if (app_product_options_table_exists($conn, 'products')) {
             $productColumns = [
+                'materialType' => "ALTER TABLE products ADD COLUMN materialType VARCHAR(100) NULL AFTER category",
+                'shippingWeightKg' => "ALTER TABLE products ADD COLUMN shippingWeightKg DECIMAL(6,3) NULL AFTER materialType",
+                'shippingSizeCode' => "ALTER TABLE products ADD COLUMN shippingSizeCode VARCHAR(20) NULL AFTER shippingWeightKg",
                 'customColorFields' => "ALTER TABLE products ADD COLUMN customColorFields TINYINT(1) NOT NULL DEFAULT 0 AFTER category",
                 'customColorLabel1' => "ALTER TABLE products ADD COLUMN customColorLabel1 VARCHAR(120) NULL AFTER customColorFields",
                 'customColorLabel2' => "ALTER TABLE products ADD COLUMN customColorLabel2 VARCHAR(120) NULL AFTER customColorLabel1",
@@ -47,12 +50,64 @@ if (!function_exists('app_product_options_ensure_schema')) {
                     mysqli_query($conn, $sql);
                 }
             }
+
+            mysqli_query(
+                $conn,
+                "UPDATE products
+                 SET materialType = CASE
+                     WHEN category = 'Blankets' OR sku LIKE '%BLANKET%' THEN 'Puffy'
+                     ELSE 'Velvet'
+                 END
+                 WHERE materialType IS NULL OR TRIM(materialType) = ''"
+            );
+            mysqli_query(
+                $conn,
+                "UPDATE products
+                 SET shippingWeightKg = CASE
+                     WHEN category = 'Blankets' OR sku LIKE '%BLANKET%' THEN 1.200
+                     WHEN LOWER(COALESCE(nameEN, '')) LIKE '%large%' THEN 0.800
+                     ELSE 0.350
+                 END
+                 WHERE shippingWeightKg IS NULL"
+            );
+            mysqli_query(
+                $conn,
+                "UPDATE products
+                 SET shippingSizeCode = CASE
+                     WHEN category = 'Blankets' OR sku LIKE '%BLANKET%' THEN 'large'
+                     WHEN LOWER(COALESCE(nameEN, '')) LIKE '%large%' THEN 'medium'
+                     ELSE 'small'
+                 END
+                 WHERE shippingSizeCode IS NULL OR TRIM(shippingSizeCode) = ''"
+            );
         }
 
-        if (app_product_options_table_exists($conn, 'product_variations')
-            && !app_product_options_column_exists($conn, 'product_variations', 'price')
-        ) {
-            mysqli_query($conn, "ALTER TABLE product_variations ADD COLUMN price DOUBLE NULL DEFAULT NULL AFTER colorID");
+        if (app_product_options_table_exists($conn, 'product_variations')) {
+            $variationColumns = [
+                'price' => "ALTER TABLE product_variations ADD COLUMN price DOUBLE NULL DEFAULT NULL AFTER colorID",
+                'shippingWeightKg' => "ALTER TABLE product_variations ADD COLUMN shippingWeightKg DECIMAL(6,3) NULL AFTER price",
+                'shippingSizeCode' => "ALTER TABLE product_variations ADD COLUMN shippingSizeCode VARCHAR(20) NULL AFTER shippingWeightKg",
+            ];
+
+            foreach ($variationColumns as $columnName => $sql) {
+                if (!app_product_options_column_exists($conn, 'product_variations', $columnName)) {
+                    mysqli_query($conn, $sql);
+                }
+            }
+        }
+
+        if (app_product_options_table_exists($conn, 'yarn_types')) {
+            foreach (['Baby Anti Pilling', 'Cotton', 'Puffy', 'Velvet'] as $typeName) {
+                $safeType = mysqli_real_escape_string($conn, $typeName);
+                mysqli_query(
+                    $conn,
+                    "INSERT INTO yarn_types (typeName)
+                     SELECT '{$safeType}'
+                     WHERE NOT EXISTS (
+                         SELECT 1 FROM yarn_types WHERE typeName = '{$safeType}' LIMIT 1
+                     )"
+                );
+            }
         }
 
         mysqli_query(

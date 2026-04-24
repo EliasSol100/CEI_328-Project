@@ -2,6 +2,8 @@
 session_start();
 require_once "database.php";
 require_once __DIR__ . "/../include/security.php";
+require_once __DIR__ . "/../include/homepage_customization.php";
+require_once __DIR__ . "/auth_mailer.php";
 
 /**
  * How the user reached this page:
@@ -57,7 +59,12 @@ function formatProfileDobInputValue(string $value): string
     }
 
     $date = DateTime::createFromFormat('!Y-m-d', $parsed);
-    return $date instanceof DateTime ? $date->format('d/m/Y') : $value;
+    return $date instanceof DateTime ? $date->format('Y-m-d') : $value;
+}
+
+function profilePasswordHasAsciiSymbol(string $password): bool
+{
+    return (bool)preg_match('/[!@#$%^&*()_+\-=\[\]{};\':"\\\\|,.<>\/?`~]/', $password);
 }
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
@@ -99,7 +106,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     }
 
     if ($dobInput !== '' && $dob === null) {
-        $errors[] = "Date of birth must use DD/MM/YYYY format.";
+        $errors[] = "Date of birth is not valid.";
+    }
+    if ($dob !== null) {
+        $dobDate = DateTime::createFromFormat('!Y-m-d', $dob);
+        $today = new DateTime('today');
+        if ($dobDate instanceof DateTime && $dobDate > $today) {
+            $errors[] = "Date of birth cannot be in the future.";
+        }
     }
 
     if (!app_is_valid_username($username)) {
@@ -119,11 +133,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     // Password strength
     if (
         strlen($password) < 8 ||
+        !preg_match('/^[\x20-\x7E]+$/', $password) ||
         !preg_match('/[A-Z]/', $password) ||
         !preg_match('/[0-9]/', $password) ||
-        !preg_match('/[\W_]/', $password)
+        !profilePasswordHasAsciiSymbol($password)
     ) {
-        $errors[] = "Password must be at least 8 characters and include an uppercase letter, a number, and a symbol.";
+        $errors[] = "Password must be at least 8 characters and include an uppercase letter, a number, and an English keyboard symbol.";
     }
 
     // Passwords match
@@ -305,6 +320,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     "is_verified"      => $userRow["is_verified"],
                 ];
 
+                if ((int)($userRow["is_verified"] ?? 0) !== 1) {
+                    app_auth_send_email_verification_code($conn, (int)$userRow["id"], (string)$userRow["email"], (string)$userRow["full_name"]);
+                }
+
                 $nextStep = ((int)($userRow["is_verified"] ?? 0) === 1)
                     ? consumeAuthRedirectTarget("../index.php")
                     : "verify.php";
@@ -316,6 +335,33 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             $errors[] = "We couldn't start your verification session. Please log in and try again.";
         }
     }
+}
+
+$initialStep = 1;
+if (!empty($errors)) {
+    foreach ($errors as $errorText) {
+        if (
+            str_contains($errorText, 'Password') ||
+            str_contains($errorText, 'Passwords do not match')
+        ) {
+            $initialStep = 2;
+            break;
+        }
+        if (
+            str_contains($errorText, 'Country') ||
+            str_contains($errorText, 'City') ||
+            str_contains($errorText, 'address') ||
+            str_contains($errorText, 'Postal')
+        ) {
+            $initialStep = 3;
+        }
+    }
+}
+
+$profileLogoPath = app_homepage_get_config_value($conn, 'homepage_header_logo_path', 'uploads/assets/images/homepage/header-logo.jpg');
+$profileLogoUrl = app_homepage_asset_url($profileLogoPath, '../');
+if ($profileLogoUrl === '') {
+    $profileLogoUrl = '../uploads/assets/images/homepage/header-logo.jpg';
 }
 ?>
 <!DOCTYPE html>
@@ -338,7 +384,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         <div class="wizard-header">
             <!-- Athina E-Shop crochet badge logo -->
             <div class="wizard-logo">
-                <img src="../assets/images/athina-eshop-logo.png" alt="Athina E-Shop Logo">
+                <img src="<?= htmlspecialchars($profileLogoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="Athina E-Shop Logo">
             </div>
 
             <h3 class="mt-2">Complete Your Profile</h3>
@@ -411,23 +457,20 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                     <div class="form-group">
                         <label>Date of Birth</label>
-                        <input type="text"
+                        <input type="date"
                                name="dob"
                                class="form-control"
                                id="dob"
-                               placeholder="DD/MM/YYYY"
-                               inputmode="numeric"
-                               maxlength="10"
-                               pattern="\d{2}/\d{2}/\d{4}"
+                               max="<?= date('Y-m-d') ?>"
                                value="<?= htmlspecialchars(formatProfileDobInputValue($_POST['dob'] ?? '')) ?>"
                                required>
                         <div id="dob-error" class="text-danger mt-1" style="display:none;">
-                            Please type your date of birth as DD/MM/YYYY.
+                            Please choose a valid date of birth.
                         </div>
                         <?php
                         if (!empty($errors)) {
                             foreach ($errors as $error) {
-                                if (str_contains($error, "Date of birth must use")) {
+                                if (str_contains($error, "Date of birth")) {
                                     echo "<div class='text-danger mt-1'>" . htmlspecialchars($error) . "</div>";
                                 }
                             }
@@ -442,7 +485,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         <?php foreach ($errors as $error): ?>
                             <?php if (in_array($error, [
                                 "All fields are required!",
-                                "Password must be at least 8 characters and include an uppercase letter, a number, and a symbol.",
+                                "Password must be at least 8 characters and include an uppercase letter, a number, and an English keyboard symbol.",
                                 "Passwords do not match!"
                             ])): ?>
                                 <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
@@ -462,7 +505,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                             <li id="check-length"><span class="text-danger">✖</span> At least 8 characters</li>
                             <li id="check-uppercase"><span class="text-danger">✖</span> At least 1 uppercase letter</li>
                             <li id="check-number"><span class="text-danger">✖</span> At least 1 number</li>
-                            <li id="check-symbol"><span class="text-danger">✖</span> At least 1 symbol</li>
+                            <li id="check-symbol"><span class="text-danger">✖</span> At least 1 English keyboard symbol</li>
                         </ul>
                     </div>
 
@@ -473,6 +516,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                             <span class="input-group-text toggle-password" data-target="#confirm_password">
                                 <i class="bi bi-eye"></i>
                             </span>
+                        </div>
+                        <div id="confirm-password-error" class="text-danger mt-1" style="display:none;">
+                            Passwords do not match.
                         </div>
                     </div>
                 </div>
@@ -533,17 +579,19 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
     $(document).ready(function () {
         function isValidDobInput(value) {
-            const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+            const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
             if (!match) {
                 return false;
             }
 
-            const day = Number(match[1]);
+            const year = Number(match[1]);
             const month = Number(match[2]) - 1;
-            const year = Number(match[3]);
+            const day = Number(match[3]);
             const date = new Date(year, month, day);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
 
-            return date.getFullYear() === year && date.getMonth() === month && date.getDate() === day;
+            return date.getFullYear() === year && date.getMonth() === month && date.getDate() === day && date <= today;
         }
 
         $("input[name='fullname']").on("input", function () {
@@ -563,7 +611,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             utilsScript: "https://cdnjs.cloudflare.com/ajax/libs/intl-tel-input/17.0.8/js/utils.js"
         });
 
-        let currentStep = 1;
+        let currentStep = <?= (int)$initialStep ?>;
         const totalSteps = 3;
 
         function showStep(step) {
@@ -637,8 +685,35 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 const dobVal = $("#dob").val().trim();
                 if (dobVal !== "" && !isValidDobInput(dobVal)) {
                     $("#dob").addClass("is-invalid");
-                    $("#dob-error").text("Please use DD/MM/YYYY format.").show();
+                    $("#dob-error").text("Please choose a valid date that is not in the future.").show();
                     valid = false;
+                }
+            }
+
+            if (currentStep === 2) {
+                const passwordVal = $("#password").val();
+                const confirmVal = $("#confirm_password").val();
+                const strongPassword =
+                    passwordVal.length >= 8 &&
+                    /^[\x20-\x7E]+$/.test(passwordVal) &&
+                    /[A-Z]/.test(passwordVal) &&
+                    /[0-9]/.test(passwordVal) &&
+                    /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(passwordVal);
+
+                if (!strongPassword) {
+                    $("#password").addClass("is-invalid");
+                    valid = false;
+                } else {
+                    $("#password").removeClass("is-invalid");
+                }
+
+                if (passwordVal !== confirmVal) {
+                    $("#confirm_password").addClass("is-invalid");
+                    $("#confirm-password-error").show();
+                    valid = false;
+                } else {
+                    $("#confirm_password").removeClass("is-invalid");
+                    $("#confirm-password-error").hide();
                 }
             }
 
@@ -662,23 +737,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             $(this).find("i").toggleClass("bi-eye bi-eye-slash");
         });
 
-        function formatDobInput(value) {
-            const digits = value.replace(/\D/g, "").slice(0, 8);
-            let formatted = "";
-
-            if (digits.length > 0) {
-                formatted = digits.slice(0, 2);
-            }
-            if (digits.length > 2) {
-                formatted += "/" + digits.slice(2, 4);
-            }
-            if (digits.length > 4) {
-                formatted += "/" + digits.slice(4);
-            }
-
-            return formatted;
-        }
-
         $("#password").on("input", function () {
             const val = $(this).val();
 
@@ -686,13 +744,21 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 length: val.length >= 8,
                 uppercase: /[A-Z]/.test(val),
                 number: /[0-9]/.test(val),
-                symbol: /[\W_]/.test(val)
+                symbol: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(val) && /^[\x20-\x7E]*$/.test(val)
             };
 
             $("#check-length").html((checks.length ? '✅' : '<span class="text-danger">✖</span>') + ' At least 8 characters');
             $("#check-uppercase").html((checks.uppercase ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 uppercase letter');
             $("#check-number").html((checks.number ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 number');
-            $("#check-symbol").html((checks.symbol ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 symbol');
+            $("#check-symbol").html((checks.symbol ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 English keyboard symbol');
+            $("#confirm_password").trigger("input");
+        });
+
+        $("#confirm_password").on("input", function () {
+            const hasValue = $(this).val().length > 0;
+            const mismatch = $("#password").val() !== $(this).val();
+            $(this).toggleClass("is-invalid", hasValue && mismatch);
+            $("#confirm-password-error").toggle(hasValue && mismatch);
         });
 
         $("#phone").on("input", function () {
@@ -703,12 +769,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         });
 
         $("#dob").on("input", function () {
-            const formatted = formatDobInput($(this).val());
-            $(this).val(formatted);
+            const value = $(this).val();
 
-            if (formatted === "" || formatted.length < 10 || isValidDobInput(formatted)) {
+            if (value === "" || isValidDobInput(value)) {
                 $(this).removeClass("is-invalid");
                 $("#dob-error").hide();
+            } else {
+                $(this).addClass("is-invalid");
+                $("#dob-error").text("Please choose a valid date that is not in the future.").show();
             }
         });
 

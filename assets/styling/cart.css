@@ -246,6 +246,60 @@
     color: #555;
     margin-bottom: 12px;
 }
+
+.cart-coupon-form {
+    margin: 18px 0;
+    padding: 16px 0;
+    border-top: 1px solid #ede6f7;
+    border-bottom: 1px solid #ede6f7;
+}
+
+.cart-coupon-form label {
+    display: block;
+    color: var(--purple-dark);
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 8px;
+}
+
+.cart-coupon-row {
+    display: flex;
+    gap: 8px;
+}
+
+.cart-coupon-row input {
+    min-width: 0;
+    flex: 1;
+    border: 1.5px solid #d8c8ec;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font: inherit;
+}
+
+.cart-coupon-row button,
+.cart-coupon-remove {
+    border: 0;
+    border-radius: 10px;
+    padding: 10px 14px;
+    background: var(--purple-dark);
+    color: #fff;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.cart-coupon-remove {
+    margin-top: 8px;
+    border: 1.5px solid #d8c8ec;
+    background: #fff;
+    color: var(--purple-dark);
+}
+
+.cart-coupon-form p {
+    margin: 8px 0 0;
+    color: #8a7a9d;
+    font-size: 12px;
+    line-height: 1.4;
+}
 .summary-total {
     font-size: 18px !important;
     font-weight: 700 !important;

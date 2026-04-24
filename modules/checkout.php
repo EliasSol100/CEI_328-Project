@@ -11,6 +11,7 @@ require_once __DIR__ . '/../include/loyalty_program.php';
 require_once __DIR__ . '/../include/payment_gateway.php';
 require_once __DIR__ . '/../include/checkout_payment_helpers.php';
 require_once __DIR__ . '/../include/translation_helpers.php';
+require_once __DIR__ . '/../include/shipping_helpers.php';
 require_once __DIR__ . '/place_order.php';
 
 // Optional: include get_config.php if it exists (to avoid errors if missing)
@@ -213,21 +214,22 @@ function checkoutSanitizePickupPoint($value): string {
 
 function checkoutShippingCost(
     string $country,
+    string $courier,
     string $speed,
     float $cartTotal,
     float $freeShippingThreshold,
-    array $shippingRatesByCountry
+    array $cartShippingProfile,
+    array $shippingRateTable
 ): float {
-    if ($cartTotal >= $freeShippingThreshold) {
-        return 0.0;
-    }
-    if (!isset($shippingRatesByCountry[$country])) {
-        return 0.0;
-    }
-    if (!isset($shippingRatesByCountry[$country][$speed])) {
-        return 0.0;
-    }
-    return (float)$shippingRatesByCountry[$country][$speed];
+    return app_shipping_calculate_cost(
+        $country,
+        $courier,
+        $speed,
+        $cartTotal,
+        $freeShippingThreshold,
+        $cartShippingProfile,
+        $shippingRateTable
+    );
 }
 
 function checkoutTableExists(mysqli $conn, string $tableName): bool {
@@ -433,29 +435,16 @@ $estimatedEarnedPoints = (($isLoggedIn && $userId > 0) || (!empty($_POST['create
     : 0;
 
 // ----- SHIPPING -----
-$countryCouriers = [
-    'Cyprus' => [
-        'akis_express' => 'Akis Express',
-        'boxnow' => 'BoxNow',
-        'acs' => 'ACS',
-    ],
-    'Greece' => [
-        'elta_courier' => 'ELTA Courier',
-        'speedex' => 'Speedex',
-        'geniki' => 'Geniki Taxydromiki',
-    ],
-];
-$shippingRatesByCountry = [
-    'Cyprus' => ['standard' => 2.00, 'express' => 5.00],
-    'Greece' => ['standard' => 4.00, 'express' => 10.00],
-];
+$countryCouriers = app_shipping_country_couriers();
+$shippingRateTable = app_shipping_rate_table();
+$cartShippingProfile = app_shipping_cart_profile($conn, $cartItems);
 $fulfillmentModes = ['delivery', 'pickup'];
 $shippingSpeeds = ['standard', 'express'];
 $shippingModeLabels = [
     'delivery' => 'Deliver to my address',
     'pickup' => 'Pickup from courier point',
 ];
-$freeShippingThreshold = 100.0;
+$freeShippingThreshold = app_shipping_free_threshold();
 $freeShippingEligible = $cartTotal >= $freeShippingThreshold;
 $shippingDifference = max(0.0, $freeShippingThreshold - $cartTotal);
 $availableCountries = array_keys($countryCouriers);
@@ -539,10 +528,12 @@ if (!checkoutIsCourierAllowed($selectedCountry, $selectedCourier, $countryCourie
 $formData['courier'] = $selectedCourier;
 $displayShippingCost = checkoutShippingCost(
     $selectedCountry,
+    $selectedCourier,
     $selectedSpeed,
     (float)$cartTotal,
     (float)$freeShippingThreshold,
-    $shippingRatesByCountry
+    $cartShippingProfile,
+    $shippingRateTable
 );
 $displayTotal = max(0, ($cartTotal - $couponDiscount - $loyaltyDiscount) + $displayShippingCost);
 
@@ -757,7 +748,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors['accept_terms'] = 'You must accept Terms & Conditions';
         }
         if ($selectedCouponCode !== '' && (!$activeCoupon || $couponDiscount <= 0)) {
-            $errors['coupon_code'] = 'Coupon code is invalid, expired, or not applicable to your cart.';
+            unset($_SESSION['cart_coupon_code']);
+            $selectedCouponCode = '';
+            $activeCoupon = null;
+            $couponDiscount = 0.0;
         }
         if (!empty($_POST['loyalty_points'])) {
             $selectedLoyaltyPoints = checkoutSanitizePositiveInt($_POST['loyalty_points']);
@@ -781,10 +775,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 $shippingCost = checkoutShippingCost(
                     $shippingCountry,
+                    $courier,
                     $shippingSpeed,
                     (float)$cartTotal,
                     (float)$freeShippingThreshold,
-                    $shippingRatesByCountry
+                    $cartShippingProfile,
+                    $shippingRateTable
                 );
                 $previewLoyaltyRedemption = loyaltyBuildRedemptionPreview(
                     $selectedLoyaltyPoints,
@@ -1134,22 +1130,6 @@ if (file_exists($headerPath)) {
                 </fieldset>
 
                 <fieldset>
-                    <legend data-translate="checkoutCouponTitle">Coupon</legend>
-                    <div class="form-group">
-                        <label data-translate="checkoutCouponLabel">Coupon Code</label>
-                        <div class="coupon-row">
-                            <input type="text" name="coupon_code" value="<?= htmlspecialchars($formData['coupon_code'] ?? '') ?>" data-translate-placeholder="checkoutCouponPlaceholder" placeholder="Enter coupon code (if available)">
-                        </div>
-                        <div class="coupon-actions">
-                            <button type="submit" name="coupon_action" value="apply" class="btn-inline btn-apply" formnovalidate data-translate="apply">Apply</button>
-                            <button type="submit" name="coupon_action" value="remove" class="btn-inline" formnovalidate data-translate="remove">Remove</button>
-                        </div>
-                        <?php if ($couponMessage !== ''): ?><span class="form-helper"><?= htmlspecialchars($couponMessage) ?></span><?php endif; ?>
-                        <?php if (isset($errors['coupon_code'])): ?><span class="error"><?= $errors['coupon_code'] ?></span><?php endif; ?>
-                    </div>
-                </fieldset>
-
-                <fieldset>
                     <legend data-translate="checkoutLoyaltyTitle">Loyalty Program</legend>
                     <?php if ($isLoggedIn && $userId > 0): ?>
                     <div class="form-group">
@@ -1262,7 +1242,8 @@ if (file_exists($headerPath)) {
     var subtotal = <?= json_encode((float)$cartTotal) ?>;
     var couponDiscount = <?= json_encode((float)$couponDiscount) ?>;
     var loyaltyDiscount = <?= json_encode((float)$loyaltyDiscount) ?>;
-    var shippingRatesByCountry = <?= json_encode($shippingRatesByCountry) ?>;
+    var shippingRateTable = <?= json_encode($shippingRateTable) ?>;
+    var cartShippingProfile = <?= json_encode($cartShippingProfile) ?>;
     var countryCouriers = <?= json_encode($countryCouriers) ?>;
     var defaultAddress = <?= json_encode($defaultAddress) ?>;
 
@@ -1468,26 +1449,50 @@ if (file_exists($headerPath)) {
         return checked ? checked.value : 'delivery';
     }
 
-    function getCountryRates(country) {
-        return shippingRatesByCountry[country] || { standard: 0, express: 0 };
+    function selectedCourier() {
+        var country = selectedCountry();
+        var options = countryCouriers[country] || {};
+        var courier = courierEl ? courierEl.value : '';
+        if (courier && options[courier]) {
+            return courier;
+        }
+        return Object.keys(options)[0] || '';
+    }
+
+    function sizeSurcharge() {
+        var sizeCode = String((cartShippingProfile && cartShippingProfile.size_code) || 'small').toLowerCase();
+        var surcharges = { small: 0, medium: 0.75, large: 1.5, oversized: 3 };
+        return Number(surcharges[sizeCode] || 0);
+    }
+
+    function rateFor(country, courier, speed) {
+        var tiers = (((shippingRateTable || {})[country] || {})[courier] || {})[speed] || [];
+        var weight = Math.max(0.1, Number((cartShippingProfile && cartShippingProfile.weight_kg) || 0.1));
+        for (var i = 0; i < tiers.length; i++) {
+            var max = tiers[i].max;
+            if (max === null || typeof max === 'undefined' || weight <= Number(max)) {
+                return Number(tiers[i].price || 0) + sizeSurcharge();
+            }
+        }
+        return 0;
     }
 
     function formatMoney(value) {
         return '\u20AC' + Number(value || 0).toFixed(2);
     }
 
-    function shippingCost(country, speed) {
+    function shippingCost(country, courier, speed) {
         if (subtotal >= freeThreshold) {
             return 0;
         }
-        var rates = getCountryRates(country);
-        return Number(rates[speed] || 0);
+        return rateFor(country, courier, speed);
     }
 
     function updateTotals() {
         var country = selectedCountry();
+        var courier = selectedCourier();
         var speed = selectedSpeed();
-        var currentShippingCost = shippingCost(country, speed);
+        var currentShippingCost = shippingCost(country, courier, speed);
         if (shippingOut) shippingOut.textContent = currentShippingCost === 0 ? t('freeLabel') : formatMoney(currentShippingCost);
         var total = Math.max(0, subtotal - couponDiscount - loyaltyDiscount + currentShippingCost);
         if (totalOut) totalOut.textContent = total.toFixed(2);
@@ -1496,13 +1501,13 @@ if (file_exists($headerPath)) {
 
     function updateSpeedLabels() {
         var country = selectedCountry();
-        var rates = getCountryRates(country);
+        var courier = selectedCourier();
         var freeText = '(' + t('checkoutFreeOverAmount', { amount: Number(freeThreshold).toFixed(0) }) + ')';
         if (standardCostLabelEl) {
-            standardCostLabelEl.textContent = subtotal >= freeThreshold ? freeText : '(' + formatMoney(rates.standard || 0) + ')';
+            standardCostLabelEl.textContent = subtotal >= freeThreshold ? freeText : '(' + formatMoney(rateFor(country, courier, 'standard')) + ')';
         }
         if (expressCostLabelEl) {
-            expressCostLabelEl.textContent = subtotal >= freeThreshold ? freeText : '(' + formatMoney(rates.express || 0) + ')';
+            expressCostLabelEl.textContent = subtotal >= freeThreshold ? freeText : '(' + formatMoney(rateFor(country, courier, 'express')) + ')';
         }
     }
 
@@ -1900,6 +1905,7 @@ if (file_exists($headerPath)) {
 
     if (courierEl) {
         courierEl.addEventListener('change', function () {
+            updateSpeedLabels();
             updateTotals();
             updateCourierMap();
             togglePickupPointWrappers();
