@@ -8,7 +8,6 @@ require_once __DIR__ . '/../../include/made_to_order_access.php';
 $current_page = 'product_management';
 $flash = '';
 
-// Backfill the Selling Fast flag on older databases before the page uses it.
 $sellingFastColumn = mysqli_query($conn, "SHOW COLUMNS FROM products LIKE 'isSellingFast'");
 if ($sellingFastColumn && mysqli_num_rows($sellingFastColumn) === 0) {
     mysqli_query($conn, "ALTER TABLE products ADD COLUMN isSellingFast TINYINT(1) NOT NULL DEFAULT 0");
@@ -145,7 +144,6 @@ function productMgmtReadUploadedImageBlob(array $files, int $index): ?string
     return app_image_optimize_photo_blob_for_storage($photoData, 1400, 1400, 78);
 }
 
-/* ── Handle POST actions ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $action = $_POST['action'] ?? '';
@@ -206,9 +204,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                  (sku, nameEN, nameGR, descriptionEN, descriptionGR, basePrice, costPrice, inventory, cartStatus, category, isSellingFast, privateCustomerEmail, privateAccessToken, privateLinkSentAt)
                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             );
-            // sku (s), nameEN (s), nameGR (s), descEN (s), descGR (s), basePrice (d), costPrice (d),
-            // inventory (i), cartStatus (s), category (s), isSellingFast (i), privateCustomerEmail (s),
-            // privateAccessToken (s), privateLinkSentAt (s)
+
             mysqli_stmt_bind_param(
                 $stmt,
                 'sssssddississs',
@@ -306,9 +302,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      privateLinkSentAt=?
                  WHERE productID=?"
             );
-            // nameEN (s), nameGR (s), descEN (s), descGR (s),
-            // basePrice (d), costPrice (d), inventory (i), cartStatus (s), category (s), isSellingFast (i),
-            // privateCustomerEmail (s), privateAccessToken (s), privateLinkSentAt (s), productID (i)
+
             mysqli_stmt_bind_param(
                 $stmt,
                 'ssssddississsi',
@@ -434,7 +428,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'delete') {
         $id = (int)($_POST['productID'] ?? 0);
 
-        // Check if this product appears in any order (must preserve history)
         $hasOrders = false;
         $chkOrders = mysqli_prepare($conn, "SELECT 1 FROM order_items WHERE productID = ? LIMIT 1");
         if ($chkOrders) {
@@ -446,13 +439,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($hasOrders) {
-            // Soft-delete: mark as discontinued so it disappears from shop
+
             $stmt = mysqli_prepare($conn, "UPDATE products SET cartStatus='discontinued' WHERE productID=?");
             mysqli_stmt_bind_param($stmt, 'i', $id);
             mysqli_stmt_execute($stmt);
             $flash = 'warn:Product has existing orders and cannot be fully deleted — it has been marked as Discontinued and hidden from the shop.';
         } else {
-            // Hard-delete: remove dependent rows first, then the product
+
             $deleteWishlist = mysqli_prepare($conn, "DELETE FROM wishlist_items WHERE productID = ?");
             if ($deleteWishlist) {
                 mysqli_stmt_bind_param($deleteWishlist, 'i', $id);
@@ -471,7 +464,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 mysqli_stmt_execute($deletePhotos);
                 mysqli_stmt_close($deletePhotos);
             }
-            // variation_stock references product_variations, so delete that first
+
             $vStmt = mysqli_prepare($conn, "SELECT variationID FROM product_variations WHERE productID = ?");
             $vRes = false;
             if ($vStmt) {
@@ -526,7 +519,6 @@ if (isset($_GET['flash'])) {
     $flash = $_GET['flash'];
 }
 
-/* ── Load products ── */
 $searchTerm = trim((string)($_GET['q'] ?? ''));
 $statusFilter = trim((string)($_GET['status_filter'] ?? ''));
 $allowedStatusFilters = ['active', 'low_stock', 'out_of_stock', 'made_to_order', 'discontinued'];
@@ -605,7 +597,6 @@ if ($productsStmt) {
     mysqli_stmt_close($productsStmt);
 }
 
-/* ── Load colors per product (for colour photos card) ── */
 $pcpColorsByProduct = [];
 $r = mysqli_query($conn,
     "SELECT DISTINCT pv.productID, pv.colorID, c.colorName
@@ -622,7 +613,6 @@ if ($r) {
     }
 }
 
-/* ── Load one product for edit modal ── */
 $editProduct = null;
 if (isset($_GET['edit'])) {
     $eid = (int)$_GET['edit'];
@@ -644,7 +634,6 @@ $availStatus = [
     'discontinued'  => ['label' => 'hidden',        'badge' => 'badge-muted'],
 ];
 
-/* ── Images keyed by productID (all photos, up to 4) ── */
 $images = [];
 $r = mysqli_query($conn, "SELECT productID, imageID FROM photos ORDER BY imageID ASC");
 if ($r) {
@@ -847,7 +836,6 @@ $statusFilterOptions = [
         </table>
       </div>
 
-      <!-- ── Product Colour Photos ── -->
       <div class="card" style="margin-top:24px">
         <div class="card-title">Product Colour Photos</div>
         <p class="text-sm text-muted" style="margin-bottom:20px">Upload product photos per colour. These appear on the storefront when the customer selects a colour.</p>
@@ -885,7 +873,6 @@ $statusFilterOptions = [
         <div id="pcp-empty" style="display:none;font-size:13px;color:#9ca3af;padding:12px 0">No photos yet for this product &amp; colour combination.</div>
       </div>
 
-      <!-- ── Multi-Colour Selection ── -->
       <div class="card" style="margin-top:24px">
         <div class="card-title">Multi-Colour Selection</div>
         <p class="text-sm text-muted" style="margin-bottom:20px">
@@ -951,7 +938,6 @@ $statusFilterOptions = [
   </main>
 </div>
 
-<!-- ── Add Product Modal ── -->
 <div class="modal-overlay" id="modalAdd">
   <div class="modal-box">
     <h3>Add Product</h3>
@@ -1049,7 +1035,6 @@ $statusFilterOptions = [
   </div>
 </div>
 
-<!-- ── Edit Product Modal (pre-filled via URL ?edit=ID) ── -->
 <?php if ($editProduct): ?>
 <div class="modal-overlay show" id="modalEdit">
   <div class="modal-box">
@@ -1292,7 +1277,7 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 
 <script>
-/* ── Product Colour Photos ── */
+
 var pcpColorMap = <?= json_encode($pcpColorsByProduct, JSON_UNESCAPED_UNICODE) ?>;
 var pcpAjax     = 'ajax/product_color_photo.php';
 
@@ -1394,7 +1379,6 @@ function pcpDelete(id, btn) {
     });
 }
 
-/* ── Multi-Colour Selection ── */
 var mcsAjax = 'ajax/color_scheme.php';
 var mcsBase = '<?= htmlspecialchars(productMgmtBuildProjectBasePath(), ENT_QUOTES) ?>/';
 

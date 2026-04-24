@@ -1,4 +1,4 @@
-/* Reset and Base Styles (scoped to storefront pages) */
+
 .site-page * {
     margin: 0;
     padding: 0;
@@ -28,10 +28,6 @@
     background-color: var(--white);
 }
 
-/* ============================
-   Account page layout & helpers
-   ============================ */
-
 body.account-page {
     min-height: 100vh;
     display: flex;
@@ -46,8 +42,6 @@ body.account-page {
 body.account-page .footer {
     flex-shrink: 0;
 }
-
-/* Avatar + country select helpers used in account.php */
 
 .account-avatar-wrapper {
     width: 80px;
@@ -68,10 +62,6 @@ body.account-page .footer {
 .country-select {
     width: 100%;
 }
-
-/* ============================
-   Storefront sections
-   ============================ */
 
 .container {
     max-width: 1200px;
@@ -99,7 +89,6 @@ body.account-page .footer {
     user-select: none;
 }
 
-/* Hero Section */
 .hero {
     position: relative;
     height: 600px;
@@ -178,7 +167,7 @@ body.account-page .footer {
     align-items: center;
     gap: 10px;
     transition: transform 0.3s, box-shadow 0.3s;
-    text-decoration: none; /* remove underline on links */
+    text-decoration: none;
 }
 
 .cta-button:hover {
@@ -203,7 +192,6 @@ body.account-page .footer {
     display: none;
 }
 
-/* Shop by Collection Section */
 .shop-collection {
     padding: 80px 0;
     background-color: var(--white);
@@ -278,7 +266,6 @@ body.account-page .footer {
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
-/* Best Sellers Section */
 .best-sellers {
     padding: 80px 0;
     background: linear-gradient(180deg, var(--purple-lavender) 0%, var(--white) 100%);
@@ -513,7 +500,6 @@ body.account-page .footer {
     color: #6d28d9;
 }
 
-/* View All Products Section */
 .view-all-section {
     padding: 60px 0;
     background-color: var(--white);
@@ -538,7 +524,6 @@ body.account-page .footer {
     color: var(--white);
 }
 
-/* Follow Our Journey Section */
 .follow-journey {
     padding: 80px 0;
     background-color: var(--white);
@@ -606,7 +591,6 @@ body.account-page .footer {
     color: #fff;
 }
 
-/* Features Section */
 .features {
     padding: 80px 0;
     background-color: var(--white);
@@ -648,7 +632,6 @@ body.account-page .footer {
     line-height: 1.6;
 }
 
-/* Footer */
 .footer {
     background-color: var(--purple-lavender);
     padding: 60px 0 30px;
@@ -1263,7 +1246,6 @@ body.account-page .footer {
     }
 }
 
-/* Responsive Design */
 @media (max-width: 1024px) {
     .products-grid {
         grid-template-columns: repeat(2, 1fr);
@@ -1492,10 +1474,6 @@ body.account-page .footer {
         flex-direction: column;
     }
 }
-
-/* =============================================
-   CHECKOUT PAGE
-   ============================================= */
 
 .checkout-container {
     max-width: 1160px;

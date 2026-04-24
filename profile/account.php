@@ -13,9 +13,6 @@ require '../PHPMailer-master/src/Exception.php';
 require '../PHPMailer-master/src/PHPMailer.php';
 require '../PHPMailer-master/src/SMTP.php';
 
-/**
- * Resolve current user ID from session
- */
 $userId = null;
 
 if (isset($_SESSION["user"]) && is_array($_SESSION["user"])) {
@@ -30,13 +27,11 @@ if ($userId === null && isset($_SESSION["user_id"])) {
     $userId = (int) $_SESSION["user_id"];
 }
 
-// Require login if we still don't have an ID
 if ($userId === null || $userId <= 0) {
     header("Location: ../authentication/login.php");
     exit();
 }
 
-// Fetch fresh user row
 $stmt = $conn->prepare("SELECT *, userID AS id FROM users WHERE userID = ?");
 $stmt->bind_param("i", $userId);
 $stmt->execute();
@@ -45,14 +40,13 @@ $user   = $result->fetch_assoc();
 $stmt->close();
 
 if (!$user) {
-    // Session says there is a user but DB row is missing; log out
+
     session_unset();
     session_destroy();
     echo "User not found.";
     exit();
 }
 
-// Make sure session has consistent IDs
 if (!isset($_SESSION["user"])) {
     $_SESSION["user"] = [];
 }
@@ -61,7 +55,6 @@ $_SESSION["user_id"]           = $user["id"];
 $_SESSION["user"]["email"]     = $user["email"];
 $_SESSION["user"]["full_name"] = $user["full_name"];
 
-// Also make header.php see correct name/role/initials
 $fullName = $user["full_name"] ?? "User";
 $role     = $_SESSION["user"]["role"] ?? "user";
 
@@ -83,7 +76,6 @@ if (!in_array($activeTab, $allowedTabs, true)) {
     $activeTab = "orders";
 }
 
-// Helper: format dates
 function formatDateTime(?string $value): string {
     if (!$value) return "-";
     $ts = strtotime($value);
@@ -105,9 +97,6 @@ function formatLoyaltyRuleLabel(?string $rule): string {
     return ucwords(str_replace("_", " ", $rule));
 }
 
-/**
- * Ensure cart session structure exists and return it by reference.
- */
 function &accountGetOrInitCart(): array {
     if (!isset($_SESSION["cart"]) || !is_array($_SESSION["cart"])) {
         $_SESSION["cart"] = [
@@ -125,9 +114,6 @@ function &accountGetOrInitCart(): array {
     return $_SESSION["cart"];
 }
 
-/**
- * Match cart line by product + variation + gift options.
- */
 function accountFindExistingLineIndex(array $items, int $productId, ?int $variationId, array $addons): ?int {
     foreach ($items as $index => $item) {
         if ((int)($item["product"]["id"] ?? 0) !== $productId) {
@@ -155,9 +141,6 @@ function accountFindExistingLineIndex(array $items, int $productId, ?int $variat
     return null;
 }
 
-/**
- * Recalculate cart totals.
- */
 function accountRecalcCartTotals(array $items): array {
     $itemsCount = 0;
     $subtotal = 0.0;
@@ -187,7 +170,6 @@ function accountResetDefaultAddresses(mysqli $conn, int $userId): void {
     }
 }
 
-// Messages
 $successMessage = "";
 $errorMessage   = "";
 
@@ -195,18 +177,10 @@ if (empty($_SESSION["account_reorder_token"])) {
     $_SESSION["account_reorder_token"] = bin2hex(random_bytes(32));
 }
 
-/**
- * ---------------------------
- *  Handle POST actions
- * ---------------------------
- */
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     app_require_csrf(false, "Invalid request token. Please refresh the page and try again.");
     $action = $_POST["action"] ?? "";
 
-    /**
-     * Reorder: add all items from a previous order back to cart.
-     */
     if ($action === "reorder_order") {
         $activeTab = "orders";
         $orderId = (int)($_POST["order_id"] ?? 0);
@@ -401,13 +375,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
     }
 
-    /**
-     * 1) Upload / change profile picture
-     */
     if ($action === "update_avatar") {
         if (!empty($_FILES["profile_image"]["name"])) {
             $file     = $_FILES["profile_image"];
-            $maxSize  = 2 * 1024 * 1024; // 2MB
+            $maxSize  = 2 * 1024 * 1024;
 
             if ($file["error"] !== UPLOAD_ERR_OK) {
                 $errorMessage = "There was a problem uploading your image.";
@@ -434,7 +405,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $targetPath = $uploadDir . "/" . $filename;
 
                     if (move_uploaded_file($file["tmp_name"], $targetPath)) {
-                        // Optionally remove old file
+
                         if (!empty($user["profile_image"])) {
                             $oldPath = $uploadDir . "/" . $user["profile_image"];
                             if (is_file($oldPath)) {
@@ -459,9 +430,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
     }
 
-    /**
-     * 2) Add new address (user_addresses)
-     */
     if ($action === "add_address") {
         $label       = trim($_POST["address_label"] ?? "");
         $country     = trim($_POST["country"]  ?? "");
@@ -507,9 +475,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $activeTab = "addresses";
     }
 
-    /**
-     * 3) Set an existing address as default
-     */
     if ($action === "set_default_address") {
         $addrId = (int) ($_POST["address_id"] ?? 0);
 
@@ -557,9 +522,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $activeTab = "addresses";
     }
 
-    /**
-     * 3b) Edit an existing address (user_addresses)
-     */
     if ($action === "edit_address") {
         $addrId = (int) ($_POST["address_id"] ?? 0);
 
@@ -632,9 +594,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $activeTab = "addresses";
     }
 
-    /**
-     * 3c) Delete an existing address (user_addresses)
-     */
     if ($action === "delete_address") {
         $addrId = (int) ($_POST["address_id"] ?? 0);
 
@@ -648,13 +607,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         if ($addrRow) {
             $wasDefault = (int)$addrRow["is_default"] === 1;
 
-            // Delete the row
             $stmt = $conn->prepare("DELETE FROM user_addresses WHERE id = ? AND user_id = ?");
             $stmt->bind_param("ii", $addrId, $userId);
             $stmt->execute();
             $stmt->close();
 
-            // If it was default, choose a new default (if any left) and sync to users table
             if ($wasDefault) {
                 $stmt = $conn->prepare("
                     SELECT * FROM user_addresses
@@ -707,9 +664,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $activeTab = "addresses";
     }
 
-    /**
-     * 3d) Delete Home address (from users table)
-     */
     if ($action === "delete_home_address") {
         $stmt = $conn->prepare("
             UPDATE users
@@ -729,9 +683,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $activeTab = "addresses";
     }
 
-    /**
-     * 4) Update account settings
-     */
     if ($action === "update_settings") {
         $firstName = trim($_POST["first_name"] ?? "");
         $lastName  = trim($_POST["last_name"]  ?? "");
@@ -850,9 +801,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     }
 }
 
-/**
- * Load addresses
- */
 $addresses = [];
 $addrStmt = $conn->prepare("SELECT * FROM user_addresses WHERE user_id = ? ORDER BY is_default DESC, created_at ASC");
 $addrStmt->bind_param("i", $userId);
@@ -863,9 +811,6 @@ while ($row = $addrRes->fetch_assoc()) {
 }
 $addrStmt->close();
 
-/**
- * Load order history for Orders tab.
- */
 $orderHistory = [];
 $orderItemPreviews = [];
 
@@ -992,25 +937,21 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
     <title>My Account - Athina E-Shop</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <!-- Bootstrap + Icons -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
-    <!-- Font Awesome (for header icons like globe, user, cart) -->
+
     <link rel="stylesheet"
           href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
           integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA=="
           crossorigin="anonymous" referrerpolicy="no-referrer" />
 
-    <!-- CountrySelect CSS -->
     <link rel="stylesheet"
           href="https://cdnjs.cloudflare.com/ajax/libs/country-select-js/2.1.0/css/countrySelect.min.css" />
 
-    <!-- Storefront global styles -->
     <link rel="stylesheet" href="../assets/styling/styles.css?v=<?= (int)@filemtime(__DIR__ . '/../assets/styling/styles.css') ?>">
     <link rel="stylesheet" href="../assets/styling/header.css?v=<?= (int)@filemtime(__DIR__ . '/../assets/styling/header.css') ?>">
     <link rel="stylesheet" href="../assets/styling/account.css?v=<?= (int)@filemtime(__DIR__ . '/../assets/styling/account.css') ?>">
 
-    <!-- Translations -->
     <script src="../assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/translations.js') ?>" defer></script>
 </head>
 
@@ -1044,7 +985,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
         <?php endif; ?>
 
         <div class="row">
-            <!-- LEFT SIDEBAR -->
+
             <div class="col-md-3 mb-4">
                 <div class="card shadow-sm border-0 rounded-4">
                     <div class="card-body text-center">
@@ -1104,12 +1045,11 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                 </div>
             </div>
 
-            <!-- RIGHT CONTENT -->
             <div class="col-md-9">
                 <div class="card shadow-sm border-0 rounded-4">
                     <div class="card-body">
                         <?php if ($activeTab === "orders"): ?>
-                            <!-- ORDERS TAB -->
+
                             <h4 class="mb-4" data-translate="ordersTitle">Order History</h4>
                             <?php if (empty($orderHistory)): ?>
                                 <p class="text-muted mb-0" data-translate="ordersEmpty">
@@ -1298,7 +1238,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                 </div>
                             <?php endif; ?>
                         <?php elseif ($activeTab === "addresses"): ?>
-                            <!-- ADDRESSES TAB -->
+
                             <div class="d-flex justify-content-between align-items-center mb-4">
                                 <h4 class="mb-0" data-translate="addressesTitle">Saved Addresses</h4>
                                 <button class="btn btn-primary rounded-pill px-4"
@@ -1310,7 +1250,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                             </div>
 
                             <div class="row g-3">
-                                <!-- Default address from users table (Home) -->
+
                                 <?php if (!empty($user["address"])): ?>
                                     <div class="col-md-6">
                                         <div class="card border-0 shadow-sm rounded-4 h-100">
@@ -1342,7 +1282,6 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                     </div>
                                 <?php endif; ?>
 
-                                <!-- Extra addresses from user_addresses -->
                                 <?php if (count($addresses) > 0): ?>
                                     <?php foreach ($addresses as $addr): ?>
                                         <div class="col-md-6">
@@ -1367,7 +1306,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                                     </p>
 
                                                     <div class="d-flex gap-2 mt-auto">
-                                                        <!-- Edit button (opens modal) -->
+
                                                         <button type="button"
                                                                 class="btn btn-outline-secondary btn-sm edit-address-btn"
                                                                 title="Edit address"<?= app_translate_title_attrs('Edit address', 'Επεξεργασία διεύθυνσης') ?>
@@ -1381,7 +1320,6 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                                             <i class="bi bi-pencil"></i>
                                                         </button>
 
-                                                        <!-- Set default -->
                                                         <form method="post">
                                                             <input type="hidden" name="action" value="set_default_address">
                                                             <input type="hidden" name="address_id" value="<?= (int)$addr["id"] ?>">
@@ -1401,7 +1339,6 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                                             <?php endif; ?>
                                                         </form>
 
-                                                        <!-- Delete -->
                                                         <form method="post">
                                                             <input type="hidden" name="action" value="delete_address">
                                                             <input type="hidden" name="address_id" value="<?= (int)$addr["id"] ?>">
@@ -1427,7 +1364,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                             </div>
 
                         <?php elseif ($activeTab === "settings"): ?>
-                            <!-- SETTINGS TAB -->
+
                             <h4 class="mb-4" data-translate="settingsTitle">Account Settings</h4>
 
                             <form method="post" class="row g-3">
@@ -1485,7 +1422,6 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
     </div>
 </main>
 
-<!-- Avatar Upload Modal -->
 <div class="modal fade" id="avatarModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <form class="modal-content" method="post" enctype="multipart/form-data">
@@ -1524,7 +1460,6 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
     </div>
 </div>
 
-<!-- Add Address Modal -->
 <div class="modal fade" id="addressModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <form class="modal-content" method="post">
@@ -1596,7 +1531,6 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
     </div>
 </div>
 
-<!-- Edit Address Modal -->
 <div class="modal fade" id="editAddressModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <form class="modal-content" method="post">
@@ -1662,7 +1596,6 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
 
 <?php include "../include/footer.php"; ?>
 
-<!-- jQuery + countrySelect JS -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/country-select-js/2.1.0/js/countrySelect.min.js"></script>
 
@@ -1677,7 +1610,6 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
     });
 </script>
 
-<!-- Edit address button -> open modal and populate -->
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const editButtons = document.querySelectorAll('.edit-address-btn');

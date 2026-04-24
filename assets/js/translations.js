@@ -789,7 +789,7 @@ function readPreferenceStorage(key) {
                 return localValue;
             }
         } catch (error) {
-            // Ignore localStorage access issues silently.
+
         }
     }
 
@@ -807,7 +807,7 @@ function writePreferenceStorage(key, value) {
 
         window.localStorage.removeItem(key);
     } catch (error) {
-        // Ignore localStorage access issues silently.
+
     }
 }
 
@@ -815,7 +815,7 @@ function removePersistentPreferenceStorage(key) {
     try {
         window.localStorage.removeItem(key);
     } catch (error) {
-        // Ignore localStorage access issues silently.
+
     }
 }
 

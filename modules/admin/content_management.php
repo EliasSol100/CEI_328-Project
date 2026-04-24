@@ -26,7 +26,6 @@ function contentPageNormalizeType(string $value): string {
     return in_array($value, ['static', 'blog'], true) ? $value : 'static';
 }
 
-/* ── Handle POST ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $action = $_POST['action'] ?? '';
@@ -89,12 +88,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 if (isset($_GET['flash'])) $flash = $_GET['flash'];
 
-/* ── Load pages ── */
 $pages = [];
 $r = mysqli_query($conn, "SELECT * FROM content_pages ORDER BY pageType ASC, pageTitle ASC, language ASC");
 if ($r) { while ($row = mysqli_fetch_assoc($r)) $pages[] = $row; }
 
-/* ── Edit: load one page ── */
 $editPage = null;
 if (isset($_GET['edit'])) {
     $eid = (int)$_GET['edit'];
@@ -135,7 +132,6 @@ $typeLabel  = ['static'=>'Static Page','blog'=>'Blog Post'];
         <div class="flash flash-<?= $type === 'ok' ? 'success' : 'error' ?>"><?= app_h($msg) ?></div>
       <?php endif; ?>
 
-      <!-- ── Content pages table ── -->
       <div class="card mb-6">
         <div class="card-title">Website Content</div>
         <table class="data-table">
@@ -188,7 +184,6 @@ $typeLabel  = ['static'=>'Static Page','blog'=>'Blog Post'];
         </table>
       </div>
 
-      <!-- ── Info cards ── -->
       <div class="grid-2">
         <div class="alert-card alert-blue">
           <div class="alert-title"><i class="fas fa-file-alt"></i> Static Pages</div>
@@ -214,7 +209,6 @@ $typeLabel  = ['static'=>'Static Page','blog'=>'Blog Post'];
   </main>
 </div>
 
-<!-- ── Add Page Modal ── -->
 <div class="modal-overlay" id="modalAdd">
   <div class="modal-box">
     <h3>New Page</h3>
@@ -267,7 +261,6 @@ $typeLabel  = ['static'=>'Static Page','blog'=>'Blog Post'];
   </div>
 </div>
 
-<!-- ── Edit Page Modal ── -->
 <?php if ($editPage): ?>
 <div class="modal-overlay show" id="modalEdit">
   <div class="modal-box">

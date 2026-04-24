@@ -17,7 +17,6 @@ unset($_SESSION['checkout_result']);
 $tempPassword = $_SESSION['temp_password'] ?? ($result['temp_password'] ?? null);
 unset($_SESSION['temp_password']);
 
-// Correct relative path for includes
 require_once __DIR__ . '/../authentication/database.php';
 require_once __DIR__ . '/../include/loyalty_program.php';
 require_once __DIR__ . '/../include/translation_helpers.php';
@@ -46,7 +45,7 @@ $loyaltyBalanceAfter = max(0, (int)($result['loyalty_balance_after'] ?? 0));
 $loyaltyAccountAvailable = !empty($result['loyalty_account_available']);
 $loyaltyHasActivity = $loyaltyRedeemedPoints > 0 || $loyaltyEarnedPoints > 0;
 if (isset($result['order_id'])) {
-    // Schema-aligned read query: orderID/order_items.orderID.
+
     $stmt = $conn->prepare("SELECT o.*, (SELECT COUNT(*) FROM order_items WHERE orderID = o.orderID) AS item_count FROM orders o WHERE o.orderID = ?");
     if ($stmt) {
         $stmt->bind_param("i", $result['order_id']);

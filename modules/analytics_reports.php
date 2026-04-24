@@ -1,35 +1,15 @@
 <?php
-/**
- * Analytics & Reports Module
- *
- * Implements function 3.2.6.20: View Analytics & Reports (Revenue / Costs / Profitability)
- *
- * @package CreationsByAthina
- */
 
-// Prevent direct access
 if (!defined('INCLUDE_CHECK') && !defined('ANALYTICS_REPORTS_DIRECT')) {
     die('Direct access not permitted');
 }
 
-/**
- * Get analytics data including revenue, costs, profitability, and cost breakdown.
- *
- * @param mysqli   $conn       Database connection
- * @param string   $timeRange  Time range: 'today', '7days', '30days', 'this_month', 'last_month', 'custom'
- * @param string   $startDate  Start date (Y-m-d) for custom range (optional)
- * @param string   $endDate    End date (Y-m-d) for custom range (optional)
- * @return array               Array containing revenue, costs, profit, margin, and cost breakdown
- * @throws Exception On database error
- */
 function getAnalyticsReports($conn, $timeRange = '30days', $startDate = null, $endDate = null) {
-    // Ensure required tables exist (operational_costs)
+
     ensureOperationalCostsTable($conn);
 
-    // Build date condition
     $dateCondition = getAnalyticsDateCondition($timeRange, $startDate, $endDate);
 
-    // 1. Revenue: sum of totalAmount from paid orders
     $revenue = 0;
     $stmt = $conn->prepare("
         SELECT COALESCE(SUM(totalAmount), 0) as total_revenue
@@ -44,7 +24,6 @@ function getAnalyticsReports($conn, $timeRange = '30days', $startDate = null, $e
     $revenue = (float)$row['total_revenue'];
     $stmt->close();
 
-    // 2. Costs: sum of amount from operational_costs
     $costs = 0;
     $costBreakdown = [];
     $stmt = $conn->prepare("
@@ -59,7 +38,6 @@ function getAnalyticsReports($conn, $timeRange = '30days', $startDate = null, $e
     $costs = (float)$row['total_costs'];
     $stmt->close();
 
-    // 3. Cost breakdown by category
     $stmt = $conn->prepare("
         SELECT category, COALESCE(SUM(amount), 0) as category_total
         FROM operational_costs
@@ -78,11 +56,9 @@ function getAnalyticsReports($conn, $timeRange = '30days', $startDate = null, $e
     }
     $stmt->close();
 
-    // 4. Profit and margin
     $profit = $revenue - $costs;
     $profitMargin = ($revenue > 0) ? round(($profit / $revenue) * 100, 2) : 0;
 
-    // 5. Revenue trend (daily) for chart
     $revenueTrend = [];
     $stmt = $conn->prepare("
         SELECT DATE(created_at) as sale_date, COALESCE(SUM(totalAmount), 0) as daily_revenue
@@ -103,7 +79,6 @@ function getAnalyticsReports($conn, $timeRange = '30days', $startDate = null, $e
     }
     $stmt->close();
 
-    // 6. Cost trend (daily) for chart (optional)
     $costTrend = [];
     $stmt = $conn->prepare("
         SELECT DATE(date) as cost_date, COALESCE(SUM(amount), 0) as daily_cost
@@ -123,7 +98,6 @@ function getAnalyticsReports($conn, $timeRange = '30days', $startDate = null, $e
     }
     $stmt->close();
 
-    // 7. Combine revenue and cost trends into a single series
     $combinedTrend = [];
     $allDates = array_unique(array_merge(array_column($revenueTrend, 'date'), array_column($costTrend, 'date')));
     sort($allDates);
@@ -159,14 +133,6 @@ function getAnalyticsReports($conn, $timeRange = '30days', $startDate = null, $e
     ];
 }
 
-/**
- * Build SQL date condition for analytics.
- *
- * @param string $timeRange
- * @param string $startDate
- * @param string $endDate
- * @return string SQL condition
- */
 function getAnalyticsDateCondition($timeRange, $startDate, $endDate) {
     $condition = "";
 
@@ -198,12 +164,6 @@ function getAnalyticsDateCondition($timeRange, $startDate, $endDate) {
     return $condition;
 }
 
-/**
- * Ensure the operational_costs table exists.
- * Creates it if not present.
- *
- * @param mysqli $conn
- */
 function ensureOperationalCostsTable($conn) {
     static $tableChecked = false;
     if ($tableChecked) return;

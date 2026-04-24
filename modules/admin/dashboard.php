@@ -34,7 +34,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['notif_action'])) {
         exit;
     }
 
-    // Backward compatibility for older databases.
     $colCheck = mysqli_query($conn, "SHOW COLUMNS FROM admin_notifications LIKE 'is_read'");
     if ($colCheck && mysqli_num_rows($colCheck) === 0) {
         mysqli_query($conn, "ALTER TABLE admin_notifications ADD COLUMN is_read TINYINT(1) NOT NULL DEFAULT 0");
@@ -103,7 +102,6 @@ $trendMetricMeta = [
 ];
 $trendMeta = $trendMetricMeta[$trendMetric];
 
-/* Stats for selected window */
 $salesInWindow = 0.0;
 $ordersInWindow = 0;
 $rangeSql = "
@@ -117,7 +115,6 @@ if ($rangeRes && ($rangeRow = mysqli_fetch_assoc($rangeRes))) {
     $ordersInWindow = (int)($rangeRow['orders_total'] ?? 0);
 }
 
-/* Top product in selected window */
 $topProduct = ['name' => '—', 'sales' => 0];
 $topProductSql = "
     SELECT p.nameEN, SUM(oi.quantity) AS total
@@ -135,7 +132,6 @@ if ($topProductRes && mysqli_num_rows($topProductRes) > 0) {
     $topProduct = ['name' => (string)$row['nameEN'], 'sales' => (int)$row['total']];
 }
 
-/* Low/out-of-stock products */
 $lowStockProducts = [];
 $r = mysqli_query($conn, "
     SELECT nameEN
@@ -150,7 +146,6 @@ if ($r) {
     }
 }
 
-/* Trend data */
 $trendLabels = [];
 $trendRevenueValues = [];
 $trendOrderValues = [];
@@ -220,7 +215,6 @@ foreach ($trendRevenueValues as $idx => $revenueValue) {
     }
 }
 
-/* Top selling products in selected window */
 $topProducts = [];
 $r = mysqli_query($conn, "
     SELECT p.nameEN, SUM(oi.quantity) AS units,
@@ -239,13 +233,12 @@ if ($r) {
     }
 }
 
-/* Recent orders */
 $recentOrders = [];
 $r = mysqli_query(
     $conn,
-    "SELECT 
-        o.orderNumber, 
-        o.status, 
+    "SELECT
+        o.orderNumber,
+        o.status,
         o.totalAmount,
         DATE_FORMAT(o.createdAt,'%m/%d/%Y') AS date,
         COALESCE(u.full_name, u.email, 'Guest') AS customer

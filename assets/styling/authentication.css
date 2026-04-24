@@ -1,10 +1,5 @@
-/* ===============================
-   Athina E-Shop Authentication Styles
-   Used by: login, registration, complete_profile,
-            verification, 2FA, forgot password
-   =============================== */
 
-/* Page layout */
+
 body.registration_page {
     min-height: 100vh;
     margin: 0;
@@ -12,7 +7,6 @@ body.registration_page {
     font-family: system-ui, -apple-system, BlinkMacSystemFont,
         "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 
-    /* Soft white ↔ light purple background */
     background:
         radial-gradient(circle at top left, #f3e8ff 0, #f3e8ff 40%, transparent 70%),
         radial-gradient(circle at bottom right, #ffe4fb 0, #ffe4fb 35%, transparent 70%),
@@ -23,7 +17,6 @@ body.registration_page {
     justify-content: center;
 }
 
-/* Main auth card */
 .wizard-box {
     position: relative;
     max-width: 480px;
@@ -35,7 +28,6 @@ body.registration_page {
     padding: 24px 24px 28px;
 }
 
-/* Header area */
 .wizard-header {
     text-align: center;
     margin-bottom: 20px;
@@ -65,7 +57,6 @@ body.registration_page {
     text-align: center;
 }
 
-/* Generic form layout */
 .wizard-content .form-group {
     margin-bottom: 16px;
 }
@@ -83,7 +74,6 @@ label {
     font-size: 0.9rem;
 }
 
-/* Fields */
 .form-control {
     width: 100%;
     min-height: 48px;
@@ -101,13 +91,11 @@ label {
     outline: none;
 }
 
-/* Selects inside auth card */
 .wizard-box select.form-control,
 .wizard-box select {
     min-height: 48px;
 }
 
-/* Alerts */
 .alert {
     padding: 10px 12px;
     border-radius: 10px;
@@ -180,7 +168,6 @@ label {
     color: #b91c1c;
 }
 
-/* Buttons */
 .wizard-actions {
     margin-top: 10px;
 }
@@ -215,7 +202,6 @@ label {
     border-color: #d1d5db;
 }
 
-/* Social login */
 .auth-social-btn {
     max-width: 300px;
 }
@@ -243,7 +229,6 @@ label {
     margin: 0 auto;
 }
 
-/* Footer links */
 .form-footer {
     margin-top: 18px;
     font-size: 0.9rem;
@@ -260,7 +245,6 @@ label {
     text-decoration: underline;
 }
 
-/* Password toggle */
 span.input-group-text.toggle-password {
     width: 46px;
     justify-content: center;
@@ -272,7 +256,6 @@ span.input-group-text.toggle-password {
     border-radius: 999px 0 0 999px;
 }
 
-/* Password checklist */
 .password-checklist {
     list-style: none;
     padding-left: 0;
@@ -280,7 +263,6 @@ span.input-group-text.toggle-password {
     color: #4b5563;
 }
 
-/* Step indicator */
 .step-indicator {
     background-color: #f3f4f6;
     height: 8px;
@@ -308,7 +290,6 @@ span.input-group-text.toggle-password {
     font-weight: 600;
 }
 
-/* Multi-step */
 .form-step {
     display: none;
     flex-direction: column;
@@ -319,7 +300,6 @@ span.input-group-text.toggle-password {
     display: flex;
 }
 
-/* Helpers */
 #username-message-wrapper {
     min-height: 2.5rem;
 }
@@ -339,10 +319,6 @@ span.input-group-text.toggle-password {
     font-size: 0.9rem;
     color: #6b7280;
 }
-
-/* ===============================
-   Verify Contact Change page
-   =============================== */
 
 .verify-contact-box {
     display: flex;
@@ -364,7 +340,6 @@ span.input-group-text.toggle-password {
     text-align: left;
 }
 
-/* Responsive */
 @media (min-width: 768px) {
     body.registration_page {
         padding: 64px 16px;

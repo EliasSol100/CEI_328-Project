@@ -4,7 +4,6 @@ ini_set('display_errors', '0');
 session_start();
 define('INCLUDE_CHECK', true);
 
-// Correct relative path: go up one level from 'modules' to project root, then into 'authentication'
 require_once __DIR__ . '/../authentication/database.php';
 require_once __DIR__ . '/../include/security.php';
 require_once __DIR__ . '/../include/loyalty_program.php';
@@ -14,16 +13,14 @@ require_once __DIR__ . '/../include/translation_helpers.php';
 require_once __DIR__ . '/../include/shipping_helpers.php';
 require_once __DIR__ . '/place_order.php';
 
-// Optional: include get_config.php if it exists (to avoid errors if missing)
 $configPath = __DIR__ . '/../authentication/get_config.php';
 if (file_exists($configPath)) {
     require_once $configPath;
     $system_title = function_exists('getSystemConfig') ? getSystemConfig('site_title') : 'Creations by Athina';
 } else {
-    $system_title = 'Creations by Athina'; // fallback title
+    $system_title = 'Creations by Athina';
 }
 
-// Check database connection
 if (!$conn || $conn->connect_error) {
     die("Database connection failed: " . ($conn->connect_error ?? 'Unknown error'));
 }
@@ -307,7 +304,6 @@ function checkoutLoadDefaultAddress(mysqli $conn, int $userId): array {
 ensurePromotionCouponColumn($conn);
 ensureLoyaltyProgramSchema($conn);
 
-// Build project root for URLs dynamically so the page works in nested folders too.
 $project = rtrim(str_replace('\\', '/', dirname(dirname($_SERVER['SCRIPT_NAME'] ?? ''))), '/');
 if ($project === '' || $project === '.') {
     $project = '';
@@ -318,7 +314,6 @@ $defaultPaymentMethod = !empty($availablePaymentMethods['stripe'])
     ? 'stripe'
     : (!empty($availablePaymentMethods['paypal']) ? 'paypal' : '');
 
-// ----- USER INFO -----
 $isLoggedIn = isset($_SESSION["user"]);
 $userId = $isLoggedIn ? (int)($_SESSION["user"]["id"] ?? $_SESSION["user"]["userID"] ?? 0) : 0;
 $userEmail = $isLoggedIn ? ($_SESSION["user"]["email"] ?? null) : null;
@@ -329,10 +324,6 @@ if (!$isLoggedIn || $userId <= 0) {
     checkoutResetLoyaltySelection();
 }
 
-// ----- CART -----
-// Support both cart shapes:
-// 1) New shape from cart_api.php: $_SESSION['cart']['items']
-// 2) Legacy shape: $_SESSION['cart'] as plain item list
 $sessionCart = $_SESSION['cart'] ?? [];
 $cartItems = (is_array($sessionCart) && isset($sessionCart['items']) && is_array($sessionCart['items']))
     ? $sessionCart['items']
@@ -434,7 +425,6 @@ $estimatedEarnedPoints = (($isLoggedIn && $userId > 0) || (!empty($_POST['create
     ? loyaltyCalculateEarnedPoints(max(0, round($loyaltyEligibleSubtotal - $loyaltyDiscount, 2)))
     : 0;
 
-// ----- SHIPPING -----
 $countryCouriers = app_shipping_country_couriers();
 $shippingRateTable = app_shipping_rate_table();
 $cartShippingProfile = app_shipping_cart_profile($conn, $cartItems);
@@ -463,7 +453,6 @@ $hasDefaultAddressData = (
     trim((string)$defaultAddress['country']) !== ''
 );
 
-// ----- FORM HANDLING -----
 $errors = [];
 $error = '';
 $formData = $_POST;
@@ -739,7 +728,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors['shipping_postal_code'] = $postalError;
             }
 
-            // Keep sanitized numeric value in-memory for re-render and order payload.
             $_POST['shipping_postal_code'] = $postal;
             $formData['shipping_postal_code'] = $postal;
         }
@@ -1184,7 +1172,7 @@ if (file_exists($headerPath)) {
         <div>
             <div class="order-summary">
                 <h2><span data-translate="checkoutYourOrder">Your Order</span> (<?= $cartCount ?>)</h2>
-                <?php foreach ($cartItems as $item): 
+                <?php foreach ($cartItems as $item):
                     $name = $item['name'] ?? $item['product']['nameEN'] ?? $item['product']['nameGR'] ?? 'Product';
                     $basePrice = (float)($item['product']['basePrice'] ?? 0);
                     $addonsCost = (float)($item['addons']['addonsCost'] ?? 0);

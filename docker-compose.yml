@@ -1,6 +1,5 @@
 services:
 
-  # ── PHP + Apache ────────────────────────────────────────────────────────────
   app:
     build: .
     container_name: athina_app
@@ -14,7 +13,6 @@ services:
       DB_NAME:     ${DB_NAME:-athina_eshop}
       DB_PORT:     3306
     volumes:
-      # Uploads και color photos παραμένουν persistent (δεν χάνονται σε rebuild)
       - uploads_data:/var/www/html/uploads
       - color_photos:/var/www/html/assets/product_color_photos
       - yarn_colors:/var/www/html/assets/yarn_colors
@@ -22,7 +20,6 @@ services:
       db:
         condition: service_healthy
 
-  # ── MariaDB ─────────────────────────────────────────────────────────────────
   db:
     image: mariadb:10.11
     container_name: athina_db
@@ -32,9 +29,7 @@ services:
       MARIADB_DATABASE:      ${DB_NAME:-athina_eshop}
       MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
     volumes:
-      # Persistent database storage
       - db_data:/var/lib/mysql
-      # Αυτόματο import του schema κατά την πρώτη εκκίνηση
       - ./sql/athina_eshop.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
@@ -43,7 +38,6 @@ services:
       retries: 5
       start_period: 30s
 
-  # ── phpMyAdmin (προαιρετικό, για διαχείριση DB) ─────────────────────────────
   phpmyadmin:
     image: phpmyadmin:latest
     container_name: athina_phpmyadmin

@@ -38,8 +38,6 @@ function adminLoadPrivateLinkForOrder(mysqli $conn, array $order): array {
     return ['product_id' => (int)$row['productID'], 'private_link' => generateAccessLink((int)$row['productID'], 'token', $token, null)];
 }
 
-// Keep long custom-order summaries readable inside the admin table by splitting
-// common detail labels onto separate lines without showing actual bullet marks.
 function adminFormatDescriptionForTable(string $description): string {
     $description = trim(preg_replace("/\r\n?/", "\n", $description));
     if ($description === '') return '';

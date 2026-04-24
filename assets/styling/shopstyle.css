@@ -1,4 +1,4 @@
-﻿.shop-page {
+.shop-page {
     background: linear-gradient(180deg, #fff 0%, #fdf6ff 100%);
     padding: 42px 0 70px;
 }
@@ -106,7 +106,6 @@
     margin-top: 5px;
 }
 
-/* TAG chips */
 .chip-row {
     display: flex;
     flex-wrap: wrap;
@@ -157,8 +156,6 @@
     box-shadow: 0 8px 16px rgba(124, 58, 237, 0.14);
 }
 
-/* --- COLOR FILTERS (now matching plush colours) --- */
-
 .color-filter-row {
     display: flex;
     flex-wrap: wrap;
@@ -186,13 +183,12 @@
     transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
-/* Individual colours (picked from actual plush palette) */
-.color-orange { background: #ff9736; } /* Flame Dragon */
-.color-yellow { background: #ffeaa7; } /* Electric Mouse */
-.color-lilac  { background: #c7a6ff; } /* Lilac Turtle */
-.color-cream  { background: #f5e1b8; } /* Daisy Bunny */
-.color-beige  { background: #e1c1aa; } /* Meadow Bunny */
-.color-pink   { background: #ff8ac2; } /* Berry Bunny */
+.color-orange { background: #ff9736; }
+.color-yellow { background: #ffeaa7; }
+.color-lilac  { background: #c7a6ff; }
+.color-cream  { background: #f5e1b8; }
+.color-beige  { background: #e1c1aa; }
+.color-pink   { background: #ff8ac2; }
 
 .color-swatch input:checked + .color-dot {
     transform: scale(1.12);
@@ -200,7 +196,6 @@
     border-color: rgba(124, 58, 237, 0.5);
 }
 
-/* Clear filters button */
 .filter-clear-wrap {
     margin-top: 26px;
 }
@@ -242,8 +237,6 @@
     box-shadow: 0 6px 14px rgba(124, 58, 237, 0.15);
     transform: translateY(-1px);
 }
-
-/* PRODUCTS WRAP */
 
 .shop-products-wrap {
     padding: 20px;
@@ -376,7 +369,6 @@
     z-index: 1;
 }
 
-/* Local plush images */
 .image-1 {
     background-image: url('../images/products/flame-dragon-plush.jpg');
 }
@@ -473,7 +465,6 @@
     color: #777;
 }
 
-/* Add to Cart button */
 .shop-atc-btn {
     display: flex;
     align-items: center;
@@ -497,7 +488,6 @@
     background: linear-gradient(90deg, #16a34a, #15803d);
 }
 
-/* Toast notification */
 .cart-toast {
     position: fixed;
     bottom: 28px;
@@ -518,7 +508,6 @@
 .cart-toast.show { opacity: 1; transform: translateY(0); }
 .cart-toast.cart-toast-error { background: #c0392b; }
 
-/* Variations modal */
 .var-modal-overlay {
     display: none;
     position: fixed;
@@ -584,8 +573,6 @@
 }
 .var-modal-add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .var-modal-add-btn:not(:disabled):hover { opacity: 0.88; }
-
-/* RESPONSIVE */
 
 @media (max-width: 1024px) {
     .shop-filter-toggle {

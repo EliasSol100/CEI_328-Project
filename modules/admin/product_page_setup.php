@@ -5,21 +5,19 @@ require_once __DIR__ . '/../../include/security.php';
 
 $current_page = 'product_page_setup';
 
-/* ── Toggle colour for category (POST) ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $categoryID = (int)($_POST['categoryID'] ?? 0);
     $colorID    = (int)($_POST['colorID']    ?? 0);
     $isEnabled  = (int)($_POST['isEnabled']  ?? 0);
 
-    // Toggle globally unavailable colour
     if (isset($_POST['toggleGlobal'])) {
         $newActive = (int)($_POST['newActive'] ?? 0);
         $stmt = mysqli_prepare($conn, "UPDATE colors SET isActive=? WHERE colorID=?");
         mysqli_stmt_bind_param($stmt, 'ii', $newActive, $colorID);
         mysqli_stmt_execute($stmt);
     } else {
-        // Upsert category_colors
+
         $stmt = mysqli_prepare($conn,
             "INSERT INTO category_colors (categoryID,colorID,isEnabled) VALUES (?,?,?)
              ON DUPLICATE KEY UPDATE isEnabled=?");
@@ -30,22 +28,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-/* ── Load categories ── */
 $categories = [];
 $r = mysqli_query($conn, "SELECT * FROM categories ORDER BY categoryName");
 if ($r) { while ($row = mysqli_fetch_assoc($r)) $categories[] = $row; }
 
-/* ── Load all colours ── */
 $allColors = [];
 $r = mysqli_query($conn, "SELECT * FROM colors ORDER BY colorName");
 if ($r) { while ($row = mysqli_fetch_assoc($r)) $allColors[$row['colorID']] = $row; }
 
-/* ── Load category_colors ── */
-$catColorMap = []; // [categoryID][colorID] => isEnabled
+$catColorMap = [];
 $r = mysqli_query($conn, "SELECT * FROM category_colors");
 if ($r) { while ($row = mysqli_fetch_assoc($r)) $catColorMap[$row['categoryID']][$row['colorID']] = (int)$row['isEnabled']; }
 
-/* ── Stats ── */
 $totalAvailable  = count(array_filter($allColors, fn($c)=>$c['isActive']==1));
 $unavailableCount= count(array_filter($allColors, fn($c)=>$c['isActive']==0));
 
@@ -57,7 +51,6 @@ $r = mysqli_query($conn, "SELECT c.colorName, COUNT(cc.categoryID) AS cnt
       GROUP BY c.colorID ORDER BY cnt DESC LIMIT 1");
 if ($r && mysqli_num_rows($r)) { $row = mysqli_fetch_assoc($r); $mostUsed = $row['colorName']; }
 
-/* ── Active category tab from GET ── */
 $activeCategory = (int)($_GET['cat'] ?? ($categories[0]['categoryID'] ?? 0));
 $activeCatObj   = null;
 foreach ($categories as $cat) {
@@ -87,7 +80,6 @@ foreach ($categories as $cat) {
 
     <div class="content-body">
 
-      <!-- ── Stat cards ── -->
       <div class="grid-3 mb-6">
         <div class="stat-card">
           <div class="stat-header">Total Available Colours <i class="fas fa-palette stat-icon"></i></div>
@@ -106,7 +98,6 @@ foreach ($categories as $cat) {
         </div>
       </div>
 
-      <!-- ── Global colours management ── -->
       <div class="card mb-6">
         <div class="card-title">Global Colour Settings</div>
         <p class="text-sm text-muted mb-4">Toggle a colour globally. Disabled colours cannot be selected for any product.</p>
@@ -149,12 +140,10 @@ foreach ($categories as $cat) {
         </table>
       </div>
 
-      <!-- ── Colour availability by category ── -->
       <div class="card">
         <div class="card-title">Colour Availability by Category</div>
         <p class="text-sm text-muted mb-4">Enable or disable colours for specific product categories. Only globally available colours can be selected.</p>
 
-        <!-- Category tabs -->
         <div class="tab-nav mb-4" style="margin-bottom:0">
           <?php foreach ($categories as $cat):
             $cnt = 0;

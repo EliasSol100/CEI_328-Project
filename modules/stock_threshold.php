@@ -1,37 +1,15 @@
 <?php
-/**
- * Stock Threshold Check Module
- *
- * Implements function 3.2.2.6: Check Stock Threshold (Low / Out-of-Stock Detection)
- *
- * @package CreationsByAthina
- */
 
-// Prevent direct access
 if (!defined('INCLUDE_CHECK') && !defined('STOCK_THRESHOLD_DIRECT')) {
     die('Direct access not permitted');
 }
 
-/**
- * Check stock level against threshold and log status changes.
- *
- * This function evaluates the current stock of a variation against its low‑stock
- * threshold and records the result in audit_logs. It also creates an admin
- * notification if the stock becomes low or out of stock.
- *
- * @param mysqli $conn         Database connection
- * @param int    $variationId   Variation ID (must exist in variation_stock)
- * @param int    $currentStock  Current stock quantity (optional; if omitted, fetched from DB)
- * @param int    $threshold     Low stock threshold (optional; if omitted, fetched from DB)
- * @throws Exception On database error
- * @return string               New status: 'available', 'low_stock', or 'out_of_stock'
- */
 function checkStockThreshold($conn, $variationId, $currentStock = null, $threshold = null) {
-    // If current stock not provided, fetch it from variation_stock
+
     if ($currentStock === null || $threshold === null) {
         $stmt = $conn->prepare("
-            SELECT quantityAvailable, lowStockThreshold 
-            FROM variation_stock 
+            SELECT quantityAvailable, lowStockThreshold
+            FROM variation_stock
             WHERE variationID = ?
         ");
         if (!$stmt) {
@@ -54,7 +32,6 @@ function checkStockThreshold($conn, $variationId, $currentStock = null, $thresho
         }
     }
 
-    // Determine status
     $status = 'available';
     if ($currentStock <= 0) {
         $status = 'out_of_stock';
@@ -62,11 +39,9 @@ function checkStockThreshold($conn, $variationId, $currentStock = null, $thresho
         $status = 'low_stock';
     }
 
-    // Get product name for logging
     $productId = getProductIdByVariation($conn, $variationId);
     $productName = getProductName($conn, $productId);
 
-    // Log the status check in audit_logs
     $details = json_encode([
         'variation_id'  => $variationId,
         'product_id'    => $productId,
@@ -89,10 +64,8 @@ function checkStockThreshold($conn, $variationId, $currentStock = null, $thresho
         error_log("Failed to log stock threshold check: " . $conn->error);
     }
 
-    // Keep product-level stock/status synced from all its variations.
     syncProductStockStatusFromVariations($conn, $productId);
 
-    // If low or out of stock, create an admin notification
     if ($status !== 'available') {
         $message = ($status === 'out_of_stock')
             ? "Product '$productName' (variation ID: $variationId) is now OUT OF STOCK."
@@ -103,24 +76,9 @@ function checkStockThreshold($conn, $variationId, $currentStock = null, $thresho
     return $status;
 }
 
-/**
- * Sync products.inventory and products.cartStatus from variation_stock rows.
- *
- * Rules:
- * - out_of_stock: total stock <= 0
- * - low_stock: total stock > 0 and no variation above its threshold
- * - active: at least one variation is comfortably above threshold
- *
- * Keeps manual/admin workflow intact because admins can still override later.
- *
- * @param mysqli $conn
- * @param int $productId
- * @return void
- */
 function syncProductStockStatusFromVariations(mysqli $conn, int $productId): void {
     if ($productId <= 0) return;
 
-    // Do not override made-to-order products.
     $p = $conn->prepare("SELECT cartStatus FROM products WHERE productID = ? LIMIT 1");
     if (!$p) return;
     $p->bind_param("i", $productId);
@@ -170,13 +128,6 @@ function syncProductStockStatusFromVariations(mysqli $conn, int $productId): voi
     $upd->close();
 }
 
-/**
- * Helper: Get product ID from variation ID.
- *
- * @param mysqli $conn
- * @param int    $variationId
- * @return int
- */
 function getProductIdByVariation($conn, $variationId) {
     $stmt = $conn->prepare("SELECT productID FROM product_variations WHERE variationID = ?");
     if (!$stmt) return 0;
@@ -192,13 +143,6 @@ function getProductIdByVariation($conn, $variationId) {
     return 0;
 }
 
-/**
- * Helper: Get product name (prefer English, fallback to Greek).
- *
- * @param mysqli $conn
- * @param int    $productId
- * @return string
- */
 function getProductName($conn, $productId) {
     if (!$productId) return "Unknown Product";
     $stmt = $conn->prepare("SELECT nameEN, nameGR FROM products WHERE productID = ?");
@@ -215,13 +159,6 @@ function getProductName($conn, $productId) {
     return "Product #$productId";
 }
 
-/**
- * Helper: Create an admin notification.
- * Creates a simple table if it doesn't exist and stores the message.
- *
- * @param mysqli $conn
- * @param string $message
- */
 function createAdminNotification($conn, $message) {
     static $tableChecked = false;
     if (!$tableChecked) {

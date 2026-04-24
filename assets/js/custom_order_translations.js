@@ -21,7 +21,7 @@
                 return localValue;
             }
         } catch (error) {
-            // Ignore localStorage access issues silently.
+
         }
 
         try {

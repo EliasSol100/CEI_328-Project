@@ -190,7 +190,6 @@ if (!function_exists('app_product_options_build_customization_summary')) {
             $parts[] = $label . ': ' . $value;
         }
 
-        // Multi-colour scheme selections
         $csA = app_product_options_pick_color_scheme_value($customization, 'A');
         $csB = app_product_options_pick_color_scheme_value($customization, 'B');
         $csC = app_product_options_pick_color_scheme_value($customization, 'C');

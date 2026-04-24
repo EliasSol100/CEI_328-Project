@@ -1,5 +1,5 @@
 <?php
-// Enable detailed error reporting
+
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 require_once dirname(__DIR__) . '/include/security.php';
 
@@ -129,7 +129,6 @@ if (!function_exists('app_url')) {
     }
 }
 
-// Shared hosting usually does not inject .env into getenv(), so load it manually when present.
 app_load_env_file(dirname(__DIR__) . '/.env');
 app_apply_security_headers();
 app_harden_session_cookie();
@@ -146,7 +145,6 @@ if (!$conn) {
     die("Connection failed: " . mysqli_connect_error());
 }
 
-// Set charset to utf8mb4
 mysqli_set_charset($conn, "utf8mb4");
 
 require_once dirname(__DIR__) . '/include/auth_session.php';

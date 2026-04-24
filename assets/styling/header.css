@@ -1,4 +1,4 @@
-/* Shared navbar styles to keep header identical across pages */
+
 header.header {
     margin-top: 0 !important;
     background-color: var(--white);
@@ -25,8 +25,6 @@ header.header .header-content {
     width: 100%;
     overflow: visible;
 }
-
-/* ---------------- Logo ---------------- */
 
 header.header .logo {
     display: inline-flex;
@@ -82,8 +80,6 @@ header.header .logo-text {
     text-overflow: ellipsis;
 }
 
-/* ---------------- Navigation ---------------- */
-
 header.header .nav {
     display: flex;
     flex-wrap: nowrap;
@@ -120,8 +116,6 @@ header.header .nav-link:hover {
     color: var(--purple-dark);
     background: #faf5ff;
 }
-
-/* ---------------- Right Utility Section ---------------- */
 
 header.header .utility-icons {
     display: flex;
@@ -206,8 +200,6 @@ header.header.mobile-nav-open .mobile-nav-icon::after {
     transform: translateY(-6px) rotate(-45deg);
 }
 
-/* ---------------- Language Selector ---------------- */
-
 header.header .language-selector {
     display: inline-flex;
     align-items: center;
@@ -237,8 +229,6 @@ header.header .language-selector:focus-visible {
     outline-offset: 2px;
 }
 
-/* ---------------- Default Utility Icons ---------------- */
-
 header.header .utility-icon {
     color: var(--text-dark);
     text-decoration: none;
@@ -262,7 +252,6 @@ header.header .utility-icon.is-active > i {
     color: var(--purple-dark);
 }
 
-/* Cart counter badge */
 header.header .cart-icon {
     position: relative;
 }
@@ -284,7 +273,6 @@ header.header .cart-count {
     line-height: 1;
 }
 
-/* Wishlist counter badge */
 header.header .wishlist-icon {
     position: relative;
 }
@@ -306,7 +294,6 @@ header.header .wishlist-count {
     line-height: 1;
 }
 
-/* IMPORTANT: only affect the direct <i> child, not nested dropdown icons */
 header.header .utility-icon > i {
     font-size: 22px !important;
     transition: color 0.3s;
@@ -316,17 +303,11 @@ header.header .utility-icon:hover > i {
     color: var(--purple-dark);
 }
 
-/* ============================= */
-/* ===== Logged In Styling ===== */
-/* ============================= */
-
 .user-menu {
     display: flex;
     align-items: center;
     gap: 10px;
 }
-
-/* User Chip */
 
 .user-chip {
     display: flex;
@@ -337,8 +318,6 @@ header.header .utility-icon:hover > i {
     background: #f3e8ff;
     border: 1px solid #e9d5ff;
 }
-
-/* Initials Circle (avatar) */
 
 .user-avatar-circle {
     width: 28px;
@@ -352,8 +331,6 @@ header.header .utility-icon:hover > i {
     align-items: center;
     justify-content: center;
 }
-
-/* Name + label (legacy chip) */
 
 .user-text {
     display: flex;
@@ -376,20 +353,16 @@ header.header .utility-icon:hover > i {
     text-overflow: ellipsis;
 }
 
-/* --- User Dropdown --- */
-
 .user-dropdown-wrapper {
     position: relative;
     display: flex;
     align-items: center;
 }
 
-/* the avatar icon button */
 .dropdown-toggle {
     cursor: pointer;
 }
 
-/* base state: hidden but still rendered so we can animate */
 .user-dropdown {
     position: absolute;
     top: 120%;
@@ -413,7 +386,6 @@ header.header .utility-icon:hover > i {
         visibility 0s linear 0.18s;
 }
 
-/* OPEN STATE – controlled by JS only */
 .user-dropdown-wrapper.open .user-dropdown {
     opacity: 1;
     visibility: visible;
@@ -436,7 +408,6 @@ header.header .utility-icon:hover > i {
     transition: background 0.2s ease;
 }
 
-/* make sure dropdown icons keep their own colors */
 .dropdown-item i {
     font-size: 16px;
 }
@@ -453,8 +424,6 @@ header.header .utility-icon:hover > i {
     color: #d9534f;
 }
 
-/* Logged Out Auth Button */
-
 .auth-icon {
     display: inline-flex;
     align-items: center;
@@ -465,10 +434,6 @@ header.header .utility-icon:hover > i {
 .auth-icon .auth-label {
     font-size: 0.85rem;
 }
-
-/* ============================= */
-/* ====== Admin Button ========= */
-/* ============================= */
 
 header.header .admin-icon {
     background: var(--purple-dark);
@@ -495,10 +460,6 @@ header.header .admin-icon:hover {
     background: #4b0a7d;
 }
 
-/* ============================= */
-/* ========= Responsive ========= */
-/* ============================= */
-
 @media (max-width: 1024px) {
     header.header .header-content {
         column-gap: 18px;
@@ -516,7 +477,6 @@ header.header .admin-icon:hover {
         max-width: 100px;
     }
 
-    /* Optionally hide the 'Admin' text label on smaller screens, keep icon only */
     header.header .admin-icon .admin-label {
         display: none;
     }
@@ -729,31 +689,17 @@ header.header .admin-icon:hover {
     }
 }
 
-/* ============================= */
-/* === Fix Bootstrap overrides == */
-/* ============================= */
-
-/* Hide Bootstrap's default caret arrow that appears on .dropdown-toggle
-   for ANY dropdown inside the header */
 header.header .dropdown-toggle::after {
     display: none !important;
 }
 
-/* Only strip Bootstrap button chrome for the avatar dropdown inside user-dropdown-wrapper,
-   so other dropdown buttons keep their background */
 header.header .user-dropdown-wrapper .dropdown-toggle {
     border: none !important;
     padding: 0 !important;
     box-shadow: none !important;
-    /* NOTE: no background here on purpose, so the avatar keeps its purple background */
+
 }
 
-/* ============================= */
-/* === Force avatar visible ==== */
-/* ============================= */
-
-/* In case page-level CSS (e.g. account.css / Bootstrap) hides the avatar,
-   force it to be visible inside the header. */
 header.header .utility-icons .user-dropdown-wrapper {
     display: flex !important;
     align-items: center !important;

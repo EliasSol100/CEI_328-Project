@@ -1,24 +1,11 @@
 <?php
-/**
- * Custom Orders Management Module
- *
- * Implements function 3.2.6.16: Manage Custom Orders (Create / Update / Track)
- *
- * @package CreationsByAthina
- */
 
-// Prevent direct access
 if (!defined('INCLUDE_CHECK') && !defined('CUSTOM_ORDERS_DIRECT')) {
     die('Direct access not permitted');
 }
 
 require_once __DIR__ . '/../include/image_storage.php';
 
-/**
- * Allowed custom order statuses.
- *
- * A couple of legacy values are kept so older rows still render safely in admin.
- */
 const CUSTOM_ORDER_STATUSES = [
     'pending',
     'in_discussion',
@@ -31,11 +18,6 @@ const CUSTOM_ORDER_STATUSES = [
     'in_progress',
 ];
 
-/**
- * Human-readable labels for status badges and selects.
- *
- * @return array<string, string>
- */
 function getCustomOrderStatusLabels(): array
 {
     return [
@@ -51,18 +33,6 @@ function getCustomOrderStatusLabels(): array
     ];
 }
 
-/**
- * Create a new custom order request.
- *
- * @param mysqli $conn
- * @param int    $userId
- * @param string $email
- * @param string $requestDescription
- * @param array  $options
- * @return array
- * @throws InvalidArgumentException
- * @throws Exception
- */
 function createCustomOrderRequest($conn, $userId, $email, $requestDescription, $options = [])
 {
     if (!$userId || $userId <= 0) {
@@ -115,7 +85,6 @@ function createCustomOrderRequest($conn, $userId, $email, $requestDescription, $
     $customOrderId = (int)$stmt->insert_id;
     $stmt->close();
 
-    // Seed the discussion thread so both sides have a clear starting point.
     addCustomOrderMessage(
         $conn,
         $customOrderId,
@@ -133,16 +102,6 @@ function createCustomOrderRequest($conn, $userId, $email, $requestDescription, $
     ];
 }
 
-/**
- * Update selected custom order fields.
- *
- * @param mysqli $conn
- * @param int    $customOrderId
- * @param array  $updates
- * @return bool
- * @throws InvalidArgumentException
- * @throws Exception
- */
 function updateCustomOrder($conn, $customOrderId, $updates)
 {
     ensureCustomOrdersTable($conn);
@@ -208,16 +167,6 @@ function updateCustomOrder($conn, $customOrderId, $updates)
     return true;
 }
 
-/**
- * Get custom order details by ID or access token.
- *
- * @param mysqli   $conn
- * @param int|null $customOrderId
- * @param string|null $accessToken
- * @return array
- * @throws InvalidArgumentException
- * @throws Exception
- */
 function trackCustomOrder($conn, $customOrderId = null, $accessToken = null)
 {
     ensureCustomOrdersTable($conn);
@@ -274,16 +223,6 @@ function trackCustomOrder($conn, $customOrderId = null, $accessToken = null)
     return $order;
 }
 
-/**
- * Get one custom order, optionally enforcing customer ownership.
- *
- * @param mysqli   $conn
- * @param int      $customOrderId
- * @param int|null $userId
- * @return array
- * @throws InvalidArgumentException
- * @throws Exception
- */
 function getCustomOrderById($conn, $customOrderId, $userId = null)
 {
     ensureCustomOrdersTable($conn);
@@ -326,13 +265,6 @@ function getCustomOrderById($conn, $customOrderId, $userId = null)
     return $order;
 }
 
-/**
- * List custom orders for a customer account.
- *
- * @param mysqli $conn
- * @param int    $userId
- * @return array<int, array<string, mixed>>
- */
 function getCustomOrdersForUser($conn, $userId)
 {
     ensureCustomOrdersTable($conn);
@@ -398,13 +330,6 @@ function getCustomOrdersForUser($conn, $userId)
     return $orders;
 }
 
-/**
- * Fetch message thread for one custom order.
- *
- * @param mysqli $conn
- * @param int    $customOrderId
- * @return array<int, array<string, mixed>>
- */
 function getCustomOrderMessages($conn, $customOrderId)
 {
     ensureCustomOrdersTable($conn);
@@ -433,13 +358,6 @@ function getCustomOrderMessages($conn, $customOrderId)
     return $messages;
 }
 
-/**
- * Fetch the current pending offer for a custom order, if one exists.
- *
- * @param mysqli $conn
- * @param int    $customOrderId
- * @return array|null
- */
 function getActiveCustomOrderOffer($conn, $customOrderId)
 {
     ensureCustomOrdersTable($conn);
@@ -463,13 +381,6 @@ function getActiveCustomOrderOffer($conn, $customOrderId)
     return $offer ?: null;
 }
 
-/**
- * Fetch the most recent offer for display/history.
- *
- * @param mysqli $conn
- * @param int    $customOrderId
- * @return array|null
- */
 function getLatestCustomOrderOffer($conn, $customOrderId)
 {
     ensureCustomOrdersTable($conn);
@@ -493,18 +404,6 @@ function getLatestCustomOrderOffer($conn, $customOrderId)
     return $offer ?: null;
 }
 
-/**
- * Add one thread message to a custom order.
- *
- * @param mysqli    $conn
- * @param int       $customOrderId
- * @param string    $senderRole
- * @param int|null  $senderUserId
- * @param string    $messageBody
- * @return int
- * @throws InvalidArgumentException
- * @throws Exception
- */
 function addCustomOrderMessage($conn, $customOrderId, $senderRole, $senderUserId, $messageBody)
 {
     ensureCustomOrdersTable($conn);
@@ -557,19 +456,6 @@ function addCustomOrderMessage($conn, $customOrderId, $senderRole, $senderUserId
     return $messageId;
 }
 
-/**
- * Create a price offer for a custom order.
- *
- * @param mysqli      $conn
- * @param int         $customOrderId
- * @param int|null    $adminUserId
- * @param float       $price
- * @param string|null $deadline
- * @param string|null $offerNote
- * @return int
- * @throws InvalidArgumentException
- * @throws Exception
- */
 function createCustomOrderOffer($conn, $customOrderId, $adminUserId, $price, $deadline = null, $offerNote = null)
 {
     ensureCustomOrdersTable($conn);
@@ -598,7 +484,7 @@ function createCustomOrderOffer($conn, $customOrderId, $adminUserId, $price, $de
     $conn->begin_transaction();
 
     try {
-        // Keep only one live decision point for the customer at a time.
+
         $supersedeStmt = $conn->prepare("
             UPDATE custom_order_offers
             SET offerStatus = 'superseded', respondedAt = NOW()
@@ -659,18 +545,6 @@ function createCustomOrderOffer($conn, $customOrderId, $adminUserId, $price, $de
     }
 }
 
-/**
- * Accept or decline the active offer for a custom order.
- *
- * @param mysqli $conn
- * @param int    $customOrderId
- * @param int    $offerId
- * @param int    $customerUserId
- * @param string $decision
- * @return bool
- * @throws InvalidArgumentException
- * @throws Exception
- */
 function respondToCustomOrderOffer($conn, $customOrderId, $offerId, $customerUserId, $decision)
 {
     ensureCustomOrdersTable($conn);
@@ -770,13 +644,6 @@ function respondToCustomOrderOffer($conn, $customOrderId, $offerId, $customerUse
     }
 }
 
-/**
- * Remove conversation rows when a custom order is deleted.
- *
- * @param mysqli $conn
- * @param int    $customOrderId
- * @return void
- */
 function deleteCustomOrderConversation($conn, $customOrderId)
 {
     ensureCustomOrdersTable($conn);
@@ -796,12 +663,6 @@ function deleteCustomOrderConversation($conn, $customOrderId)
     }
 }
 
-/**
- * Ensure custom order tables are present and compatible with the storefront pages.
- *
- * @param mysqli $conn
- * @return void
- */
 function ensureCustomOrdersTable($conn)
 {
     static $checked = false;
@@ -896,14 +757,6 @@ function ensureCustomOrdersTable($conn)
     $checked = true;
 }
 
-/**
- * Store a customer-provided reference image for a custom order request.
- *
- * @param array $file
- * @return string
- * @throws InvalidArgumentException
- * @throws RuntimeException
- */
 function storeCustomOrderReferencePhoto(array $file): string
 {
     if (empty($file) || !isset($file['error']) || (int)$file['error'] !== UPLOAD_ERR_OK) {
@@ -938,7 +791,6 @@ function storeCustomOrderReferencePhoto(array $file): string
         throw new RuntimeException('Could not create the custom order upload folder.');
     }
 
-    // Always normalize custom-order uploads to JPG for smaller files and consistent storage.
     $filename = 'custom_order_' . date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.jpg';
     $targetPath = $targetDir . DIRECTORY_SEPARATOR . $filename;
     if (!app_image_convert_file_to_jpeg($tmpPath, $targetPath, 1600, 1600, 84)) {
@@ -948,12 +800,6 @@ function storeCustomOrderReferencePhoto(array $file): string
     return $relativeDir . $filename;
 }
 
-/**
- * Delete a stored custom-order photo when a request is cleaned up.
- *
- * @param string $relativePath
- * @return void
- */
 function deleteCustomOrderReferencePhoto(string $relativePath): void
 {
     $relativePath = trim(str_replace('\\', '/', $relativePath));
@@ -972,15 +818,6 @@ function deleteCustomOrderReferencePhoto(string $relativePath): void
     }
 }
 
-/**
- * Log custom order action to audit_logs.
- *
- * @param mysqli $conn
- * @param int    $customOrderId
- * @param string $actionType
- * @param string $message
- * @return void
- */
 function logCustomOrderAction($conn, $customOrderId, $actionType, $message)
 {
     $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
@@ -996,15 +833,6 @@ function logCustomOrderAction($conn, $customOrderId, $actionType, $message)
     }
 }
 
-/**
- * Notify admin about new custom order.
- *
- * @param mysqli $conn
- * @param int    $customOrderId
- * @param string $customerEmail
- * @param string $description
- * @return void
- */
 function notifyAdminNewCustomOrder($conn, $customOrderId, $customerEmail, $description)
 {
     $message = "New custom order request #$customOrderId from $customerEmail: " . substr($description, 0, 100) . '...';
@@ -1020,13 +848,6 @@ function notifyAdminNewCustomOrder($conn, $customOrderId, $customerEmail, $descr
     );
 }
 
-/**
- * Create admin notification.
- *
- * @param mysqli $conn
- * @param string $message
- * @return void
- */
 function createAdminNotification($conn, $message)
 {
     static $tableChecked = false;
@@ -1052,9 +873,6 @@ function createAdminNotification($conn, $message)
     }
 }
 
-/**
- * Build a public customer portal URL for one custom order.
- */
 function customOrderCustomerUrl(int $customOrderId): string
 {
     $path = 'custom_order.php?view=' . max(0, $customOrderId) . '#discussion';
@@ -1064,9 +882,6 @@ function customOrderCustomerUrl(int $customOrderId): string
     return '/' . ltrim($path, '/');
 }
 
-/**
- * Build an admin URL for one custom order.
- */
 function customOrderAdminUrl(int $customOrderId): string
 {
     $path = 'modules/admin/custom_orders.php?view=' . max(0, $customOrderId);
@@ -1076,9 +891,6 @@ function customOrderAdminUrl(int $customOrderId): string
     return '/' . ltrim($path, '/');
 }
 
-/**
- * Send one plain text email through the shared auth mailer.
- */
 function sendCustomOrderPlainEmail(string $toEmail, string $toName, string $subject, string $body): bool
 {
     $toEmail = trim($toEmail);
@@ -1094,11 +906,6 @@ function sendCustomOrderPlainEmail(string $toEmail, string $toName, string $subj
     return !empty($result['success']);
 }
 
-/**
- * Admin recipients for custom order notifications.
- *
- * @return array<int, array{name:string,email:string}>
- */
 function customOrderAdminRecipients(mysqli $conn): array
 {
     $recipients = [];
@@ -1145,9 +952,6 @@ function customOrderAdminRecipients(mysqli $conn): array
     return $recipients;
 }
 
-/**
- * Send a custom order notification to all admins.
- */
 function sendCustomOrderAdminEmail(mysqli $conn, string $subject, string $body): array
 {
     $sent = 0;
@@ -1162,9 +966,6 @@ function sendCustomOrderAdminEmail(mysqli $conn, string $subject, string $body):
     return ['sent' => $sent, 'failed' => $failed];
 }
 
-/**
- * Send an email to the customer attached to a custom order.
- */
 function sendCustomOrderCustomerEmail(mysqli $conn, int $customOrderId, string $subject, string $body): bool
 {
     try {
@@ -1182,9 +983,6 @@ function sendCustomOrderCustomerEmail(mysqli $conn, int $customOrderId, string $
     return sendCustomOrderPlainEmail($email, $name, $subject, $body);
 }
 
-/**
- * Notify the customer about a price/date offer.
- */
 function sendCustomOrderOfferEmail(mysqli $conn, int $customOrderId, float $price, ?string $deadline, ?string $note = null): bool
 {
     $deadline = trim((string)$deadline);
@@ -1202,9 +1000,6 @@ function sendCustomOrderOfferEmail(mysqli $conn, int $customOrderId, float $pric
     return sendCustomOrderCustomerEmail($conn, $customOrderId, 'Your custom order offer is ready', $body);
 }
 
-/**
- * Notify the customer about a status change.
- */
 function sendCustomOrderStatusEmail(mysqli $conn, int $customOrderId, string $status, string $note = ''): bool
 {
     $labels = getCustomOrderStatusLabels();

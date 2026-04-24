@@ -5,9 +5,6 @@ require_once "authentication/get_config.php";
 require_once __DIR__ . "/include/homepage_customization.php";
 require_once __DIR__ . "/include/translation_helpers.php";
 
-// --------------------------------------------------
-// Site configuration
-// --------------------------------------------------
 $system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
 $logo_path    = getSystemConfig("logo_path") ?: "assets/images/athina-eshop-logo.png";
 $logo_path    = str_replace("authentication/assets/", "assets/", $logo_path);
@@ -18,22 +15,18 @@ if (!file_exists($logo_path)) {
     $logo_path = "assets/images/athina-eshop-logo.png";
 }
 
-// --------------------------------------------------
-// User / Profile handling (new users table structure)
-// --------------------------------------------------
 $role        = "guest";
 $fullName    = "Guest";
 $isLoggedIn  = isset($_SESSION["user"]);
 $userInitial = "G";
 
 if ($isLoggedIn) {
-    // These come from your login / verification flows
+
     $userId    = $_SESSION["user"]["id"]        ?? null;
     $fullName  = $_SESSION["user"]["full_name"] ?? 'User';
     $role      = $_SESSION["user"]["role"]      ?? 'user';
     $userEmail = $_SESSION["user"]["email"]     ?? ($_SESSION["email"] ?? null);
 
-    // Derive initials for header avatar
     $parts = preg_split('/\s+/', trim($fullName));
     if (!empty($parts)) {
         $first = strtoupper(substr($parts[0], 0, 1));
@@ -44,7 +37,7 @@ if ($isLoggedIn) {
     $user = null;
 
     if (!empty($userEmail)) {
-        // Fetch latest profile data from the users table using EMAIL (safe, unique)
+
         $stmt = $conn->prepare("
             SELECT country, city, address, postcode, dob, phone, profile_complete, is_verified
             FROM users
@@ -61,7 +54,6 @@ if ($isLoggedIn) {
         }
     }
 
-    // Determine if profile is complete based on DB columns
     $fieldsComplete =
         $user &&
         !empty($user["country"])  &&
@@ -71,19 +63,16 @@ if ($isLoggedIn) {
         !empty($user["dob"])      &&
         !empty($user["phone"]);
 
-    // Update session flags to match DB (if we managed to load a row)
     if ($user !== null) {
         $_SESSION["user"]["profile_complete"] = (bool)$fieldsComplete;
         $_SESSION["user"]["is_verified"]      = (int)($user["is_verified"] ?? 0);
     }
 
-    // Keep these for any other pages that rely on them
     if ($userId !== null) {
         $_SESSION['user_id'] = $userId;
     }
     $_SESSION['role'] = $role;
 
-    // If profile still incomplete, force user back to complete_profile wizard
     if (!$fieldsComplete) {
         header("Location: authentication/complete_profile.php");
         exit();
@@ -95,12 +84,10 @@ if ($isLoggedIn) {
     }
 }
 
-// Make name/initials available to header.php
 $GLOBALS['header_user_full_name'] = $fullName;
 $GLOBALS['header_user_initials']  = $userInitial;
 $GLOBALS['header_user_role']      = $role;
 
-// Backfill the Selling Fast flag on older databases before homepage queries use it.
 $sellingFastColumn = $conn->query("SHOW COLUMNS FROM products LIKE 'isSellingFast'");
 if ($sellingFastColumn && $sellingFastColumn->num_rows === 0) {
     $conn->query("ALTER TABLE products ADD COLUMN isSellingFast TINYINT(1) NOT NULL DEFAULT 0");
@@ -130,7 +117,6 @@ function getOrCreateWishlistID($conn, $uid) {
     return 0;
 }
 
-// Simple wishlist state for homepage hearts (same as shop.php)
 $wishlist = isset($_SESSION['wishlist']) && is_array($_SESSION['wishlist'])
     ? $_SESSION['wishlist']
     : [];
@@ -250,7 +236,6 @@ $homepageSettings = app_homepage_load_settings($conn);
     include __DIR__ . '/include/header.php';
     ?>
 
-    <!-- Hero Section -->
     <section class="hero" style="background-image: url('<?= htmlspecialchars(app_homepage_asset_url($homepageSettings['hero_image']), ENT_QUOTES, 'UTF-8') ?>');">
         <div class="hero-overlay"></div>
         <div class="hero-content">
@@ -284,7 +269,6 @@ $homepageSettings = app_homepage_load_settings($conn);
         </div>
     </section>
 
-    <!-- Shop by Collection Section -->
     <section class="shop-collection">
         <div class="container">
             <h2 class="section-title" data-translate="shopByCollection">Shop by Collection</h2>
@@ -378,7 +362,6 @@ $homepageSettings = app_homepage_load_settings($conn);
     </section>
     <?php endif; ?>
 
-    <!-- Best Sellers Section -->
     <?php if (!empty($bestSellerProducts)): ?>
     <section class="best-sellers">
         <div class="container">
@@ -462,7 +445,6 @@ $homepageSettings = app_homepage_load_settings($conn);
             </p>
             <div class="products-grid">
 
-                <!-- 1: Flame Dragon -->
                 <?php $fav = in_array('flame_dragon', $wishlist, true); ?>
                 <div class="product-card">
                     <div class="product-image-wrapper">
@@ -495,7 +477,6 @@ $homepageSettings = app_homepage_load_settings($conn);
                     </div>
                 </div>
 
-                <!-- 2: Electric Mouse -->
                 <?php $fav = in_array('electric_mouse', $wishlist, true); ?>
                 <div class="product-card">
                     <div class="product-image-wrapper">
@@ -528,7 +509,6 @@ $homepageSettings = app_homepage_load_settings($conn);
                     </div>
                 </div>
 
-                <!-- 3: Lilac Sea Turtle -->
                 <?php $fav = in_array('lilac_turtle', $wishlist, true); ?>
                 <div class="product-card">
                     <div class="product-image-wrapper">
@@ -561,7 +541,6 @@ $homepageSettings = app_homepage_load_settings($conn);
                     </div>
                 </div>
 
-                <!-- 4: Daisy Dress Bunny -->
                 <?php $fav = in_array('daisy_bunny', $wishlist, true); ?>
                 <div class="product-card">
                     <div class="product-image-wrapper">
@@ -600,14 +579,12 @@ $homepageSettings = app_homepage_load_settings($conn);
 
     <?php endif; ?>
 
-    <!-- View All Products Button Section -->
     <section class="view-all-section">
         <div class="container">
             <a href="shop.php" class="view-all-btn" data-translate="viewAllProducts">View All Products</a>
         </div>
     </section>
 
-    <!-- Follow Our Journey Section -->
     <section class="follow-journey">
         <div class="container">
             <h2 class="section-title" data-translate="followJourney">Follow Our Journey</h2>
@@ -620,7 +597,6 @@ $homepageSettings = app_homepage_load_settings($conn);
         </div>
     </section>
 
-    <!-- Feature Blocks Section -->
     <section class="features">
         <div class="container">
             <div class="features-grid">

@@ -6,7 +6,6 @@ require_once __DIR__ . '/../../include/security.php';
 $current_page = 'customer_management';
 $flash = '';
 
-/* Handle POST actions: add / edit / delete user */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $action = $_POST['action'] ?? '';
@@ -52,7 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $userID      = (int)($_POST['userID'] ?? 0);
         $fullName    = trim($_POST['full_name'] ?? '');
         $email       = trim($_POST['email'] ?? '');
-        $passwordRaw = $_POST['password'] ?? ''; // optional
+        $passwordRaw = $_POST['password'] ?? '';
         $role        = $_POST['role'] ?? 'user';
         $isVerified  = isset($_POST['is_verified']) ? (int)$_POST['is_verified'] : 0;
         $phone       = trim($_POST['phone'] ?? '');
@@ -61,7 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($userID && $fullName !== '' && $email !== '') {
             if ($passwordRaw !== '') {
-                // Update including password
+
                 $passwordHash = password_hash($passwordRaw, PASSWORD_DEFAULT);
                 $stmt = mysqli_prepare(
                     $conn,
@@ -83,7 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $userID
                 );
             } else {
-                // Update without touching password
+
                 $stmt = mysqli_prepare(
                     $conn,
                     "UPDATE users
@@ -114,7 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'delete_user') {
         $userID = (int)($_POST['userID'] ?? 0);
         if ($userID) {
-            // Optional: prevent deleting yourself
+
             if (!isset($ADMIN_USER_ID) || (int)$ADMIN_USER_ID !== $userID) {
                 $stmt = mysqli_prepare($conn, "DELETE FROM users WHERE userID=?");
                 mysqli_stmt_bind_param($stmt, 'i', $userID);
@@ -147,7 +146,6 @@ if (isset($_GET['flash'])) {
     $flash = $_GET['flash'];
 }
 
-/* Load all customers */
 $searchTerm = trim((string)($_GET['q'] ?? ''));
 $statusFilter = trim((string)($_GET['status_filter'] ?? ''));
 $roleFilter = trim((string)($_GET['role_filter'] ?? ''));
@@ -238,7 +236,6 @@ if ($customersStmt) {
     mysqli_stmt_close($customersStmt);
 }
 
-/* If editing, locate that user */
 $editUser = null;
 if (isset($_GET['edit'])) {
     $eid = (int)$_GET['edit'];
@@ -413,7 +410,6 @@ if (isset($_GET['edit'])) {
   </main>
 </div>
 
-<!-- Add Customer Modal -->
 <div class="modal-overlay" id="modalAddCustomer">
   <div class="modal-box">
     <h3>New Customer Account</h3>
@@ -482,7 +478,6 @@ if (isset($_GET['edit'])) {
   </div>
 </div>
 
-<!-- Edit Customer Modal -->
 <?php if ($editUser): ?>
 <div class="modal-overlay show" id="modalEditCustomer">
   <div class="modal-box">

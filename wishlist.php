@@ -74,7 +74,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
     }
 
-    // Sync header counter after any change.
     $sessionCount = isset($_SESSION["wishlist"]) && is_array($_SESSION["wishlist"])
         ? count($_SESSION["wishlist"])
         : 0;

@@ -6,7 +6,6 @@ require_once __DIR__ . '/../../../include/image_storage.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
-/* ── Auto-create tables ── */
 $conn->query("
     CREATE TABLE IF NOT EXISTS product_color_scheme (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -38,7 +37,6 @@ $action    = (string)($_POST['action']    ?? $_GET['action']    ?? '');
 $productID = (int)($_POST['productID']    ?? $_GET['productID'] ?? 0);
 $id        = (int)($_POST['id']           ?? $_GET['id']        ?? 0);
 
-/* ── get_config ── */
 if ($action === 'get_config' && $productID > 0) {
     $row = null;
     $stmt = $conn->prepare("SELECT num_colors, is_enabled FROM product_color_scheme WHERE productID = ?");
@@ -57,7 +55,6 @@ if ($action === 'get_config' && $productID > 0) {
     exit;
 }
 
-/* ── save_config ── */
 if ($action === 'save_config' && $productID > 0) {
     $numColors = (int)($_POST['num_colors'] ?? 2);
     $isEnabled = (int)($_POST['is_enabled'] ?? 0);
@@ -78,7 +75,6 @@ if ($action === 'save_config' && $productID > 0) {
     exit;
 }
 
-/* ── upload_photo ── */
 if ($action === 'upload_photo' && $productID > 0) {
     if (empty($_FILES['photo']['tmp_name']) || (int)($_FILES['photo']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
         echo json_encode(['ok' => false, 'error' => 'No file received']);
@@ -140,7 +136,6 @@ if ($action === 'upload_photo' && $productID > 0) {
     exit;
 }
 
-/* ── list_photos ── */
 if ($action === 'list_photos' && $productID > 0) {
     $rows = [];
     $stmt = $conn->prepare("SELECT id, photoPath, sort_order FROM product_color_scheme_photos WHERE productID = ? ORDER BY sort_order ASC");
@@ -157,7 +152,6 @@ if ($action === 'list_photos' && $productID > 0) {
     exit;
 }
 
-/* ── delete_photo ── */
 if ($action === 'delete_photo' && $id > 0) {
     $stmt = $conn->prepare("SELECT photoPath FROM product_color_scheme_photos WHERE id = ?");
     if ($stmt) {

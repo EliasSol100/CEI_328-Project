@@ -1,10 +1,4 @@
 <?php
-/**
- * Create Custom Product from Request Module
- *
- * This module converts one custom-order record into a private made-to-order
- * product that can be opened only through the customer's personal checkout link.
- */
 
 if (!defined('INCLUDE_CHECK') && !defined('CREATE_CUSTOM_PRODUCT_DIRECT')) {
     die('Direct access not permitted');
@@ -16,22 +10,6 @@ if (!function_exists('ensureCustomOrdersTable')) {
     require_once __DIR__ . '/custom_orders.php';
 }
 
-/**
- * Create or refresh the private checkout product for one custom order.
- *
- * The function keeps the existing product when possible, so the admin can
- * update the agreed price/details later without creating duplicate products.
- *
- * @param mysqli      $conn
- * @param int         $customOrderId
- * @param float|null  $price
- * @param string|null $description
- * @param array       $imageFiles Absolute file paths to attach as product photos.
- * @param string      $accessMethod Only token links are supported in the current flow.
- * @return array<string, mixed>
- * @throws InvalidArgumentException
- * @throws Exception
- */
 function createCustomProductFromRequest($conn, $customOrderId, $price = null, $description = null, $imageFiles = [], $accessMethod = 'token')
 {
     ensureCustomOrdersTable($conn);
@@ -246,13 +224,6 @@ function createCustomProductFromRequest($conn, $customOrderId, $price = null, $d
     }
 }
 
-/**
- * Load the linked product row if it still exists.
- *
- * @param mysqli $conn
- * @param int    $productId
- * @return array<string, mixed>|null
- */
 function loadExistingCustomProductRow($conn, $productId)
 {
     $productId = (int)$productId;
@@ -278,16 +249,6 @@ function loadExistingCustomProductRow($conn, $productId)
     return $row ?: null;
 }
 
-/**
- * Build the storefront link that unlocks the private made-to-order product.
- *
- * @param int         $productId
- * @param string      $method
- * @param string|null $token
- * @param string|null $password
- * @return string
- * @throws InvalidArgumentException
- */
 function generateAccessLink($productId, $method, $token, $password)
 {
     $productId = (int)$productId;
@@ -322,16 +283,6 @@ function generateAccessLink($productId, $method, $token, $password)
     return $path;
 }
 
-/**
- * Attach the customer's reference photo to the private product when it has no
- * photos yet. The uploaded request image is already normalized to JPG.
- *
- * @param mysqli $conn
- * @param int    $productId
- * @param string $photoReferencePath
- * @param array  $imageFiles
- * @return void
- */
 function attachCustomOrderReferencePhotoToProduct(mysqli $conn, int $productId, string $photoReferencePath, array $imageFiles = []): void
 {
     if ($productId <= 0) {
@@ -381,16 +332,6 @@ function attachCustomOrderReferencePhotoToProduct(mysqli $conn, int $productId, 
     }
 }
 
-/**
- * Keep a mail helper available for future use, but the current admin flow
- * shares the link manually after the Instagram conversation is complete.
- *
- * @param string $toEmail
- * @param int    $productId
- * @param string $accessLink
- * @param string $method
- * @return bool
- */
 function sendCustomProductAccessEmail($toEmail, $productId, $accessLink, $method)
 {
     $toEmail = normalizeCustomerEmail((string)$toEmail);
@@ -414,15 +355,6 @@ function sendCustomProductAccessEmail($toEmail, $productId, $accessLink, $method
     return !empty($result['success']);
 }
 
-/**
- * Log private custom-product preparation in audit_logs.
- *
- * @param mysqli $conn
- * @param int    $customOrderId
- * @param int    $productId
- * @param string $accessMethod
- * @return void
- */
 function logCustomProductCreation($conn, $customOrderId, $productId, $accessMethod)
 {
     $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';

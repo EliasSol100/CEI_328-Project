@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../../../include/security.php';
-// $current_page must be set in the parent file (e.g. 'dashboard', 'product_management')
+
 $current_page = $current_page ?? '';
 
 $nav = [
@@ -9,7 +9,6 @@ $nav = [
     ['id' => 'product_page_setup',     'label' => 'Product Page Setup',     'icon' => 'fa-palette',        'file' => 'product_page_setup.php'],
     ['id' => 'stock_availability',     'label' => 'Stock & Availability',   'icon' => 'fa-layer-group',    'file' => 'stock_availability.php'],
 
-    // NEW: Customer Management (above Order Management)
     ['id' => 'customer_management',    'label' => 'Customer Management',    'icon' => 'fa-user',           'file' => 'customer_management.php'],
     ['id' => 'order_management',       'label' => 'Order Management',       'icon' => 'fa-shopping-cart',  'file' => 'order_management.php'],
     ['id' => 'custom_orders',          'label' => 'Custom Orders',          'icon' => 'fa-star',           'file' => 'custom_orders.php'],

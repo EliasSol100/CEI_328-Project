@@ -1,29 +1,12 @@
 <?php
-/**
- * Place Order Module
- *
- * Implements function 3.2.4.1: Place Order
- *
- * @package CreationsByAthina
- */
 
-// Prevent direct access unless explicitly allowed by caller.
 if (!defined('INCLUDE_CHECK') && !defined('PLACE_ORDER_DIRECT')) {
     die('Direct access not permitted');
 }
 
-// Trigger stock deduction + threshold checks after order placement.
 require_once __DIR__ . '/stock_management.php';
 require_once __DIR__ . '/../include/product_option_helpers.php';
 
-/**
- * Create an admin notification row for newly placed orders.
- * Reuses a shared lightweight table used by other modules.
- *
- * @param mysqli $conn
- * @param string $message
- * @return void
- */
 function notifyAdminNewOrder(mysqli $conn, string $message): void {
     static $tableChecked = false;
     if (!$tableChecked) {
@@ -46,12 +29,6 @@ function notifyAdminNewOrder(mysqli $conn, string $message): void {
     }
 }
 
-/**
- * Ensure required shipping/order columns exist on orders table.
- *
- * @param mysqli $conn
- * @return void
- */
 function ensureOrderShippingSchema(mysqli $conn): void {
     static $checked = false;
     if ($checked) {
@@ -81,12 +58,6 @@ function ensureOrderShippingSchema(mysqli $conn): void {
     }
 }
 
-/**
- * Ensure custom_orders can store auto-created made-to-order links from checkout.
- *
- * @param mysqli $conn
- * @return void
- */
 function ensureCustomOrderBridgeSchema(mysqli $conn): void {
     static $checked = false;
     if ($checked) {
@@ -99,7 +70,6 @@ function ensureCustomOrderBridgeSchema(mysqli $conn): void {
         return;
     }
 
-    // Allow guest orders (NULL userID) for auto-created made-to-order rows.
     $conn->query("ALTER TABLE custom_orders MODIFY COLUMN userID INT(11) NULL");
 
     $requiredColumns = [
@@ -119,18 +89,6 @@ function ensureCustomOrderBridgeSchema(mysqli $conn): void {
     }
 }
 
-/**
- * Auto-create Custom Orders rows for made-to-order products purchased in checkout.
- *
- * @param mysqli $conn
- * @param int $orderID
- * @param string $orderNumber
- * @param int|null $userID
- * @param string $email
- * @param string $customerName
- * @param array $madeToOrderItems
- * @return int
- */
 function createCustomOrdersForMadeToOrderCheckout(
     mysqli $conn,
     int $orderID,
@@ -155,9 +113,6 @@ function createCustomOrdersForMadeToOrderCheckout(
             continue;
         }
 
-        // Reuse the admin-created custom order row for this private product.
-        // Checkout should enrich that row with the real order reference instead
-        // of creating a second entry for the same custom product.
         $linkedStmt = $conn->prepare("
             SELECT customOrderID, sourceOrderID
             FROM custom_orders
@@ -293,12 +248,6 @@ function createCustomOrdersForMadeToOrderCheckout(
     return $created;
 }
 
-/**
- * Convert internal courier code into user-friendly label.
- *
- * @param string $courierCode
- * @return string
- */
 function courierLabelFromCode(string $courierCode): string {
     $map = [
         'akis_express' => 'Akis Express',
@@ -312,12 +261,6 @@ function courierLabelFromCode(string $courierCode): string {
     return $map[$key] ?? ($courierCode !== '' ? $courierCode : 'Not specified');
 }
 
-/**
- * Generate next order number using format ORD-YYYY-XXX.
- *
- * @param mysqli $conn
- * @return string
- */
 function generateOrderNumber(mysqli $conn): string {
     $yearPrefix = 'ORD-' . date('Y') . '-';
     $escPrefix = $conn->real_escape_string($yearPrefix . '%');
@@ -333,18 +276,6 @@ function generateOrderNumber(mysqli $conn): string {
     return $yearPrefix . str_pad((string)$next, 3, '0', STR_PAD_LEFT);
 }
 
-/**
- * Create a full order record (header + items + payment + shipment summary).
- *
- * IMPORTANT: This function expects to run inside an active transaction.
- * Caller is responsible for begin/commit/rollback.
- *
- * @param mysqli $conn
- * @param array $input
- * @return array ['order_id' => int, 'order_number' => string, 'total' => float]
- * @throws InvalidArgumentException
- * @throws Exception
- */
 function placeOrder(mysqli $conn, array $input): array {
     app_product_options_ensure_schema($conn);
     ensureOrderShippingSchema($conn);
@@ -391,7 +322,6 @@ function placeOrder(mysqli $conn, array $input): array {
         $pickupPoint = '';
     }
 
-    // 1) Order header
     $stmt = $conn->prepare(
         "INSERT INTO orders (
             orderNumber, userID, isGuestFlag, email, status,
@@ -429,7 +359,6 @@ function placeOrder(mysqli $conn, array $input): array {
     $orderID = (int)$stmt->insert_id;
     $stmt->close();
 
-    // 2) Order lines (products + variations + gift add-ons)
     $lineStmt = $conn->prepare(
         "INSERT INTO order_items (
             orderID, productID, variationID, quantity, unitPrice, costPriceSnapshot, giftWrapping, giftBagFlag, giftMessage, customizationNote
@@ -529,7 +458,6 @@ function placeOrder(mysqli $conn, array $input): array {
         $madeToOrderItems
     );
 
-    // 3) Payment record
     $provider = trim((string)($input['payment_provider'] ?? 'manual'));
     $paymentStatus = trim((string)($input['payment_status'] ?? 'paid'));
     $transactionID = trim((string)($input['transaction_id'] ?? ''));
@@ -550,7 +478,6 @@ function placeOrder(mysqli $conn, array $input): array {
     }
     $payStmt->close();
 
-    // 4) Shipment summary
     $courierLabel = courierLabelFromCode($courier);
     $modeLabel = $fulfillmentMode === 'pickup' ? 'Pickup Point' : 'Delivery';
     if ($shippingPriority !== '') {
@@ -568,18 +495,14 @@ function placeOrder(mysqli $conn, array $input): array {
         $shipStmt->close();
     }
 
-    // 5) Trigger stock functions after the order has been fully stored.
-    // This runs 3.2.2.5 (stock management) and internally 3.2.2.6 (stock threshold).
     deductStockAfterOrderCompletion($orderID, $conn);
 
-    // 6) Notify admin about the new order.
     $adminNotificationMessage = "New order placed: {$orderNumber} | Total: €" . number_format($totalAmount, 2);
     if ($createdCustomOrders > 0) {
         $adminNotificationMessage .= " | Custom Orders: {$createdCustomOrders}";
     }
     notifyAdminNewOrder($conn, $adminNotificationMessage);
 
-    // 7) Email all admins about the new order.
     sendAdminOrderNotificationEmail($conn, [
         'order_id' => $orderID,
         'order_number' => $orderNumber,
@@ -604,13 +527,6 @@ function placeOrder(mysqli $conn, array $input): array {
     ];
 }
 
-/**
- * Send customer order confirmation email after a successful checkout commit.
- * Uses the same SMTP provider/settings currently used by auth emails.
- *
- * @param array $payload
- * @return array ['sent' => bool, 'error' => string]
- */
 function sendOrderConfirmationEmail(array $payload): array {
     $toEmail = trim((string)($payload['to_email'] ?? ''));
     if ($toEmail === '' || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
@@ -716,13 +632,6 @@ function sendOrderConfirmationEmail(array $payload): array {
     return ['sent' => false, 'error' => $finalError];
 }
 
-/**
- * Send new-order notification email to admin users.
- *
- * @param mysqli $conn
- * @param array $payload
- * @return array ['sent' => int, 'failed' => int]
- */
 function sendAdminOrderNotificationEmail(mysqli $conn, array $payload): array {
     $orderNumber = trim((string)($payload['order_number'] ?? ''));
     $orderId = (int)($payload['order_id'] ?? 0);

@@ -20,7 +20,6 @@ if (!file_exists($logo_path)) {
 ensureMadeToOrderProductSchema($conn);
 app_product_options_ensure_schema($conn);
 
-// --------- User / Profile handling ----------
 $role     = "guest";
 $fullName = "Guest";
 $userId   = null;
@@ -214,15 +213,10 @@ function shopColorSwatchHex(string $colorName): string
     return $map[$key] ?? '#ece6f6';
 }
 
-// Backfill the Selling Fast flag on older databases before shop queries use it.
 $sellingFastColumn = $conn->query("SHOW COLUMNS FROM products LIKE 'isSellingFast'");
 if ($sellingFastColumn && $sellingFastColumn->num_rows === 0) {
     $conn->query("ALTER TABLE products ADD COLUMN isSellingFast TINYINT(1) NOT NULL DEFAULT 0");
 }
-
-// ---------------------------------------------
-// Wishlist handling (DB for logged-in, session for guests)
-// ---------------------------------------------
 
 function getOrCreateWishlistID($conn, $uid) {
     $uid = (int)$uid;
@@ -344,7 +338,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'toggl
     }
 }
 
-// Load wishlisted product IDs
 $wishlistedIDs = [];
 if ($userId) {
     $uid = (int)$userId;
@@ -369,7 +362,6 @@ if ($userId) {
     }
 }
 
-// Keep header wishlist counter in sync on this request.
 $_SESSION['wishlist_count'] = count($wishlistedIDs);
 
 $accessibleMadeToOrderIds = getAccessibleMadeToOrderProductIds($conn);
@@ -382,7 +374,6 @@ if (!empty($accessibleMadeToOrderIds)) {
     $categoryVisibilityWhere .= " OR (cartStatus = 'made_to_order' AND productID IN (" . implode(',', array_map('intval', $accessibleMadeToOrderIds)) . "))";
 }
 
-// Load distinct active categories
 $categories = [];
 $categoryLabels = shopCategoryLabels();
 $catRes = $conn->query("
@@ -445,7 +436,6 @@ if ($colorRes) {
     }
 }
 
-// Price bounds from DB (all active/made_to_order products)
 $minPrice = 0;
 $maxPrice = 100;
 $priceBoundsRes = $conn->query("
@@ -474,7 +464,6 @@ if ($minPrice > $maxPrice) {
     $maxPrice = 100;
 }
 
-// Active filter/search state from query string
 $searchQuery = trim((string)($_GET['q'] ?? ''));
 $searchQuery = substr($searchQuery, 0, 120);
 
@@ -517,9 +506,6 @@ $selectedColors = array_values(array_unique(array_filter(array_map('intval', $se
     return $colorId > 0 && isset($colorFilterOptions[$colorId]);
 })));
 
-// ---------------------------------------------
-// Load products from DB (with active search + filters)
-// ---------------------------------------------
 $products = [];
 $sql = "
     SELECT p.productID, p.sku, p.nameEN, p.nameGR, p.basePrice, p.inventory,
@@ -657,7 +643,6 @@ if (!empty($selectedTags)) {
     }));
 }
 
-// Load review summary per product
 $reviewData = [];
 $revRes = $conn->query("
     SELECT productID, COUNT(*) AS cnt, ROUND(AVG(rating), 1) AS avg_rating
@@ -673,7 +658,6 @@ if ($revRes) {
     }
 }
 
-// Load product_color_photos per product (for carousel)
 $colorPhotosByProduct = [];
 $cpRes = $conn->query("SELECT productID, photoPath FROM product_color_photos ORDER BY productID, sortOrder ASC");
 if ($cpRes) {
@@ -802,11 +786,10 @@ if ($vpRes) {
             </button>
 
             <div class="shop-layout">
-                <!-- FILTER SIDEBAR -->
+
                 <aside class="shop-filters" id="shop-filters-panel">
                     <form id="shop-filters-form" method="get" action="shop.php">
 
-                    <!-- Search -->
                     <div class="shop-search">
                         <div class="shop-search-input-wrap">
                             <i class="fas fa-search" aria-hidden="true"></i>
@@ -821,7 +804,6 @@ if ($vpRes) {
 
                     <h3 data-translate="filters">Filters</h3>
 
-                    <!-- CATEGORY -->
                     <div class="filter-group">
                         <h4 data-translate="category">Category</h4>
 
@@ -841,7 +823,6 @@ if ($vpRes) {
                         <?php endforeach; ?>
                     </div>
 
-                    <!-- PRICE -->
                     <div class="filter-group">
                         <h4 data-translate="price">Price</h4>
                         <input id="price-range"
@@ -892,7 +873,6 @@ if ($vpRes) {
                     </div>
                     <?php endif; ?>
 
-                    <!-- TAGS -->
                     <div class="filter-group">
                         <h4 data-translate="tags">Tags</h4>
                         <div class="chip-row">
@@ -908,7 +888,6 @@ if ($vpRes) {
                         </div>
                     </div>
 
-                    <!-- APPLY FILTERS -->
                     <div class="filter-group">
                         <button type="submit"
                                 class="apply-filters-btn"
@@ -917,7 +896,6 @@ if ($vpRes) {
                         </button>
                     </div>
 
-                    <!-- CLEAR FILTERS -->
                     <div class="filter-group filter-clear-wrap">
                         <button id="clear-filters-btn"
                                 type="button"
@@ -930,7 +908,6 @@ if ($vpRes) {
 
                 </aside>
 
-                <!-- PRODUCTS GRID -->
                 <section class="shop-products-wrap">
                     <div class="shop-grid">
 
@@ -974,7 +951,7 @@ if ($vpRes) {
                                 <span class="shop-selling-fast-badge" data-translate="sellingFast">Selling Fast</span>
                                 <?php endif; ?>
                                 <?php
-                                    // Combine blob photos + color photos
+
                                     $allSlides = [];
                                     foreach ($imageIDs as $imgID) {
                                         $allSlides[] = ['type' => 'blob', 'src' => 'modules/admin/ajax/product_image.php?id=' . $imgID];
@@ -1083,7 +1060,6 @@ if ($vpRes) {
     <?php include __DIR__ . '/include/footer.php'; ?>
     <div id="cart-toast" class="cart-toast"></div>
 
-    <!-- Filtering behaviour (category + price + search) -->
     <script>
     (function () {
         const form = document.getElementById('shop-filters-form');
