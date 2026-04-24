@@ -718,6 +718,20 @@ if ($vpRes) {
     .shop-carousel .carousel-item {
         height: 100%;
     }
+    .shop-carousel .carousel-item {
+        display: none;
+        transition: none !important;
+        transform: none !important;
+    }
+    .shop-carousel .carousel-item.active {
+        display: block;
+    }
+    .shop-carousel .carousel-item-next,
+    .shop-carousel .carousel-item-prev,
+    .shop-carousel .active.carousel-item-start,
+    .shop-carousel .active.carousel-item-end {
+        transform: none !important;
+    }
     .shop-carousel .carousel-item img {
         width: 100%;
         height: 100%;
@@ -1146,40 +1160,20 @@ if ($vpRes) {
     })();
     </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="assets/js/instant-carousel.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/instant-carousel.js') ?>"></script>
     <script src="assets/js/wishlist-live.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/wishlist-live.js') ?>" defer></script>
     <script>
     document.querySelectorAll('.shop-carousel').forEach(carouselEl => {
         const slideCount = carouselEl.querySelectorAll('.carousel-item').length;
-        if (slideCount < 2 || !window.bootstrap) return;
+        if (slideCount < 2) return;
 
         carouselEl.setAttribute('data-bs-ride', 'false');
         carouselEl.setAttribute('data-bs-interval', 'false');
         carouselEl.setAttribute('data-bs-touch', 'false');
 
-        const carousel = bootstrap.Carousel.getOrCreateInstance(carouselEl, {
-            interval: false,
-            ride: false,
-            pause: false,
-            wrap: true,
-            touch: false
-        });
-
-        function stopCarouselAutoplay() {
-            if (carousel._config) {
-                carousel._config.interval = false;
-                carousel._config.ride = false;
-                carousel._config.touch = false;
-            }
-            carousel.pause();
+        if (window.athinaInstantCarouselInit) {
+            window.athinaInstantCarouselInit(carouselEl);
         }
-
-        stopCarouselAutoplay();
-        carouselEl.addEventListener('slide.bs.carousel', stopCarouselAutoplay);
-        carouselEl.addEventListener('slid.bs.carousel', stopCarouselAutoplay);
-        carouselEl.querySelectorAll('.carousel-control-prev, .carousel-control-next').forEach(control => {
-            control.addEventListener('click', () => window.setTimeout(stopCarouselAutoplay, 0));
-            control.addEventListener('touchend', () => window.setTimeout(stopCarouselAutoplay, 0));
-        });
     });
 
     document.querySelectorAll('.shop-product-card.is-clickable').forEach(card => {

@@ -47,3 +47,4 @@ $backHref = $siteRoot . '/index.php';
   </div>
 </aside>
 <?= app_csrf_bootstrap_script() ?>
+<script src="../../assets/js/date-input-format.js?v=<?= (int)@filemtime(__DIR__ . '/../../../assets/js/date-input-format.js') ?>" defer></script>

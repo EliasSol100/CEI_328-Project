@@ -34,9 +34,22 @@
 }
 
 #product-carousel .carousel-item {
+    display: none;
     height: 100%;
     min-height: 0;
-    transition: none;
+    transition: none !important;
+    transform: none !important;
+}
+
+#product-carousel .carousel-item.active {
+    display: block;
+}
+
+#product-carousel .carousel-item-next,
+#product-carousel .carousel-item-prev,
+#product-carousel .active.carousel-item-start,
+#product-carousel .active.carousel-item-end {
+    transform: none !important;
 }
 
 .product-carousel-image,

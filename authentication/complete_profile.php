@@ -570,25 +570,69 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
     <script src="https://cdnjs.cloudflare.com/ajax/libs/country-select-js/2.1.0/js/countrySelect.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/zxcvbn/4.4.2/zxcvbn.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/intl-tel-input/17.0.8/js/intlTelInput.min.js"></script>
+    <script src="../assets/js/date-input-format.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/date-input-format.js') ?>"></script>
     <script>
     let usernameValid = false;
     let usernameChecked = false;
 
     $(document).ready(function () {
         function isValidDobInput(value) {
-            const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
-            if (!match) {
-                return false;
+            const rawValue = String(value || "").trim();
+            let match = rawValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            let year;
+            let month;
+            let day;
+
+            if (match) {
+                year = Number(match[1]);
+                month = Number(match[2]) - 1;
+                day = Number(match[3]);
+            } else {
+                match = rawValue.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+                if (!match) {
+                    return false;
+                }
+                day = Number(match[1]);
+                month = Number(match[2]) - 1;
+                year = Number(match[3]);
             }
 
-            const year = Number(match[1]);
-            const month = Number(match[2]) - 1;
-            const day = Number(match[3]);
             const date = new Date(year, month, day);
             const today = new Date();
             today.setHours(0, 0, 0, 0);
 
             return date.getFullYear() === year && date.getMonth() === month && date.getDate() === day && date <= today;
+        }
+
+        function getFieldName($field) {
+            return $field.attr("name") || $field.attr("data-date-name") || "";
+        }
+
+        function getFieldValue($field) {
+            return String($field.val() || "").trim();
+        }
+
+        function showDobError(message) {
+            $("#dob").addClass("is-invalid");
+            $("#dob-error").text(message).show();
+        }
+
+        function clearDobError() {
+            $("#dob").removeClass("is-invalid");
+            $("#dob-error").hide();
+        }
+
+        function validateDobField() {
+            const dobVal = getFieldValue($("#dob"));
+            if (dobVal === "") {
+                return false;
+            }
+            if (!isValidDobInput(dobVal)) {
+                showDobError("Please choose a valid date that is not in the future.");
+                return false;
+            }
+            clearDobError();
+            return true;
         }
 
         $("input[name='fullname']").on("input", function () {
@@ -630,8 +674,8 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
 
             currentFields.each(function () {
                 const $field = $(this);
-                const value = $field.val().trim();
-                const name = $field.attr("name");
+                const value = getFieldValue($field);
+                const name = getFieldName($field);
 
                 if (!value) {
                     $field.addClass("is-invalid");
@@ -639,7 +683,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                         if (name === "phone") {
                             $("#phone-error").show();
                         } else if (name === "dob") {
-                            $("#dob-error").show();
+                            showDobError("Please choose a valid date of birth.");
                         }
                     }
                     valid = false;
@@ -679,10 +723,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                     $("#fullname-error").remove();
                 }
 
-                const dobVal = $("#dob").val().trim();
-                if (dobVal !== "" && !isValidDobInput(dobVal)) {
-                    $("#dob").addClass("is-invalid");
-                    $("#dob-error").text("Please choose a valid date that is not in the future.").show();
+                if (!validateDobField()) {
                     valid = false;
                 }
             }
