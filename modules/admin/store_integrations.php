@@ -107,7 +107,7 @@ $facebookConfigured = !empty($facebookConfig['enabled']);
   <link rel="stylesheet" href="assets/admin.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
-<body>
+<body class="store-integrations-admin">
 <div class="admin-wrapper">
   <?php include __DIR__ . '/includes/sidebar.php'; ?>
 
