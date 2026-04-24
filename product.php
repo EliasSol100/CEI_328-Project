@@ -954,7 +954,7 @@ include __DIR__ . "/include/header.php";
 <main class="product-page">
     <div class="product-wrap">
         <section class="product-gallery">
-            <div id="product-carousel" class="carousel slide" data-bs-ride="false" data-bs-interval="false">
+            <div id="product-carousel" class="carousel slide" data-bs-ride="false" data-bs-interval="false" data-bs-touch="false">
                 <div class="carousel-inner" id="product-carousel-inner">
                     <?php foreach ($photos as $idx => $src): ?>
                     <div class="carousel-item <?= $idx === 0 ? 'active' : '' ?>">
@@ -1662,7 +1662,7 @@ include __DIR__ . "/include/header.php";
                 interval: false,
                 ride: false,
                 wrap: true,
-                touch: true
+                touch: false
             });
             carousel.to(0);
             carousel.pause();
@@ -1677,15 +1677,17 @@ include __DIR__ . "/include/header.php";
 
         el.setAttribute('data-bs-ride', 'false');
         el.setAttribute('data-bs-interval', 'false');
+        el.setAttribute('data-bs-touch', 'false');
         var carousel = bootstrap.Carousel.getOrCreateInstance(el, {
             interval: false,
             ride: false,
             wrap: true,
-            touch: true
+            touch: false
         });
         if (carousel._config) {
             carousel._config.interval = false;
             carousel._config.ride = false;
+            carousel._config.touch = false;
         }
         carousel.pause();
     }
@@ -2110,5 +2112,44 @@ include __DIR__ . "/include/header.php";
 })();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(function () {
+    var el = document.getElementById('product-carousel');
+    if (!el || !window.bootstrap || !window.bootstrap.Carousel) {
+        return;
+    }
+
+    function stopProductCarouselAutoplay() {
+        el.setAttribute('data-bs-ride', 'false');
+        el.setAttribute('data-bs-interval', 'false');
+        el.setAttribute('data-bs-touch', 'false');
+        var carousel = bootstrap.Carousel.getOrCreateInstance(el, {
+            interval: false,
+            ride: false,
+            pause: false,
+            wrap: true,
+            touch: false
+        });
+        if (carousel._config) {
+            carousel._config.interval = false;
+            carousel._config.ride = false;
+            carousel._config.touch = false;
+        }
+        carousel.pause();
+    }
+
+    stopProductCarouselAutoplay();
+    el.addEventListener('slide.bs.carousel', stopProductCarouselAutoplay);
+    el.addEventListener('slid.bs.carousel', stopProductCarouselAutoplay);
+    el.querySelectorAll('.carousel-control-prev, .carousel-control-next').forEach(function (control) {
+        control.addEventListener('click', function () {
+            window.setTimeout(stopProductCarouselAutoplay, 0);
+        });
+        control.addEventListener('touchend', function () {
+            window.setTimeout(stopProductCarouselAutoplay, 0);
+        });
+    });
+})();
+</script>
 </body>
 </html>

@@ -981,7 +981,7 @@ if ($vpRes) {
                                     }));
                                 ?>
                                 <?php if (!empty($allSlides)): ?>
-                                <div id="carousel-<?= $pid ?>" class="carousel slide shop-carousel" data-bs-ride="false" data-bs-interval="1400">
+                                <div id="carousel-<?= $pid ?>" class="carousel slide shop-carousel" data-bs-ride="false" data-bs-interval="false" data-bs-touch="false">
                                     <div class="carousel-inner">
                                         <?php foreach ($allSlides as $cidx => $slide): ?>
                                         <?php
@@ -1149,28 +1149,36 @@ if ($vpRes) {
     <script src="assets/js/wishlist-live.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/wishlist-live.js') ?>" defer></script>
     <script>
     document.querySelectorAll('.shop-carousel').forEach(carouselEl => {
-        const card = carouselEl.closest('.shop-product-card');
         const slideCount = carouselEl.querySelectorAll('.carousel-item').length;
-        if (!card || slideCount < 2 || !window.bootstrap) return;
+        if (slideCount < 2 || !window.bootstrap) return;
+
+        carouselEl.setAttribute('data-bs-ride', 'false');
+        carouselEl.setAttribute('data-bs-interval', 'false');
+        carouselEl.setAttribute('data-bs-touch', 'false');
 
         const carousel = bootstrap.Carousel.getOrCreateInstance(carouselEl, {
-            interval: 1400,
+            interval: false,
             ride: false,
             pause: false,
             wrap: true,
-            touch: true
+            touch: false
         });
-        carousel.pause();
 
-        card.addEventListener('mouseenter', () => carousel.cycle());
-        card.addEventListener('mouseleave', () => {
+        function stopCarouselAutoplay() {
+            if (carousel._config) {
+                carousel._config.interval = false;
+                carousel._config.ride = false;
+                carousel._config.touch = false;
+            }
             carousel.pause();
-            carousel.to(0);
-        });
-        card.addEventListener('focusin', () => carousel.cycle());
-        card.addEventListener('focusout', () => {
-            carousel.pause();
-            carousel.to(0);
+        }
+
+        stopCarouselAutoplay();
+        carouselEl.addEventListener('slide.bs.carousel', stopCarouselAutoplay);
+        carouselEl.addEventListener('slid.bs.carousel', stopCarouselAutoplay);
+        carouselEl.querySelectorAll('.carousel-control-prev, .carousel-control-next').forEach(control => {
+            control.addEventListener('click', () => window.setTimeout(stopCarouselAutoplay, 0));
+            control.addEventListener('touchend', () => window.setTimeout(stopCarouselAutoplay, 0));
         });
     });
 
