@@ -871,6 +871,21 @@ if ($reviewStatus === "saved") {
 }
 $defaultReviewRating = max(1, min(5, (int)$reviewInput["rating"]));
 $openReviewForm = $canWriteReview && (!empty($reviewErrors) || ((string)($_GET["write_review"] ?? "") === "1"));
+$productGalleryPreloadSources = [];
+foreach ($photos as $src) {
+    $productGalleryPreloadSources[] = (string)$src;
+}
+foreach ($colorPhotos as $photoList) {
+    foreach ($photoList as $src) {
+        $productGalleryPreloadSources[] = (string)$src;
+    }
+}
+foreach ($variationPhotos as $photoList) {
+    foreach ($photoList as $src) {
+        $productGalleryPreloadSources[] = (string)$src;
+    }
+}
+$productGalleryPreloadSources = array_slice(array_values(array_unique(array_filter($productGalleryPreloadSources))), 0, 32);
 $storedCouponCode = '';
 $initialCouponEvaluation = ['valid' => false, 'discounted_price' => round(max(0, $baseProductPrice), 2)];
 $couponFeedbackText = '';
@@ -901,6 +916,9 @@ if ($storedCouponCode !== '') {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="assets/js/translations.js?v=<?= (int)@filemtime(__DIR__ . "/assets/js/translations.js") ?>" defer></script>
     <script src="assets/js/wishlist-live.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/wishlist-live.js') ?>" defer></script>
+    <?php foreach ($productGalleryPreloadSources as $preloadSrc): ?>
+    <link rel="preload" as="image" href="<?= htmlspecialchars($preloadSrc, ENT_QUOTES, 'UTF-8') ?>">
+    <?php endforeach; ?>
     <style>
         .price-row {
             display: flex;
@@ -943,9 +961,10 @@ include __DIR__ . "/include/header.php";
                         <img src="<?= htmlspecialchars($src) ?>"
                              class="product-carousel-image d-block w-100"
                              alt="<?= htmlspecialchars((string)$product['nameEN']) ?>"
-                             loading="<?= $idx === 0 ? 'eager' : 'lazy' ?>"
+                             loading="eager"
                              decoding="async"
-                             fetchpriority="<?= $idx === 0 ? 'high' : 'low' ?>">
+                             fetchpriority="<?= $idx === 0 ? 'high' : 'low' ?>"
+                             draggable="false">
                     </div>
                     <?php endforeach; ?>
                 </div>
@@ -1414,6 +1433,32 @@ include __DIR__ . "/include/header.php";
     var hasPresetColorChoices = false;
     var variationPhotos = <?= json_encode($variationPhotos, JSON_UNESCAPED_UNICODE) ?>;
 
+    var preloadedProductImages = {};
+    function preloadProductImage(src) {
+        if (!src || preloadedProductImages[src]) {
+            return;
+        }
+        var img = new Image();
+        img.decoding = "async";
+        img.loading = "eager";
+        if ("fetchPriority" in img) {
+            img.fetchPriority = "low";
+        }
+        img.src = src;
+        preloadedProductImages[src] = img;
+    }
+    function preloadProductImages(list) {
+        (list || []).forEach(preloadProductImage);
+    }
+    function preloadProductImageMap(map) {
+        Object.keys(map || {}).forEach(function (key) {
+            preloadProductImages(map[key]);
+        });
+    }
+    preloadProductImages(defaultPhotos);
+    preloadProductImageMap(colorPhotos);
+    preloadProductImageMap(variationPhotos);
+
     var sizeChips = Array.prototype.slice.call(document.querySelectorAll(".size-chip"));
     var colorChips = Array.prototype.slice.call(document.querySelectorAll(".color-chip-btn"));
     var customField1Input = document.getElementById("custom-colour-field-1");
@@ -1593,11 +1638,22 @@ include __DIR__ . "/include/header.php";
 
         var inner = document.getElementById('product-carousel-inner');
         if (!inner) return;
+        preloadProductImages(imgs);
         inner.innerHTML = '';
         imgs.forEach(function(src, idx) {
             var div = document.createElement('div');
             div.className = 'carousel-item' + (idx === 0 ? ' active' : '');
-            div.innerHTML = '<img src="' + src + '" class="product-carousel-image d-block w-100" alt="Product image">';
+            var img = document.createElement('img');
+            img.src = src;
+            img.className = 'product-carousel-image d-block w-100';
+            img.alt = 'Product image';
+            img.loading = 'eager';
+            img.decoding = 'async';
+            img.draggable = false;
+            if ('fetchPriority' in img) {
+                img.fetchPriority = idx === 0 ? 'high' : 'low';
+            }
+            div.appendChild(img);
             inner.appendChild(div);
         });
         var el = document.getElementById('product-carousel');
