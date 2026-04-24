@@ -697,26 +697,44 @@ foreach ($productColorChoices as $colorId => $colorChoice) {
 
 $uniqueColors = array_values($uniqueColors);
 $colorCatalogue = [];
-$catalogRes = $conn->query("
-    SELECT c.colorID, c.colorName, c.globalInventoryAvailable, c.isActive,
-           COALESCE(yt.typeName, 'General') AS typeName,
-           MIN(cyt.photoPath) AS photoPath
-    FROM colors c
-    LEFT JOIN color_yarn_types cyt ON cyt.colorID = c.colorID
-    LEFT JOIN yarn_types yt ON yt.typeID = cyt.typeID
-    GROUP BY c.colorID, c.colorName, c.globalInventoryAvailable, c.isActive, yt.typeName
-    ORDER BY typeName ASC, c.colorName ASC
-");
-if ($catalogRes) {
-    while ($row = $catalogRes->fetch_assoc()) {
-        $colorCatalogue[] = [
-            'id' => (int)$row['colorID'],
-            'name' => (string)$row['colorName'],
-            'typeName' => (string)$row['typeName'],
-            'available' => (int)($row['isActive'] ?? 0) === 1 && (int)($row['globalInventoryAvailable'] ?? 0) > 0,
-            'stock' => (int)($row['globalInventoryAvailable'] ?? 0),
-            'photoPath' => trim(app_image_prefer_optimized_asset_path((string)($row['photoPath'] ?? ''))),
-        ];
+$catalogueColorIds = array_values(array_unique(array_map(static function (array $color): int {
+    return (int)($color['id'] ?? 0);
+}, $uniqueColors)));
+$catalogueColorIds = array_values(array_filter($catalogueColorIds, static fn(int $id): bool => $id > 0));
+
+if (!empty($catalogueColorIds)) {
+    $cataloguePlaceholders = implode(',', array_fill(0, count($catalogueColorIds), '?'));
+    $catalogStmt = $conn->prepare("
+        SELECT c.colorID, c.colorName, c.globalInventoryAvailable, c.isActive,
+               COALESCE(yt.typeName, 'General') AS typeName,
+               MIN(cyt.photoPath) AS photoPath
+        FROM colors c
+        LEFT JOIN color_yarn_types cyt ON cyt.colorID = c.colorID
+        LEFT JOIN yarn_types yt ON yt.typeID = cyt.typeID
+        WHERE c.colorID IN ($cataloguePlaceholders)
+        GROUP BY c.colorID, c.colorName, c.globalInventoryAvailable, c.isActive, yt.typeName
+        ORDER BY typeName ASC, c.colorName ASC
+    ");
+    if ($catalogStmt) {
+        $catalogTypes = str_repeat('i', count($catalogueColorIds));
+        $catalogParams = [$catalogTypes];
+        foreach ($catalogueColorIds as $idx => $colorId) {
+            $catalogParams[] = &$catalogueColorIds[$idx];
+        }
+        call_user_func_array([$catalogStmt, 'bind_param'], $catalogParams);
+        $catalogStmt->execute();
+        $catalogRes = $catalogStmt->get_result();
+        while ($catalogRes && ($row = $catalogRes->fetch_assoc())) {
+            $colorCatalogue[] = [
+                'id' => (int)$row['colorID'],
+                'name' => (string)$row['colorName'],
+                'typeName' => (string)$row['typeName'],
+                'available' => (int)($row['isActive'] ?? 0) === 1 && (int)($row['globalInventoryAvailable'] ?? 0) > 0,
+                'stock' => (int)($row['globalInventoryAvailable'] ?? 0),
+                'photoPath' => trim(app_image_prefer_optimized_asset_path((string)($row['photoPath'] ?? ''))),
+            ];
+        }
+        $catalogStmt->close();
     }
 }
 $hasVariationPriceRange = count(array_unique(array_map(static fn($price): string => number_format((float)$price, 2, '.', ''), $variationPrices))) > 1;
@@ -1657,7 +1675,10 @@ include __DIR__ . "/include/header.php";
             inner.appendChild(div);
         });
         var el = document.getElementById('product-carousel');
-        if (el && window.bootstrap) {
+        if (el && window.athinaInstantCarouselTo) {
+            window.athinaInstantCarouselInit(el);
+            window.athinaInstantCarouselTo(el, 0);
+        } else if (el && window.bootstrap) {
             var carousel = bootstrap.Carousel.getOrCreateInstance(el, {
                 interval: false,
                 ride: false,
@@ -1671,7 +1692,16 @@ include __DIR__ . "/include/header.php";
 
     function syncCarouselAutoplay() {
         var el = document.getElementById('product-carousel');
-        if (!el || !window.bootstrap) {
+        if (!el) {
+            return;
+        }
+
+        if (window.athinaInstantCarouselInit) {
+            window.athinaInstantCarouselInit(el);
+            return;
+        }
+
+        if (!window.bootstrap) {
             return;
         }
 
@@ -2112,43 +2142,19 @@ include __DIR__ . "/include/header.php";
 })();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="assets/js/instant-carousel.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/instant-carousel.js') ?>"></script>
 <script>
 (function () {
     var el = document.getElementById('product-carousel');
-    if (!el || !window.bootstrap || !window.bootstrap.Carousel) {
+    if (!el) {
         return;
     }
-
-    function stopProductCarouselAutoplay() {
-        el.setAttribute('data-bs-ride', 'false');
-        el.setAttribute('data-bs-interval', 'false');
-        el.setAttribute('data-bs-touch', 'false');
-        var carousel = bootstrap.Carousel.getOrCreateInstance(el, {
-            interval: false,
-            ride: false,
-            pause: false,
-            wrap: true,
-            touch: false
-        });
-        if (carousel._config) {
-            carousel._config.interval = false;
-            carousel._config.ride = false;
-            carousel._config.touch = false;
-        }
-        carousel.pause();
+    el.setAttribute('data-bs-ride', 'false');
+    el.setAttribute('data-bs-interval', 'false');
+    el.setAttribute('data-bs-touch', 'false');
+    if (window.athinaInstantCarouselInit) {
+        window.athinaInstantCarouselInit(el);
     }
-
-    stopProductCarouselAutoplay();
-    el.addEventListener('slide.bs.carousel', stopProductCarouselAutoplay);
-    el.addEventListener('slid.bs.carousel', stopProductCarouselAutoplay);
-    el.querySelectorAll('.carousel-control-prev, .carousel-control-next').forEach(function (control) {
-        control.addEventListener('click', function () {
-            window.setTimeout(stopProductCarouselAutoplay, 0);
-        });
-        control.addEventListener('touchend', function () {
-            window.setTimeout(stopProductCarouselAutoplay, 0);
-        });
-    });
 })();
 </script>
 </body>
