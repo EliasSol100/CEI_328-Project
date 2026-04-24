@@ -74,6 +74,13 @@
     color: #211538;
 }
 
+.custom-order-card h3,
+.custom-order-cta-box h3 {
+    margin: 0 0 14px;
+    font-size: 22px;
+    color: #211538;
+}
+
 .custom-order-guide {
     position: sticky;
     top: 92px;
@@ -132,6 +139,14 @@
     font-size: 15px;
     line-height: 1.6;
     color: #6a647b;
+}
+
+.custom-order-info-item .custom-order-btn {
+    margin-top: 16px;
+}
+
+.custom-order-recommended {
+    background: linear-gradient(180deg, #fff0fb 0%, #f7f2ff 100%);
 }
 
 .custom-order-cta-box {

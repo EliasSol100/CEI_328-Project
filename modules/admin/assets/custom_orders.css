@@ -113,6 +113,83 @@
   border: 1px solid #fed7aa;
 }
 
+.custom-order-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.custom-order-admin-panel {
+  padding: 18px;
+}
+
+.custom-order-admin-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.custom-order-admin-form textarea {
+  resize: vertical;
+}
+
+.custom-order-offer-summary,
+.custom-order-thread {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+}
+
+.custom-order-thread-header,
+.custom-order-message-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.custom-order-message-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.custom-order-message {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+}
+
+.custom-order-message.is-customer {
+  background: #f5efff;
+  border-color: #e9d5ff;
+}
+
+.custom-order-message.is-admin {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.custom-order-message.is-system {
+  background: #f9fafb;
+}
+
+.custom-order-message-meta {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.custom-order-message-body {
+  white-space: normal;
+  line-height: 1.5;
+}
+
 .custom-orders-table-wrap {
   overflow-x: auto;
 }
@@ -206,6 +283,10 @@
   .custom-order-detail-header,
   .custom-order-checkout-header {
     align-items: stretch;
+  }
+
+  .custom-order-admin-grid {
+    grid-template-columns: 1fr;
   }
 
   .custom-orders-status-cell {

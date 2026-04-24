@@ -337,6 +337,13 @@ function extractOrderNumberFromNotif(string $text): ?string {
     return null;
 }
 
+function extractCustomOrderIdFromNotif(string $text): int {
+    if (preg_match('/custom\s+order(?:\s+request)?\s+#?(\d+)/i', $text, $m)) {
+        return (int)$m[1];
+    }
+    return 0;
+}
+
 $statusLabel = [
     'pending' => ['label' => 'pending', 'badge' => 'badge-muted'],
     'accepted' => ['label' => 'accepted', 'badge' => 'badge-accepted'],
@@ -409,6 +416,7 @@ $jsonOrders = json_encode($trendOrderValues);
               $rawMessage = (string)$n['message'];
               $orderNumber = extractOrderNumberFromNotif($rawMessage);
               $targetOrderId = $orderNumber !== null ? ($orderNumberToId[$orderNumber] ?? 0) : 0;
+              $targetCustomOrderId = extractCustomOrderIdFromNotif($rawMessage);
             ?>
             <div class="notif-row">
               <div class="notif-main">
@@ -419,6 +427,10 @@ $jsonOrders = json_encode($trendOrderValues);
                 <?php if ($targetOrderId > 0): ?>
                   <a href="order_management.php?view=<?= (int)$targetOrderId ?>" class="btn-secondary btn-sm">
                     <i class="fas fa-arrow-up-right-from-square"></i> Open Order
+                  </a>
+                <?php elseif ($targetCustomOrderId > 0): ?>
+                  <a href="custom_orders.php?view=<?= (int)$targetCustomOrderId ?>" class="btn-secondary btn-sm">
+                    <i class="fas fa-star"></i> Open Custom Order
                   </a>
                 <?php elseif ($orderNumber !== null): ?>
                   <a href="order_management.php" class="btn-secondary btn-sm">

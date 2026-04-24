@@ -66,6 +66,7 @@ function adminFormatDescriptionForTable(string $description): string {
 
 ensureCustomOrderAdminSchema($conn);
 ensureCustomOrdersTable($conn);
+$statusOptions = getCustomOrderStatusLabels();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
@@ -160,6 +161,76 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $flash = 'ok:Custom order deleted.';
     }
 
+    if ($action === 'send_message') {
+        $id = (int)($_POST['customOrderID'] ?? 0);
+        $message = trim((string)($_POST['messageBody'] ?? ''));
+        if ($id <= 0 || $message === '') {
+            $flash = 'err:Write a message before sending.';
+        } else {
+            try {
+                $messageOrder = getCustomOrderById($conn, $id);
+                addCustomOrderMessage($conn, $id, 'admin', $ADMIN_USER_ID ?? null, $message);
+                if (in_array((string)($messageOrder['status'] ?? 'pending'), ['pending', 'declined'], true)) {
+                    updateCustomOrder($conn, $id, ['status' => 'in_discussion']);
+                }
+                $emailSent = sendCustomOrderCustomerEmail(
+                    $conn,
+                    $id,
+                    "Reply about your custom order #{$id}",
+                    "Hello,\n\nAthina replied to your custom order request.\n\n" .
+                    "Message:\n{$message}\n\n" .
+                    "Reply here:\n" . customOrderCustomerUrl($id) . "\n\n" .
+                    "Thank you,\nAthina E-Shop"
+                );
+                $flash = $emailSent ? 'ok:Reply sent and emailed to the customer.' : 'warn:Reply saved, but the customer email could not be sent.';
+            } catch (Throwable $e) {
+                $flash = 'err:' . ($e->getMessage() !== '' ? $e->getMessage() : 'Could not send the reply.');
+            }
+        }
+        header('Location: custom_orders.php?view=' . $id . '&flash=' . urlencode($flash));
+        exit;
+    }
+
+    if ($action === 'send_offer') {
+        $id = (int)($_POST['customOrderID'] ?? 0);
+        $price = round((float)($_POST['offeredPrice'] ?? 0), 2);
+        $deadline = trim((string)($_POST['proposedDeadline'] ?? ''));
+        $note = trim((string)($_POST['offerNote'] ?? ''));
+        try {
+            createCustomOrderOffer($conn, $id, $ADMIN_USER_ID ?? null, $price, $deadline, $note);
+            $flash = 'ok:Offer sent to the customer.';
+        } catch (Throwable $e) {
+            $flash = 'err:' . ($e->getMessage() !== '' ? $e->getMessage() : 'Could not send the offer.');
+        }
+        header('Location: custom_orders.php?view=' . $id . '&flash=' . urlencode($flash));
+        exit;
+    }
+
+    if ($action === 'decline_request') {
+        $id = (int)($_POST['customOrderID'] ?? 0);
+        $message = trim((string)($_POST['declineMessage'] ?? ''));
+        if ($message === '') {
+            $message = "Thank you for your idea. Unfortunately, Athina cannot accept this custom order request at this time.";
+        }
+        try {
+            updateCustomOrder($conn, $id, ['status' => 'declined']);
+            addCustomOrderMessage($conn, $id, 'admin', $ADMIN_USER_ID ?? null, $message);
+            $emailSent = sendCustomOrderCustomerEmail(
+                $conn,
+                $id,
+                "Custom order #{$id} update",
+                "Hello,\n\n{$message}\n\n" .
+                "You can view the request here:\n" . customOrderCustomerUrl($id) . "\n\n" .
+                "Thank you,\nAthina E-Shop"
+            );
+            $flash = $emailSent ? 'ok:Request declined and customer notified.' : 'warn:Request declined, but the customer email could not be sent.';
+        } catch (Throwable $e) {
+            $flash = 'err:' . ($e->getMessage() !== '' ? $e->getMessage() : 'Could not decline the request.');
+        }
+        header('Location: custom_orders.php?view=' . $id . '&flash=' . urlencode($flash));
+        exit;
+    }
+
     if ($action === 'status') {
         $id = (int)($_POST['customOrderID'] ?? 0);
         $status = trim((string)($_POST['status'] ?? ''));
@@ -169,6 +240,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 mysqli_stmt_bind_param($stmt, 'si', $status, $id);
                 mysqli_stmt_execute($stmt);
                 mysqli_stmt_close($stmt);
+            }
+            try {
+                addCustomOrderMessage($conn, $id, 'system', null, 'Status updated to ' . ($statusOptions[$status] ?? ucwords(str_replace('_', ' ', $status))) . '.');
+                sendCustomOrderStatusEmail($conn, $id, $status);
+            } catch (Throwable $e) {
+                error_log('Custom order status notification failed: ' . $e->getMessage());
             }
             $flash = 'ok:Status updated.';
         } else {
@@ -180,7 +257,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = (int)($_POST['customOrderID'] ?? 0);
         try {
             $result = createCustomProductFromRequest($conn, $id);
-            $flash = !empty($result['was_updated']) ? 'ok:Private checkout link refreshed for this custom order.' : 'ok:Private checkout link created for this custom order.';
+            $emailSent = sendCustomProductAccessEmail(
+                (string)($result['customer_email'] ?? ''),
+                (int)($result['product_id'] ?? 0),
+                (string)($result['private_link'] ?? ''),
+                'token'
+            );
+            addCustomOrderMessage($conn, $id, 'system', null, $emailSent ? 'Private checkout link was emailed to the customer.' : 'Private checkout link was created, but the customer email could not be sent.');
+            if ($emailSent) {
+                $flash = !empty($result['was_updated'])
+                    ? 'ok:Private checkout link refreshed and emailed to the customer.'
+                    : 'ok:Private checkout link created and emailed to the customer.';
+            } else {
+                $flash = 'warn:Private checkout link is ready, but the customer email could not be sent. Copy the URL manually.';
+            }
         } catch (Throwable $e) {
             $flash = 'err:' . ($e->getMessage() !== '' ? $e->getMessage() : 'Could not create the checkout link.');
         }
@@ -206,13 +296,20 @@ if (isset($_GET['edit'])) {
 
 $viewOrder = null;
 $viewPrivateCheckout = ['product_id' => 0, 'private_link' => ''];
+$viewMessages = [];
+$viewActiveOffer = null;
+$viewLatestOffer = null;
 if (isset($_GET['view'])) {
     $viewId = (int)$_GET['view'];
     foreach ($orders as $orderRow) if ((int)$orderRow['customOrderID'] === $viewId) { $viewOrder = $orderRow; break; }
-    if ($viewOrder) $viewPrivateCheckout = adminLoadPrivateLinkForOrder($conn, $viewOrder);
+    if ($viewOrder) {
+        $viewPrivateCheckout = adminLoadPrivateLinkForOrder($conn, $viewOrder);
+        $viewMessages = getCustomOrderMessages($conn, (int)$viewOrder['customOrderID']);
+        $viewActiveOffer = getActiveCustomOrderOffer($conn, (int)$viewOrder['customOrderID']);
+        $viewLatestOffer = getLatestCustomOrderOffer($conn, (int)$viewOrder['customOrderID']);
+    }
 }
 
-$statusOptions = getCustomOrderStatusLabels();
 $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', 'accepted' => 'badge-completed', 'in_production' => 'badge-orange', 'ready_for_checkout' => 'badge-orange', 'in_progress' => 'badge-orange', 'completed' => 'badge-completed', 'declined' => 'badge-red', 'cancelled' => 'badge-red'];
 ?>
 <!DOCTYPE html>
@@ -237,8 +334,8 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
       <button class="btn-primary" type="button" onclick="openModal('modalAdd')"><i class="fas fa-plus"></i> New Custom Order</button>
     </div>
     <div class="content-body">
-      <?php if ($flash): [$type, $msg] = array_pad(explode(':', $flash, 2), 2, ''); ?>
-        <div class="flash flash-<?= $type === 'ok' ? 'success' : 'error' ?>"><?= htmlspecialchars($msg) ?></div>
+      <?php if ($flash): [$type, $msg] = array_pad(explode(':', $flash, 2), 2, ''); $flashClass = $type === 'ok' ? 'success' : ($type === 'warn' ? 'warning' : 'error'); ?>
+        <div class="flash flash-<?= htmlspecialchars($flashClass) ?>"><?= htmlspecialchars($msg) ?></div>
       <?php endif; ?>
       <?php if ($viewOrder): ?>
         <?php
@@ -294,17 +391,98 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
               </a>
             </div>
           <?php endif; ?>
+          <div class="custom-order-admin-grid">
+            <div class="card custom-order-admin-panel">
+              <div class="card-title custom-order-checkout-title">Reply / Request More Info</div>
+              <p class="text-sm text-muted custom-order-checkout-copy">Send a message to the customer. They can reply from their Custom Orders page.</p>
+              <form method="POST" class="custom-order-admin-form">
+                <?= app_csrf_input() ?>
+                <input type="hidden" name="action" value="send_message">
+                <input type="hidden" name="customOrderID" value="<?= (int)$viewOrder['customOrderID'] ?>">
+                <textarea name="messageBody" class="form-input" rows="4" placeholder="Ask for extra details, photos, colours, or timing..." required></textarea>
+                <button type="submit" class="btn-primary"><i class="fas fa-paper-plane"></i> Send Reply</button>
+              </form>
+            </div>
+            <div class="card custom-order-admin-panel">
+              <div class="card-title custom-order-checkout-title">Send Offer</div>
+              <p class="text-sm text-muted custom-order-checkout-copy">Send a price/date proposal for the customer to accept or decline.</p>
+              <form method="POST" class="custom-order-admin-form">
+                <?= app_csrf_input() ?>
+                <input type="hidden" name="action" value="send_offer">
+                <input type="hidden" name="customOrderID" value="<?= (int)$viewOrder['customOrderID'] ?>">
+                <div class="form-grid-2">
+                  <div class="form-group">
+                    <label class="form-label">Offered Price (EUR)</label>
+                    <input type="number" step="0.01" min="0.01" name="offeredPrice" class="form-input" value="<?= htmlspecialchars((string)($viewOrder['agreedPrice'] ?? '')) ?>" required>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Target Date</label>
+                    <input type="date" name="proposedDeadline" class="form-input" value="<?= !empty($viewOrder['deadline']) ? htmlspecialchars(date('Y-m-d', strtotime((string)$viewOrder['deadline']))) : '' ?>">
+                  </div>
+                </div>
+                <textarea name="offerNote" class="form-input" rows="3" placeholder="Optional note for the customer..."></textarea>
+                <button type="submit" class="btn-primary"><i class="fas fa-envelope"></i> Send Offer</button>
+              </form>
+            </div>
+          </div>
+          <?php if ($viewActiveOffer || $viewLatestOffer): ?>
+            <?php $offerForView = $viewActiveOffer ?: $viewLatestOffer; ?>
+            <div class="custom-order-offer-summary">
+              <h4 class="custom-order-section-title"><?= $viewActiveOffer ? 'Active Customer Offer' : 'Latest Customer Offer' ?></h4>
+              <div class="order-detail-grid custom-order-detail-grid">
+                <div class="order-detail-block">
+                  <p class="text-sm mb-1"><strong>Price:</strong> EUR <?= number_format((float)($offerForView['offeredPrice'] ?? 0), 2) ?></p>
+                  <p class="text-sm mb-1"><strong>Target Date:</strong> <?= !empty($offerForView['proposedDeadline']) ? htmlspecialchars(date('n/j/Y', strtotime((string)$offerForView['proposedDeadline']))) : 'None' ?></p>
+                </div>
+                <div class="order-detail-block">
+                  <p class="text-sm mb-1"><strong>Status:</strong> <?= htmlspecialchars(ucwords(str_replace('_', ' ', (string)($offerForView['offerStatus'] ?? 'pending')))) ?></p>
+                  <p class="text-sm mb-1"><strong>Sent:</strong> <?= !empty($offerForView['createdAt']) ? htmlspecialchars(date('n/j/Y H:i', strtotime((string)$offerForView['createdAt']))) : '-' ?></p>
+                </div>
+              </div>
+              <?php if (trim((string)($offerForView['offerNote'] ?? '')) !== ''): ?>
+                <div class="text-sm text-muted custom-order-description-body"><?= htmlspecialchars((string)$offerForView['offerNote']) ?></div>
+              <?php endif; ?>
+            </div>
+          <?php endif; ?>
+          <div class="custom-order-thread">
+            <div class="custom-order-thread-header">
+              <h4 class="custom-order-section-title">Customer Discussion</h4>
+              <form method="POST" class="custom-orders-inline-form" onsubmit="return confirm('Decline this custom order request and notify the customer?')">
+                <?= app_csrf_input() ?>
+                <input type="hidden" name="action" value="decline_request">
+                <input type="hidden" name="customOrderID" value="<?= (int)$viewOrder['customOrderID'] ?>">
+                <input type="hidden" name="declineMessage" value="Thank you for your idea. Unfortunately, Athina cannot accept this custom order request at this time.">
+                <button type="submit" class="btn-delete"><i class="fas fa-ban"></i> Decline Request</button>
+              </form>
+            </div>
+            <?php if (empty($viewMessages)): ?>
+              <p class="text-muted text-sm">No discussion messages yet.</p>
+            <?php else: ?>
+              <div class="custom-order-message-list">
+                <?php foreach ($viewMessages as $message): ?>
+                  <?php $senderRole = strtolower((string)($message['senderRole'] ?? 'system')); ?>
+                  <div class="custom-order-message is-<?= htmlspecialchars($senderRole) ?>">
+                    <div class="custom-order-message-meta">
+                      <strong><?= htmlspecialchars(ucfirst($senderRole)) ?></strong>
+                      <span><?= !empty($message['createdAt']) ? htmlspecialchars(date('n/j/Y H:i', strtotime((string)$message['createdAt']))) : '' ?></span>
+                    </div>
+                    <div class="text-sm custom-order-message-body"><?= nl2br(htmlspecialchars((string)$message['messageBody'])) ?></div>
+                  </div>
+                <?php endforeach; ?>
+              </div>
+            <?php endif; ?>
+          </div>
           <div class="card custom-order-checkout-card">
             <div class="custom-order-checkout-header">
               <div>
                 <div class="card-title custom-order-checkout-title">Private Checkout Link</div>
-                <p class="text-sm text-muted custom-order-checkout-copy">After the Instagram conversation is complete, create the private product here and send the URL manually to the customer.</p>
+                <p class="text-sm text-muted custom-order-checkout-copy">Create or refresh the private product and email the customer their secure checkout link.</p>
               </div>
               <form method="POST">
                 <?= app_csrf_input() ?>
                 <input type="hidden" name="action" value="create_checkout_link">
                 <input type="hidden" name="customOrderID" value="<?= (int)$viewOrder['customOrderID'] ?>">
-                <button type="submit" class="btn-primary"><i class="fas fa-link"></i> <?= !empty($viewPrivateCheckout['private_link']) ? 'Refresh Checkout Link' : 'Create Checkout Link' ?></button>
+                <button type="submit" class="btn-primary"><i class="fas fa-link"></i> <?= !empty($viewPrivateCheckout['private_link']) ? 'Refresh & Email Link' : 'Create & Email Link' ?></button>
               </form>
             </div>
             <?php if (!empty($viewPrivateCheckout['private_link'])): ?>

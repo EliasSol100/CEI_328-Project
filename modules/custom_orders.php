@@ -520,7 +520,7 @@ function addCustomOrderMessage($conn, $customOrderId, $senderRole, $senderUserId
         throw new InvalidArgumentException('Message cannot be empty.');
     }
 
-    getCustomOrderById($conn, $customOrderId);
+    $order = getCustomOrderById($conn, $customOrderId);
 
     $senderUserId = $senderUserId ? (int)$senderUserId : null;
     $stmt = $conn->prepare("
@@ -543,6 +543,15 @@ function addCustomOrderMessage($conn, $customOrderId, $senderRole, $senderUserId
 
     if ($senderRole === 'customer') {
         createAdminNotification($conn, "Customer replied on custom order #{$customOrderId}.");
+        sendCustomOrderAdminEmail(
+            $conn,
+            "Customer reply on custom order #{$customOrderId}",
+            "A customer replied on custom order #{$customOrderId}.\n\n" .
+            "Customer: " . trim((string)($order['displayName'] ?? $order['customerName'] ?? 'Customer')) . "\n" .
+            "Email: " . trim((string)($order['email'] ?? '')) . "\n\n" .
+            "Message:\n{$messageBody}\n\n" .
+            "Open in admin:\n" . customOrderAdminUrl((int)$customOrderId)
+        );
     }
 
     return $messageId;
@@ -641,6 +650,7 @@ function createCustomOrderOffer($conn, $customOrderId, $adminUserId, $price, $de
 
         logCustomOrderAction($conn, $customOrderId, 'offer_created', 'Admin created a price offer.');
         $conn->commit();
+        sendCustomOrderOfferEmail($conn, $customOrderId, $price, $deadline, $offerNote);
 
         return $offerId;
     } catch (Throwable $e) {
@@ -745,6 +755,12 @@ function respondToCustomOrderOffer($conn, $customOrderId, $offerId, $customerUse
         addCustomOrderMessage($conn, $customOrderId, 'system', null, $systemMessage);
         logCustomOrderAction($conn, $customOrderId, 'offer_' . $newOfferStatus, 'Customer responded to the latest price offer.');
         createAdminNotification($conn, "Customer {$newOfferStatus} offer on custom order #{$customOrderId}.");
+        sendCustomOrderAdminEmail(
+            $conn,
+            "Custom order #{$customOrderId} offer {$newOfferStatus}",
+            "The customer {$newOfferStatus} the latest offer for custom order #{$customOrderId}.\n\n" .
+            "Open in admin:\n" . customOrderAdminUrl((int)$customOrderId)
+        );
 
         $conn->commit();
         return true;
@@ -795,8 +811,37 @@ function ensureCustomOrdersTable($conn)
 
     $tableCheck = $conn->query("SHOW TABLES LIKE 'custom_orders'");
     if (!$tableCheck || $tableCheck->num_rows === 0) {
-        $checked = true;
-        return;
+        $conn->query("
+            CREATE TABLE IF NOT EXISTS custom_orders (
+                customOrderID INT AUTO_INCREMENT PRIMARY KEY,
+                userID INT NULL,
+                email VARCHAR(255) NULL,
+                requestDescription LONGTEXT NOT NULL,
+                avgReadTime DOUBLE NULL,
+                status VARCHAR(40) NOT NULL DEFAULT 'pending',
+                expertNotes VARCHAR(500) NULL,
+                aiWritingAcknowledgeFlag TINYINT(1) NOT NULL DEFAULT 0,
+                access_token VARCHAR(255) NULL,
+                token_expires_at DATETIME NULL,
+                customerName VARCHAR(255) NULL,
+                agreedPrice DOUBLE NULL,
+                deadline DATE NULL,
+                accessCode VARCHAR(50) NULL,
+                sourceOrderID INT NULL,
+                sourceOrderNumber VARCHAR(64) NULL,
+                sourceProductID INT NULL,
+                linkedProductName VARCHAR(255) NULL,
+                photoReferencePath VARCHAR(255) NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_custom_orders_userID (userID),
+                INDEX idx_custom_orders_status (status)
+            )
+        ");
+    }
+
+    $userColumnCheck = $conn->query("SHOW COLUMNS FROM custom_orders LIKE 'userID'");
+    if ($userColumnCheck && $userColumnCheck->num_rows > 0) {
+        $conn->query("ALTER TABLE custom_orders MODIFY COLUMN userID INT(11) NULL");
     }
 
     $columnChecks = [
@@ -964,6 +1009,15 @@ function notifyAdminNewCustomOrder($conn, $customOrderId, $customerEmail, $descr
 {
     $message = "New custom order request #$customOrderId from $customerEmail: " . substr($description, 0, 100) . '...';
     createAdminNotification($conn, $message);
+    sendCustomOrderAdminEmail(
+        $conn,
+        "New custom order request #{$customOrderId}",
+        "A customer submitted a new website custom order request.\n\n" .
+        "Custom Order: #{$customOrderId}\n" .
+        "Customer email: {$customerEmail}\n\n" .
+        "Request preview:\n" . trim(substr($description, 0, 1200)) . "\n\n" .
+        "Open in admin:\n" . customOrderAdminUrl((int)$customOrderId)
+    );
 }
 
 /**
@@ -996,5 +1050,173 @@ function createAdminNotification($conn, $message)
     } else {
         error_log('Failed to create admin notification: ' . $conn->error);
     }
+}
+
+/**
+ * Build a public customer portal URL for one custom order.
+ */
+function customOrderCustomerUrl(int $customOrderId): string
+{
+    $path = 'custom_order.php?view=' . max(0, $customOrderId) . '#discussion';
+    if (function_exists('app_url')) {
+        return app_url($path);
+    }
+    return '/' . ltrim($path, '/');
+}
+
+/**
+ * Build an admin URL for one custom order.
+ */
+function customOrderAdminUrl(int $customOrderId): string
+{
+    $path = 'modules/admin/custom_orders.php?view=' . max(0, $customOrderId);
+    if (function_exists('app_url')) {
+        return app_url($path);
+    }
+    return '/' . ltrim($path, '/');
+}
+
+/**
+ * Send one plain text email through the shared auth mailer.
+ */
+function sendCustomOrderPlainEmail(string $toEmail, string $toName, string $subject, string $body): bool
+{
+    $toEmail = trim($toEmail);
+    if ($toEmail === '' || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+        return false;
+    }
+
+    if (!function_exists('app_auth_send_plaintext_email')) {
+        require_once __DIR__ . '/../authentication/auth_mailer.php';
+    }
+
+    $result = app_auth_send_plaintext_email($toEmail, $toName, $subject, $body);
+    return !empty($result['success']);
+}
+
+/**
+ * Admin recipients for custom order notifications.
+ *
+ * @return array<int, array{name:string,email:string}>
+ */
+function customOrderAdminRecipients(mysqli $conn): array
+{
+    $recipients = [];
+    $seen = [];
+
+    $res = $conn->query("
+        SELECT full_name, email
+        FROM users
+        WHERE LOWER(role) IN ('admin','administrator','superadmin')
+          AND email IS NOT NULL
+          AND email <> ''
+    ");
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $email = strtolower(trim((string)($row['email'] ?? '')));
+            if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || isset($seen[$email])) {
+                continue;
+            }
+            $seen[$email] = true;
+            $recipients[] = [
+                'name' => trim((string)($row['full_name'] ?? 'Admin')),
+                'email' => $email,
+            ];
+        }
+    }
+
+    $fallbacks = [];
+    if (function_exists('app_env_value')) {
+        $fallbacks[] = app_env_value('CUSTOM_ORDER_ADMIN_EMAIL', '');
+        $fallbacks[] = app_env_value('ADMIN_NOTIFICATION_EMAIL', '');
+        $fallbacks[] = app_env_value('SMTP_FROM_EMAIL', '');
+        $fallbacks[] = app_env_value('SMTP_USERNAME', '');
+    }
+
+    foreach ($fallbacks as $fallbackEmail) {
+        $email = strtolower(trim((string)$fallbackEmail));
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || isset($seen[$email])) {
+            continue;
+        }
+        $seen[$email] = true;
+        $recipients[] = ['name' => 'Admin', 'email' => $email];
+    }
+
+    return $recipients;
+}
+
+/**
+ * Send a custom order notification to all admins.
+ */
+function sendCustomOrderAdminEmail(mysqli $conn, string $subject, string $body): array
+{
+    $sent = 0;
+    $failed = 0;
+    foreach (customOrderAdminRecipients($conn) as $recipient) {
+        if (sendCustomOrderPlainEmail($recipient['email'], $recipient['name'], '[Custom Orders] ' . $subject, $body)) {
+            $sent++;
+        } else {
+            $failed++;
+        }
+    }
+    return ['sent' => $sent, 'failed' => $failed];
+}
+
+/**
+ * Send an email to the customer attached to a custom order.
+ */
+function sendCustomOrderCustomerEmail(mysqli $conn, int $customOrderId, string $subject, string $body): bool
+{
+    try {
+        $order = getCustomOrderById($conn, $customOrderId);
+    } catch (Throwable $e) {
+        return false;
+    }
+
+    $email = normalizeCustomerEmail((string)($order['email'] ?? ''));
+    $name = trim((string)($order['displayName'] ?? $order['customerName'] ?? 'Customer'));
+    if ($name === '') {
+        $name = 'Customer';
+    }
+
+    return sendCustomOrderPlainEmail($email, $name, $subject, $body);
+}
+
+/**
+ * Notify the customer about a price/date offer.
+ */
+function sendCustomOrderOfferEmail(mysqli $conn, int $customOrderId, float $price, ?string $deadline, ?string $note = null): bool
+{
+    $deadline = trim((string)$deadline);
+    $note = trim((string)$note);
+    $body =
+        "Hello,\n\n" .
+        "Athina reviewed your custom order request and sent you an offer.\n\n" .
+        "Custom Order: #{$customOrderId}\n" .
+        "Proposed price: EUR " . number_format($price, 2) . "\n" .
+        ($deadline !== '' ? "Target date: {$deadline}\n" : '') .
+        ($note !== '' ? "\nMessage from the shop:\n{$note}\n" : '') .
+        "\nYou can accept, decline, or reply here:\n" . customOrderCustomerUrl($customOrderId) . "\n\n" .
+        "Thank you,\nAthina E-Shop";
+
+    return sendCustomOrderCustomerEmail($conn, $customOrderId, 'Your custom order offer is ready', $body);
+}
+
+/**
+ * Notify the customer about a status change.
+ */
+function sendCustomOrderStatusEmail(mysqli $conn, int $customOrderId, string $status, string $note = ''): bool
+{
+    $labels = getCustomOrderStatusLabels();
+    $statusLabel = $labels[$status] ?? ucwords(str_replace('_', ' ', $status));
+    $note = trim($note);
+    $body =
+        "Hello,\n\n" .
+        "Your custom order #{$customOrderId} status was updated to: {$statusLabel}.\n\n" .
+        ($note !== '' ? $note . "\n\n" : '') .
+        "You can view the request here:\n" . customOrderCustomerUrl($customOrderId) . "\n\n" .
+        "Thank you,\nAthina E-Shop";
+
+    return sendCustomOrderCustomerEmail($conn, $customOrderId, "Custom order #{$customOrderId} update", $body);
 }
 ?>
