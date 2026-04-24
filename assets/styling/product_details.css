@@ -36,6 +36,7 @@
 #product-carousel .carousel-item {
     height: 100%;
     min-height: 0;
+    transition: none;
 }
 
 .product-carousel-image,
