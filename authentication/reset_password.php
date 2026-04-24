@@ -6,12 +6,11 @@ require_once __DIR__ . "/../include/auth_branding.php";
 
 $error        = "";
 $success      = "";
-$emailDisplay = ""; // for showing in UI
+$emailDisplay = "";
 $token        = "";
-$expiresAt    = null; // raw datetime from DB for countdown
+$expiresAt    = null;
 $authLogoUrl = app_auth_logo_url($conn, '../');
 
-// Helper: validate token and return row (email, expires_at)
 function findResetRecord(mysqli $conn, string $token): ?array {
     if ($token === "") {
         return null;
@@ -32,15 +31,13 @@ function findResetRecord(mysqli $conn, string $token): ?array {
         return null;
     }
 
-    // Check expiry
     if (strtotime($row["expires_at"]) < time()) {
         return null;
     }
 
-    return $row; // ['email' => ..., 'expires_at' => ...]
+    return $row;
 }
 
-// 1) First load: coming from email link (?token=...)
 if ($_SERVER["REQUEST_METHOD"] === "GET") {
     $token = $_GET["token"] ?? "";
 
@@ -53,7 +50,6 @@ if ($_SERVER["REQUEST_METHOD"] === "GET") {
     }
 }
 
-// 2) Form submission: POST with token + new password
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     app_require_csrf(false, "Invalid request token. Please refresh and try again.");
     $token           = $_POST["token"] ?? "";
@@ -67,7 +63,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $emailDisplay = $record["email"];
         $expiresAt    = $record["expires_at"];
 
-        // Validate password (server-side guard)
         if (empty($password) || empty($repeat_password)) {
             $error = "Please fill in both password fields.";
         } elseif ($password !== $repeat_password) {
@@ -80,7 +75,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         ) {
             $error = "Password must be at least 8 characters and include an uppercase letter, a number, and a symbol.";
         } else {
-            // Update user's password
+
             $passwordHash = password_hash($password, PASSWORD_DEFAULT);
             $email        = $record["email"];
 
@@ -90,7 +85,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $stmt->execute();
                 $stmt->close();
 
-                // Delete reset record so link can't be reused
                 $token_hash = hash('sha256', $token);
                 $stmt = $conn->prepare("DELETE FROM password_resets WHERE token_hash = ?");
                 if ($stmt) {
@@ -99,7 +93,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $stmt->close();
                 }
 
-                // Log user in
                 $stmt = $conn->prepare("SELECT *, userID AS id FROM users WHERE email = ?");
                 $stmt->bind_param("s", $email);
                 $stmt->execute();
@@ -123,7 +116,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     ];
                 }
 
-                // Redirect to homepage
                 header("Location: ../index.php");
                 exit();
             } else {
@@ -133,7 +125,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     }
 }
 
-// 3) Compute remaining seconds for countdown (if we have a valid record)
 $remainingSeconds = 0;
 if (!empty($expiresAt)) {
     $expiresTs = strtotime($expiresAt);
@@ -147,7 +138,7 @@ $canShowResetForm = (!empty($token) && !empty($emailDisplay) && !empty($expiresA
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8"> 
+    <meta charset="UTF-8">
     <title>Reset Password - Athina E-Shop</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
@@ -155,7 +146,7 @@ $canShowResetForm = (!empty($token) && !empty($emailDisplay) && !empty($expiresA
 
     <link rel="stylesheet" href="../assets/styling/style.css">
     <link rel="stylesheet" href="../assets/styling/authentication.css">
-    <!-- Font Awesome for check / x icons -->
+
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
     <style>
@@ -169,19 +160,19 @@ $canShowResetForm = (!empty($token) && !empty($emailDisplay) && !empty($expiresA
             align-items: center;
             gap: 8px;
             font-size: 0.9rem;
-            color: #4b5563; /* neutral */
+            color: #4b5563;
         }
         .password-checklist li i {
             font-size: 0.9rem;
         }
         .password-checklist li.valid {
-            color: #16a34a; /* green-600 */
+            color: #16a34a;
         }
         .password-checklist li.valid i {
             color: #16a34a;
         }
         .password-checklist li.invalid {
-            color: #dc2626; /* red-600 */
+            color: #dc2626;
         }
         .password-checklist li.invalid i {
             color: #dc2626;
@@ -284,7 +275,7 @@ $canShowResetForm = (!empty($token) && !empty($emailDisplay) && !empty($expiresA
     </div>
 
     <script>
-        // Password checklist
+
         (function () {
             const passwordInput = document.getElementById('password');
             const repeatInput   = document.getElementById('repeat_password');
@@ -336,11 +327,9 @@ $canShowResetForm = (!empty($token) && !empty($emailDisplay) && !empty($expiresA
                 repeatInput.addEventListener('input', evaluatePassword);
             }
 
-            // Run once on load (in case browser autofills)
             evaluatePassword();
         })();
 
-        // Live countdown for reset link
         (function () {
             var remaining = <?php echo (int)$remainingSeconds; ?>;
             if (remaining <= 0) return;

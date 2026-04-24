@@ -77,7 +77,6 @@ if (!isset($_SESSION["wishlist"]) || !is_array($_SESSION["wishlist"])) {
     $_SESSION["wishlist"] = [];
 }
 
-// Key-based wishlist (homepage cards)
 if ($productKey !== "") {
     $response["productKey"] = $productKey;
 
@@ -116,7 +115,6 @@ if ($productKey !== "") {
     exit();
 }
 
-// ID-based wishlist (shop cards)
 if ($productId > 0 && $action === "toggle_wishlist_item") {
     $response["productId"] = $productId;
     $inWishlist = false;

@@ -10,18 +10,14 @@ $feedbackMessage = '';
 $feedbackClass   = 'danger';
 $userRow         = null;
 
-// ------------------------------------
-// 1. Make sure we have a logged-in user
-// ------------------------------------
 if (!isset($_SESSION["user_id"])) {
-    // No user in session → go back to login
+
     header("Location: login.php");
     exit();
 }
 
 $userId = (int) $_SESSION["user_id"];
 
-// Load user row for display (email)
 $stmt = $conn->prepare("SELECT *, userID AS id FROM users WHERE userID = ?");
 $stmt->bind_param("i", $userId);
 $stmt->execute();
@@ -30,22 +26,18 @@ $userRow = $result->fetch_assoc();
 $stmt->close();
 
 if (!$userRow) {
-    // User disappeared from DB → reset session and redirect
+
     session_unset();
     session_destroy();
     header("Location: login.php");
     exit();
 }
 
-// If already verified, no need to be here
 if (!empty($userRow["is_verified"]) && (int)$userRow["is_verified"] === 1) {
     header("Location: " . consumeAuthRedirectTarget("../index.php"));
     exit();
 }
 
-// ------------------------------------
-// Helper: generate new code & expiry (email)
-// ------------------------------------
 function generateEmailVerificationCode(mysqli $conn, int $userId, string $email): array
 {
     return app_auth_send_email_verification_code($conn, $userId, $email, (string)($_SESSION["full_name"] ?? ''));
@@ -116,13 +108,9 @@ function ensureActiveEmailVerificationCode(mysqli $conn, int $userId, array &$us
     ];
 }
 
-// ------------------------------------
-// 2. Handle POST actions (verify / resend / switch)
-// ------------------------------------
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     app_require_csrf(false, "Invalid request token. Please refresh and try again.");
 
-    // 2a. Resend code by email
     if (isset($_POST["resend_code"])) {
         if ($userRow && !empty($userRow["email"])) {
             $resend = ensureActiveEmailVerificationCode($conn, $userId, $userRow, true);
@@ -141,7 +129,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
     }
 
-    // 2c. Verify code
     if (isset($_POST["verify"])) {
         $code = trim($_POST["verification_code"] ?? '');
 
@@ -149,7 +136,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             $feedbackMessage = "Please enter your verification code.";
             $feedbackClass   = "danger";
         } else {
-            // Re-fetch minimal fields (including stored verification_code & expiry)
+
             $stmt = $conn->prepare("
                 SELECT userID AS id, email, full_name, role, profile_complete, is_verified,
                        verification_code, verification_expires_at
@@ -181,7 +168,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $feedbackMessage = "The verification code is incorrect. Please try again.";
                     $feedbackClass   = "danger";
                 } else {
-                    // Mark user as verified & clear the code and expiry
+
                     $stmt = $conn->prepare("
                         UPDATE users
                         SET is_verified = '1',
@@ -193,7 +180,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $stmt->execute();
                     $stmt->close();
 
-                    // Reload fresh user row to rebuild the session
                     $stmt = $conn->prepare("SELECT *, userID AS id FROM users WHERE userID = ?");
                     $stmt->bind_param("i", $userId);
                     $stmt->execute();
@@ -215,13 +201,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         $_SESSION["role"]    = $updatedUser["role"] ?? "user";
                     }
 
-                    // All good → go to homepage
                     header("Location: " . consumeAuthRedirectTarget("../index.php"));
                     exit();
                 }
             }
 
-            // keep $userRow in sync for countdown (if it changed)
             if (!empty($dbUser)) {
                 $userRow = array_merge($userRow ?? [], $dbUser);
             }
@@ -240,11 +224,8 @@ if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     }
 }
 
-// ------------------------------------
-// 3. Ensure expiry exists for existing code (fallback) & compute remaining
-// ------------------------------------
 if (!empty($userRow["verification_code"]) && empty($userRow["verification_expires_at"])) {
-    // If there is a code but no expiry yet (old records), set a new 20-min window from now
+
     $expiresAt = date('Y-m-d H:i:s', time() + 20 * 60);
     $stmt = $conn->prepare("UPDATE users SET verification_expires_at = ? WHERE userID = ?");
     $stmt->bind_param("si", $expiresAt, $userId);
@@ -325,7 +306,6 @@ $verifyLogoUrl = app_auth_logo_url($conn, '../');
                         Verify Email
                     </button>
 
-                    <!-- Resend Code (white button) -->
                     <button type="submit" name="resend_code"
                             class="btn w-100 mt-2 bg-white border text-dark"
                             formnovalidate>

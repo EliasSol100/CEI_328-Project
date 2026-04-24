@@ -460,7 +460,6 @@ if (!$product) {
     exit;
 }
 
-// Keep discontinued/internal statuses out of direct-link access for storefront users.
 $publicProductStatuses = ["active", "low_stock", "out_of_stock"];
 if (!$isAdmin) {
     $productStatus = (string)($product["cartStatus"] ?? "");
@@ -491,9 +490,6 @@ if ($photoStmt) {
     $photoStmt->close();
 }
 
-// Custom-order checkout products can reuse the uploaded reference image directly
-// from the custom order record, so the private product still has a visible image
-// even when we do not duplicate the file into the normal photos table.
 if (empty($photos) && productPageCanQueryCustomOrderPhoto($conn)) {
     $customPhotoStmt = $conn->prepare("
         SELECT photoReferencePath
@@ -526,8 +522,7 @@ if (empty($photos)) {
     $photos[] = "assets/images/athina-eshop-logo.png";
 }
 
-/* ── Per-colour product photos ── */
-$colorPhotos = []; // [colorID => [photoPath, ...]]
+$colorPhotos = [];
 $productColorChoices = [];
 $cpStmt = $conn->prepare(
     "SELECT pcp.colorID, pcp.photoPath, c.colorName
@@ -748,8 +743,6 @@ $customColorLabel1Gr = trim((string)($product["customColorLabel1GR"] ?? ""));
 $customColorLabel2Gr = trim((string)($product["customColorLabel2GR"] ?? ""));
 $customColorHelpGr = trim((string)($product["customColorHelpTextGR"] ?? ""));
 
-/* ── Multi-colour scheme ── */
-// Ensure tables exist (safe to run on every page load — no-op if already created)
 $conn->query("CREATE TABLE IF NOT EXISTS product_color_scheme (
     id INT AUTO_INCREMENT PRIMARY KEY, productID INT NOT NULL, num_colors TINYINT NOT NULL DEFAULT 2,
     is_enabled TINYINT(1) NOT NULL DEFAULT 0, UNIQUE KEY unique_product (productID),
@@ -778,7 +771,6 @@ if ($csRow) {
     $colorSchemeEnabled   = true;
     $colorSchemeNumColors = (int)($csRow['num_colors'] ?? 2);
 
-    // Load diagram photos
     $csPhotoStmt = $conn->prepare("SELECT id, photoPath FROM product_color_scheme_photos WHERE productID = ? ORDER BY sort_order ASC");
     if ($csPhotoStmt) {
         $csPhotoStmt->bind_param('i', $productId);
@@ -793,7 +785,6 @@ if ($csRow) {
         $csPhotoStmt->close();
     }
 
-    // Load active colors for dropdowns
     $csColorsRes = $conn->query("SELECT colorID, colorName FROM colors WHERE isActive = 1 ORDER BY colorName ASC");
     if ($csColorsRes) {
         while ($csColorRow = $csColorsRes->fetch_assoc()) {
@@ -2122,7 +2113,6 @@ include __DIR__ . "/include/header.php";
     paintRatingSelection();
 })();
 
-/* ── Colour Scheme Carousel ── */
 (function() {
     var slides = Array.prototype.slice.call(document.querySelectorAll('.cs-slide'));
     var dots   = Array.prototype.slice.call(document.querySelectorAll('.cs-dot'));

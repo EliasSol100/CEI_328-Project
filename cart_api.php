@@ -12,12 +12,8 @@ header('Content-Type: application/json; charset=utf-8');
 app_product_options_ensure_schema($conn);
 app_coupon_ensure_schema($conn);
 
-/* =========================
-   GET: Return cart OR variations for a product
-   ========================= */
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
 
-    // GET ?action=variations&product_id=N
     if (($_GET['action'] ?? '') === 'variations') {
         $pid = (int)($_GET['product_id'] ?? 0);
         if ($pid <= 0 || !isset($conn) || !($conn instanceof mysqli)) {
@@ -29,7 +25,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
         exit;
     }
 
-    // Default: return cart
     if (!isset($_SESSION['cart']) || !is_array($_SESSION['cart'])) {
         $_SESSION['cart'] = [
             'items' => [],
@@ -47,9 +42,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
     exit;
 }
 
-/* =========================
-   POST: Add item to cart
-   ========================= */
 try {
     if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
         http_response_code(405);
@@ -143,8 +135,6 @@ try {
             $variation = fetchVariationBySize($conn, $productId, $size);
         }
 
-        // If no DB variation row exists but client provided variation fields,
-        // preserve those values so cart/checkout can still show the selection.
         if ($variation === null && ($size !== '' || $yarnType !== '' || ($colorId !== null && $colorId > 0))) {
             $customVariation = [
                 'variationID' => null,
@@ -201,7 +191,6 @@ try {
         badRequest('Only ' . $availableStock . ' left in stock.');
     }
 
-    // Gift add-on pricing
     $addonsCost = 0.0;
     if (!empty($addons['gift_wrapping'])) $addonsCost += 2.0;
     if (!empty($addons['gift_bag'])) $addonsCost += 1.5;
@@ -274,8 +263,6 @@ try {
     echo json_encode(['success' => false, 'message' => 'Server error.', 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
     exit;
 }
-
-/* ===== Helpers ===== */
 
 function readRequestPayload(): array {
     if (!empty($_POST) && is_array($_POST)) {
@@ -433,7 +420,6 @@ function recalcCartTotals(array $items): array {
     ];
 }
 
-/* ===== DB (mysqli) ===== */
 function fetchProduct(mysqli $conn, int $productId): ?array {
     $sql = "SELECT productID, sku, nameGR, nameEN, inventory, basePrice, cartStatus, hasVariants,
                    customColorFields, customColorLabel1, customColorLabel2

@@ -1,32 +1,13 @@
 <?php
-/**
- * Dashboard KPIs Module
- *
- * Implements function 3.2.6.9: View Dashboard KPIs & Sales Trend Chart
- *
- * @package CreationsByAthina
- */
 
-// Prevent direct access
 if (!defined('INCLUDE_CHECK') && !defined('DASHBOARD_KPIS_DIRECT')) {
     die('Direct access not permitted');
 }
 
-/**
- * Get dashboard KPIs and sales trend data.
- *
- * @param mysqli   $conn       Database connection
- * @param string   $timeRange  Time range: 'today', '7days', '30days', 'this_month', 'last_month', 'custom'
- * @param string   $startDate  Start date (Y-m-d) for custom range (optional)
- * @param string   $endDate    End date (Y-m-d) for custom range (optional)
- * @return array               Array with KPIs and chart data
- * @throws Exception On database error
- */
 function getDashboardKPIs($conn, $timeRange = '30days', $startDate = null, $endDate = null) {
-    // Calculate date range based on $timeRange
+
     $dateCondition = getDateCondition($timeRange, $startDate, $endDate);
 
-    // 1. Total sales (sum of totalAmount for paid orders)
     $totalSales = 0;
     $stmt = $conn->prepare("
         SELECT COALESCE(SUM(totalAmount), 0) as total_sales
@@ -41,7 +22,6 @@ function getDashboardKPIs($conn, $timeRange = '30days', $startDate = null, $endD
     $totalSales = (float)$row['total_sales'];
     $stmt->close();
 
-    // 2. Recent orders count
     $recentOrders = 0;
     $stmt = $conn->prepare("
         SELECT COUNT(*) as order_count
@@ -56,7 +36,6 @@ function getDashboardKPIs($conn, $timeRange = '30days', $startDate = null, $endD
     $recentOrders = (int)$row['order_count'];
     $stmt->close();
 
-    // 3. Top product (best seller) by quantity sold in the period
     $topProduct = [
         'product_id'   => null,
         'product_name' => 'None',
@@ -83,7 +62,6 @@ function getDashboardKPIs($conn, $timeRange = '30days', $startDate = null, $endD
     }
     $stmt->close();
 
-    // 4. Low stock alerts count (variations where quantityAvailable <= lowStockThreshold)
     $lowStockCount = 0;
     $stmt = $conn->prepare("
         SELECT COUNT(*) as low_stock_count
@@ -97,7 +75,6 @@ function getDashboardKPIs($conn, $timeRange = '30days', $startDate = null, $endD
     $lowStockCount = (int)$row['low_stock_count'];
     $stmt->close();
 
-    // 5. Daily sales for trend chart
     $dailySales = [];
     $stmt = $conn->prepare("
         SELECT DATE(created_at) as sale_date, COALESCE(SUM(totalAmount), 0) as daily_total
@@ -118,10 +95,8 @@ function getDashboardKPIs($conn, $timeRange = '30days', $startDate = null, $endD
     }
     $stmt->close();
 
-    // 6. Average order value
     $avgOrderValue = $recentOrders > 0 ? $totalSales / $recentOrders : 0;
 
-    // Return all metrics
     return [
         'total_sales'       => $totalSales,
         'order_count'       => $recentOrders,
@@ -137,14 +112,6 @@ function getDashboardKPIs($conn, $timeRange = '30days', $startDate = null, $endD
     ];
 }
 
-/**
- * Build SQL date condition based on time range.
- *
- * @param string $timeRange
- * @param string $startDate
- * @param string $endDate
- * @return string SQL condition (e.g., "AND created_at >= ...")
- */
 function getDateCondition($timeRange, $startDate, $endDate) {
     $condition = "";
 

@@ -6,7 +6,6 @@ require_once __DIR__ . '/../../include/security.php';
 $current_page = 'marketing_integrations';
 $flash = '';
 
-/* ── Handle POST: save integration settings ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $platform     = $_POST['platform']     ?? '';
@@ -31,12 +30,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 if (isset($_GET['flash'])) $flash = $_GET['flash'];
 
-/* ── Load integrations ── */
 $integrations = [];
 $r = mysqli_query($conn, "SELECT * FROM marketing_integrations ORDER BY platform");
 if ($r) { while ($row = mysqli_fetch_assoc($r)) $integrations[$row['platform']] = $row; }
 
-// Ensure both platforms always show
 foreach (['Mailchimp','Klaviyo'] as $p) {
     if (!isset($integrations[$p])) {
         $integrations[$p] = ['platform'=>$p,'apiKey'=>'','listID'=>'','serverPrefix'=>'','isConnected'=>0,'lastSyncAt'=>null,'subscriberCount'=>0];
@@ -73,7 +70,6 @@ $editPlatform = $_GET['setup'] ?? null;
         <div class="flash flash-<?= $type === 'ok' ? 'success' : 'error' ?>"><?= htmlspecialchars($msg) ?></div>
       <?php endif; ?>
 
-      <!-- ── Mailchimp ── -->
       <?php $mc = $integrations['Mailchimp']; ?>
       <div class="integration-card mb-6">
         <div class="integration-logo logo-mailchimp">
@@ -125,7 +121,6 @@ $editPlatform = $_GET['setup'] ?? null;
         </div>
       </div>
 
-      <!-- ── Klaviyo ── -->
       <?php $kl = $integrations['Klaviyo']; ?>
       <div class="integration-card mb-6">
         <div class="integration-logo logo-klaviyo">
@@ -177,7 +172,6 @@ $editPlatform = $_GET['setup'] ?? null;
         </div>
       </div>
 
-      <!-- ── Info card ── -->
       <div class="alert-card alert-blue">
         <div class="alert-title"><i class="fas fa-circle-info"></i> Integration Tips</div>
         <p class="alert-text" style="margin-bottom:6px">
@@ -192,7 +186,6 @@ $editPlatform = $_GET['setup'] ?? null;
   </main>
 </div>
 
-<!-- ── Mailchimp Modal ── -->
 <div class="modal-overlay" id="modalMailchimp">
   <div class="modal-box">
     <h3>Mailchimp Settings</h3>
@@ -226,7 +219,6 @@ $editPlatform = $_GET['setup'] ?? null;
   </div>
 </div>
 
-<!-- ── Klaviyo Modal ── -->
 <div class="modal-overlay" id="modalKlaviyo">
   <div class="modal-box">
     <h3>Klaviyo Settings</h3>

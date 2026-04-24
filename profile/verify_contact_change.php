@@ -48,7 +48,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             } elseif ($codeInput !== $row["verification_code"]) {
                 $errorMessage = "The code you entered is not correct.";
             } else {
-                // Update email/phone
+
                 $stmt = $conn->prepare("
                     UPDATE users
                     SET email = ?, phone = ?, verification_code = NULL, verification_expires_at = NULL
@@ -58,12 +58,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $stmt->execute();
                 $stmt->close();
 
-                // Refresh session
                 $_SESSION["user"]["email"] = $pending["new_email"];
 
                 unset($_SESSION["contact_change_pending"]);
 
-                // Redirect back to settings with success flag
                 header("Location: account.php?tab=settings&updated=1");
                 exit();
             }
@@ -78,10 +76,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     <title>Verify Contact Change - Athina E-Shop</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <!-- Bootstrap (for buttons / alerts baseline) -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 
-    <!-- Athina auth styling -->
     <link rel="stylesheet" href="../assets/styling/authentication.css">
 </head>
 <body class="registration_page">

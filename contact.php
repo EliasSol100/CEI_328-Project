@@ -14,7 +14,6 @@ if (!file_exists($logo_path)) {
     $logo_path = "assets/images/athina-eshop-logo.png";
 }
 
-// --------- User / Profile handling ----------
 $role     = "guest";
 $fullName = "Guest";
 
@@ -59,7 +58,6 @@ if (isset($_SESSION["user"])) {
     $_SESSION['role']    = $role;
 }
 
-// Make name / role available to header.php
 $GLOBALS['header_user_full_name'] = $fullName;
 $GLOBALS['header_user_role']      = $role;
 ?>
@@ -94,7 +92,6 @@ $GLOBALS['header_user_role']      = $role;
             <div class="container">
                 <div class="contact-grid">
 
-                    <!-- Contact Form -->
                     <div class="contact-card">
                         <h2 data-translate="sendMessage">Send a Message</h2>
                         <form class="contact-form" method="post" action="contact.php">
@@ -117,7 +114,6 @@ $GLOBALS['header_user_role']      = $role;
                         </form>
                     </div>
 
-                    <!-- Contact Info -->
                     <div class="contact-card">
                         <h2 data-translate="getInTouch">Get in Touch</h2>
                         <div class="info-card">

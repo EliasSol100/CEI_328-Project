@@ -1,8 +1,5 @@
-/* ===================================================
-   Creations by Athena – Admin Dashboard Scripts
-   =================================================== */
 
-/* ── Modal helpers ────────────────────────────────── */
+
 var adminUnsavedGuard = {
   hasUnsavedChanges: false,
   isSubmitting: false,
@@ -64,7 +61,6 @@ function closeModal(id) {
   if (el) { el.classList.remove('show'); document.body.style.overflow = ''; }
 }
 
-// Close modal on outside click
 document.addEventListener('click', function (e) {
   var openModal = e.target.closest('.modal-overlay.show');
   if (openModal && !e.target.closest('.modal-box')) {
@@ -74,7 +70,6 @@ document.addEventListener('click', function (e) {
   }
 });
 
-// Close modal on Escape key
 document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') {
     var openModals = Array.prototype.slice.call(document.querySelectorAll('.modal-overlay.show'));
@@ -89,7 +84,6 @@ document.addEventListener('keydown', function (e) {
   }
 });
 
-/* ── Tab switching ────────────────────────────────── */
 function switchTab(btn, group) {
   document.querySelectorAll('[data-tab-group="' + group + '"] .tab-btn').forEach(function (b) {
     b.classList.remove('active');
@@ -108,7 +102,6 @@ function switchTab(btn, group) {
   }
 }
 
-/* ── Auto-dismiss flash messages ─────────────────── */
 document.addEventListener('DOMContentLoaded', function () {
   var flashes = document.querySelectorAll('.flash');
   flashes.forEach(function (f) {
@@ -120,7 +113,6 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 });
 
-/* ── Toggle colour availability (inline AJAX) ─────── */
 function toggleColour(form) {
   var fd = new FormData(form);
   fetch(form.action, { method: 'POST', body: fd })
@@ -131,12 +123,10 @@ function toggleColour(form) {
     .catch(function () { alert('Network error.'); });
 }
 
-/* ── Confirm delete ───────────────────────────────── */
 function confirmDelete(msg) {
   return confirm(msg || 'Are you sure you want to delete this item?');
 }
 
-/* ── Copy to clipboard ────────────────────────────── */
 function copyCode(text) {
   navigator.clipboard.writeText(text).then(function () {
     var toast = document.createElement('div');
@@ -147,14 +137,12 @@ function copyCode(text) {
   });
 }
 
-/* ── Status select auto-submit ────────────────────── */
 document.addEventListener('change', function (e) {
   if (e.target.classList.contains('status-select-auto')) {
     e.target.closest('form').submit();
   }
 });
 
-/* ── Populate edit modal ──────────────────────────── */
 function populateEditModal(modalId, data) {
   var modal = document.getElementById(modalId);
   if (!modal) return;

@@ -1,5 +1,5 @@
 <?php
-// Make sure session is available (usually already started in the page)
+
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
@@ -15,7 +15,6 @@ if (isset($_SESSION["wishlist_count"])) {
     $wishlistCount = count($_SESSION["wishlist"]);
 }
 
-// Detect if we're in a subdirectory (profile/, authentication/, etc.)
 $scriptName = $_SERVER['PHP_SELF'] ?? '';
 $rootPrefix = (
     strpos($scriptName, '/profile/') !== false ||
@@ -23,7 +22,6 @@ $rootPrefix = (
     strpos($scriptName, '/modules/') !== false
 ) ? '../' : '';
 
-// Pull data passed from each page if available, otherwise fall back to session
 $headerName  = $GLOBALS['header_user_full_name'] ?? ($_SESSION["user"]["full_name"] ?? "Guest");
 $headerRole  = $GLOBALS['header_user_role']      ?? ($_SESSION["user"]["role"] ?? "guest");
 $initials    = $GLOBALS['header_user_initials']  ?? null;
@@ -38,7 +36,6 @@ $isCartPage = $activePage === 'cart' || $activePage === 'checkout' || $currentSc
 $isWishlistPage = $activePage === 'wishlist' || $currentScriptName === 'wishlist.php';
 $isAdminArea = strpos($scriptName, '/modules/admin/') !== false;
 
-// Fallback initials generation if not provided
 if ($isLoggedIn && !$initials) {
     $parts = preg_split('/\s+/', trim($headerName));
     if (!empty($parts)) {
@@ -53,7 +50,7 @@ if ($isLoggedIn && !$initials) {
 <header class="header">
     <div class="container">
         <div class="header-content">
-            <!-- Logo: works from root and subfolders -->
+
             <a href="<?php echo $rootPrefix; ?>index.php" class="logo" aria-label="Creations by Athina Home">
                 <?php if ($headerLogoUrl !== ''): ?>
                     <div class="logo-icon logo-icon-image">
@@ -68,20 +65,20 @@ if ($isLoggedIn && !$initials) {
             <?php include __DIR__ . '/navigation.php'; ?>
 
             <div class="utility-icons">
-                <!-- Language selector -->
+
                 <div class="language-selector" role="button" tabindex="0"<?= app_translate_aria_attrs('Toggle language', 'Αλλαγή γλώσσας') ?><?= app_translate_title_attrs('Toggle language', 'Αλλαγή γλώσσας') ?>>
                     <i class="fas fa-globe"></i>
                     <span class="language-selector-label">EN</span>
                 </div>
 
                 <?php
-                // Normalize role for comparison
+
                 $normalizedRole = strtolower((string)$headerRole);
                 $isAdmin = in_array($normalizedRole, ['admin', 'administrator', 'superadmin'], true);
                 ?>
 
                 <?php if ($isLoggedIn && $isAdmin): ?>
-                    <!-- ADMIN DASHBOARD BUTTON (visible only for admin roles) -->
+
                     <a href="<?php echo $rootPrefix; ?>modules/admin/dashboard.php"
                        class="utility-icon admin-icon<?= $isAdminArea ? ' is-active' : '' ?>"
                        aria-label="Admin Dashboard"
@@ -92,7 +89,7 @@ if ($isLoggedIn && !$initials) {
                 <?php endif; ?>
 
                 <?php if ($isLoggedIn): ?>
-                    <!-- LOGGED-IN STATE: avatar + dropdown -->
+
                     <div class="utility-icon user-dropdown-wrapper<?= $isProfileArea ? ' is-active' : '' ?>">
                         <div class="user-avatar-circle dropdown-toggle"
                              tabindex="0"
@@ -101,7 +98,7 @@ if ($isLoggedIn && !$initials) {
                         </div>
 
                         <div class="user-dropdown">
-                            <!-- My Account (works from both root and /profile/) -->
+
                             <a href="<?php echo $rootPrefix; ?>profile/account.php" class="dropdown-item">
                                 <i class="fas fa-user"></i>
                                 <span data-translate="headerMyAccount">My Account</span>
@@ -121,7 +118,7 @@ if ($isLoggedIn && !$initials) {
                         </div>
                     </div>
                 <?php else: ?>
-                    <!-- LOGGED-OUT STATE: login/register icon -->
+
                     <a href="<?php echo $rootPrefix; ?>authentication/login.php"
                        class="utility-icon auth-icon<?= $isAuthArea ? ' is-active' : '' ?>"
                        aria-label="Register or Login"
@@ -130,7 +127,6 @@ if ($isLoggedIn && !$initials) {
                     </a>
                 <?php endif; ?>
 
-                <!-- Cart icon -->
                 <?php $cartCount = (int)($_SESSION["cart"]["totals"]["items_count"] ?? 0); ?>
                 <a href="<?php echo $rootPrefix; ?>cart.php" class="utility-icon cart-icon<?= $isCartPage ? ' is-active' : '' ?>" aria-label="Shopping cart"<?= app_translate_aria_attrs('Shopping cart', 'Καλάθι αγορών') ?>>
                     <i class="fas fa-shopping-cart"></i>
@@ -139,7 +135,6 @@ if ($isLoggedIn && !$initials) {
                     <?php endif; ?>
                 </a>
 
-                <!-- Wishlist icon -->
                 <a href="<?php echo $rootPrefix; ?>wishlist.php" class="utility-icon wishlist-icon<?= $isWishlistPage ? ' is-active' : '' ?>" aria-label="Wishlist"<?= app_translate_aria_attrs('Wishlist', 'Λίστα επιθυμιών') ?>>
                     <i class="fas fa-heart"></i>
                     <?php if ($wishlistCount > 0): ?>
@@ -159,7 +154,6 @@ if ($isLoggedIn && !$initials) {
     </div>
 </header>
 
-<!-- Avatar dropdown behaviour (runs on EVERY page that includes header.php) -->
 <script>
 (function () {
     function initHeaderInteractions() {
@@ -217,7 +211,7 @@ if ($isLoggedIn && !$initials) {
                 }
             });
 
-            return; // not logged in, nothing else to wire
+            return;
         }
 
         function closeDropdown() {
@@ -240,7 +234,6 @@ if ($isLoggedIn && !$initials) {
             }
         });
 
-        // Close when clicking outside
         document.addEventListener('click', function (e) {
             if (header.classList.contains('mobile-nav-open') && !header.contains(e.target)) {
                 closeMobileNav();
@@ -252,7 +245,6 @@ if ($isLoggedIn && !$initials) {
             }
         });
 
-        // Close on Escape
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') {
                 closeDropdown();

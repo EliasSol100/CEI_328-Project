@@ -1,30 +1,11 @@
 <?php
-/**
- * Stock Management Module
- * 
- * Handles stock deduction after order completion, threshold checks,
- * admin notifications, and audit logging.
- * 
- * @package CreationsByAthina
- */
 
-// Prevent direct access if needed
 if (!defined('INCLUDE_CHECK') && !defined('STOCK_MANAGEMENT_DIRECT')) {
     die('Direct access not permitted');
 }
 
-/**
- * Deduct stock for all items in a confirmed order.
- * 
- * This function should be called **within an active transaction**
- * to ensure atomicity with order creation.
- *
- * @param int      $orderId The ID of the order (orderID column)
- * @param mysqli   $conn    Active database connection (already in transaction)
- * @throws Exception If any error occurs (rollback handled by caller)
- */
 function deductStockAfterOrderCompletion($orderId, $conn) {
-    // 1. Verify order exists and status allows stock deduction
+
     $stmt = $conn->prepare("SELECT status FROM orders WHERE orderID = ?");
     if (!$stmt) {
         throw new Exception("Failed to prepare order check: " . $conn->error);
@@ -36,13 +17,12 @@ function deductStockAfterOrderCompletion($orderId, $conn) {
         throw new Exception("Order #$orderId not found.");
     }
     $order = $result->fetch_assoc();
-    $allowedStatuses = ['pending', 'confirmed', 'paid', 'processing', 'accepted']; // adjust as needed
+    $allowedStatuses = ['pending', 'confirmed', 'paid', 'processing', 'accepted'];
     if (!in_array($order['status'], $allowedStatuses)) {
         throw new Exception("Order #$orderId status '{$order['status']}' not eligible for stock deduction.");
     }
     $stmt->close();
 
-    // 2. Fetch all order items
     $stmt = $conn->prepare("SELECT productID, variationID, quantity FROM order_items WHERE orderID = ?");
     if (!$stmt) {
         throw new Exception("Failed to prepare order items fetch: " . $conn->error);
@@ -56,13 +36,11 @@ function deductStockAfterOrderCompletion($orderId, $conn) {
         throw new Exception("No items found for order #$orderId.");
     }
 
-    // 3. Process each item
     while ($item = $items->fetch_assoc()) {
         $productId   = (int)$item['productID'];
         $variationId = (int)$item['variationID'];
         $qtyOrdered  = (int)$item['quantity'];
 
-        // If no variation_id, deduct from product inventory directly.
         if (!$variationId) {
             $pStmt = $conn->prepare("SELECT inventory, cartStatus FROM products WHERE productID = ? FOR UPDATE");
             if (!$pStmt) {
@@ -110,7 +88,6 @@ function deductStockAfterOrderCompletion($orderId, $conn) {
             continue;
         }
 
-        // Lock the stock row to prevent race conditions
         $stockStmt = $conn->prepare("SELECT quantityAvailable FROM variation_stock WHERE variationID = ? FOR UPDATE");
         if (!$stockStmt) {
             throw new Exception("Failed to prepare stock select: " . $conn->error);
@@ -119,8 +96,7 @@ function deductStockAfterOrderCompletion($orderId, $conn) {
         $stockStmt->execute();
         $stockRes = $stockStmt->get_result();
         if ($stockRes->num_rows === 0) {
-            // If no stock record exists, create one with 0 stock? Or throw?
-            // Better to throw because product should have stock record.
+
             throw new Exception("Stock record not found for variation ID: $variationId");
         }
         $stockRow = $stockRes->fetch_assoc();
@@ -131,7 +107,6 @@ function deductStockAfterOrderCompletion($orderId, $conn) {
             throw new Exception("Insufficient stock for variation ID: $variationId (ordered: $qtyOrdered, available: $currentStock)");
         }
 
-        // Update stock quantity
         $updateStmt = $conn->prepare("UPDATE variation_stock SET quantityAvailable = ? WHERE variationID = ?");
         if (!$updateStmt) {
             throw new Exception("Failed to prepare stock update: " . $conn->error);
@@ -142,37 +117,18 @@ function deductStockAfterOrderCompletion($orderId, $conn) {
         }
         $updateStmt->close();
 
-        // Log the stock change for audit
         logStockChange($conn, $orderId, $productId, $variationId, $qtyOrdered, $currentStock, $newStock);
 
-        // Check stock thresholds and trigger notifications/status updates
         checkStockThreshold($conn, $productId, $variationId, $newStock);
     }
 
-    // Optionally mark order as stock_deducted (if column exists)
-    // $markStmt = $conn->prepare("UPDATE orders SET stock_deducted = 1 WHERE orderID = ?");
-    // if ($markStmt) {
-    //     $markStmt->bind_param("i", $orderId);
-    //     $markStmt->execute();
-    //     $markStmt->close();
-    // }
 }
 
-/**
- * Check stock level against threshold and update product status.
- * 
- * @param mysqli $conn
- * @param int    $productId
- * @param int    $variationId
- * @param int    $newStock
- * @throws Exception
- */
 function checkStockThreshold($conn, $productId, $variationId, $newStock) {
-    // Get threshold from variation_stock (lowStockThreshold) or default 5
+
     $threshold = 5;
     $productName = "Product #$productId";
 
-    // Try to get product name from products table
     $prodStmt = $conn->prepare("SELECT nameEN FROM products WHERE productID = ?");
     if ($prodStmt) {
         $prodStmt->bind_param("i", $productId);
@@ -184,7 +140,6 @@ function checkStockThreshold($conn, $productId, $variationId, $newStock) {
         $prodStmt->close();
     }
 
-    // Get threshold from variation_stock
     $threshStmt = $conn->prepare("SELECT lowStockThreshold FROM variation_stock WHERE variationID = ?");
     if ($threshStmt) {
         $threshStmt->bind_param("i", $variationId);
@@ -196,7 +151,6 @@ function checkStockThreshold($conn, $productId, $variationId, $newStock) {
         $threshStmt->close();
     }
 
-    // Determine status (optional – you may not have a stock_status column)
     $status = 'available';
     if ($newStock <= 0) {
         $status = 'out_of_stock';
@@ -204,40 +158,16 @@ function checkStockThreshold($conn, $productId, $variationId, $newStock) {
         $status = 'low_stock';
     }
 
-    // Update stock_status in variation_stock if column exists
-    // If not, you can ignore or add the column.
-    // $updateStatus = $conn->prepare("UPDATE variation_stock SET stock_status = ? WHERE variationID = ?");
-    // if ($updateStatus) {
-    //     $updateStatus->bind_param("si", $status, $variationId);
-    //     $updateStatus->execute();
-    //     $updateStatus->close();
-    // }
-
-    // If out of stock, you may want to disable the variation (if is_active column exists)
     if ($status === 'out_of_stock') {
-        // Check if is_active column exists in product_variations
-        // $disableStmt = $conn->prepare("UPDATE product_variations SET is_active = 0 WHERE variationID = ?");
-        // if ($disableStmt) {
-        //     $disableStmt->bind_param("i", $variationId);
-        //     $disableStmt->execute();
-        //     $disableStmt->close();
-        // }
 
-        // Notify admin about out of stock
         createNotification($conn, "Product '$productName' (variation ID: $variationId) is now OUT OF STOCK.");
     } elseif ($status === 'low_stock') {
         createNotification($conn, "Product '$productName' (variation ID: $variationId) is LOW ON STOCK ($newStock left).");
     }
 }
 
-/**
- * Create an admin notification.
- * 
- * @param mysqli $conn
- * @param string $message
- */
 function createNotification($conn, $message) {
-    // Check if admin_notifications table exists; if not, create it.
+
     $tableCheck = $conn->query("SHOW TABLES LIKE 'admin_notifications'");
     if ($tableCheck->num_rows === 0) {
         $createTable = "CREATE TABLE IF NOT EXISTS admin_notifications (
@@ -258,17 +188,6 @@ function createNotification($conn, $message) {
     }
 }
 
-/**
- * Log stock deduction event in audit_logs using the current project schema.
- *
- * @param mysqli $conn
- * @param int $orderId
- * @param int $productId
- * @param int|null $variationId
- * @param int $quantityChange
- * @param int $oldStock
- * @param int $newStock
- */
 function logStockChange(
     mysqli $conn,
     int $orderId,

@@ -4,7 +4,6 @@ require_once __DIR__ . "/database.php";
 require_once __DIR__ . "/../include/security.php";
 require_once __DIR__ . "/../include/auth_branding.php";
 
-// PHPMailer from project ROOT (one level above /authentication)
 require_once __DIR__ . "/../PHPMailer-master/src/Exception.php";
 require_once __DIR__ . "/../PHPMailer-master/src/PHPMailer.php";
 require_once __DIR__ . "/../PHPMailer-master/src/SMTP.php";
@@ -16,9 +15,6 @@ $error   = "";
 $success = "";
 $authLogoUrl = app_auth_logo_url($conn, '../');
 
-/**
- * Helper: Build the reset link URL
- */
 function buildResetLink(string $token): string
 {
     $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
@@ -40,7 +36,7 @@ if (isset($_POST["submit"])) {
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $error = "Please enter a valid email address.";
     } else {
-        // 1) Look up user by email
+
         $stmt = $conn->prepare("SELECT userID, full_name, email FROM users WHERE email = ? LIMIT 1");
         if (!$stmt) {
             $error = "Something went wrong. Please try again later.";
@@ -51,17 +47,13 @@ if (isset($_POST["submit"])) {
             $user   = $result->fetch_assoc();
             $stmt->close();
 
-            // For security: respond the same whether user exists or not.
-            // Only send email if user is real.
             if ($user) {
-                // 2) Create token + hashed token
+
                 $resetToken = bin2hex(random_bytes(32));
                 $tokenHash  = hash('sha256', $resetToken);
-                // ðŸ” 20-minute validity instead of 1 hour
-                $expiresAt  = date('Y-m-d H:i:s', time() + 20 * 60); // valid for 20 minutes
 
-                // 3) Store token in password_resets table
-                // Ensure table exists in local/dev databases before using it.
+                $expiresAt  = date('Y-m-d H:i:s', time() + 20 * 60);
+
                 $conn->query("
                     CREATE TABLE IF NOT EXISTS password_resets (
                         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -73,7 +65,7 @@ if (isset($_POST["submit"])) {
                         KEY idx_password_resets_token_hash (token_hash)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 ");
-                // Optional: delete any existing reset records for this email
+
                 $del = $conn->prepare("DELETE FROM password_resets WHERE email = ?");
                 if ($del) {
                     $del->bind_param("s", $email);
@@ -94,7 +86,7 @@ if (isset($_POST["submit"])) {
                 }
 
                 if (empty($error)) {
-                    // 4) Send reset email via PHPMailer
+
                     $resetLink = buildResetLink($resetToken);
                     $mail      = new PHPMailer(true);
 
@@ -116,17 +108,14 @@ if (isset($_POST["submit"])) {
                             ],
                         ];
 
-                        // --- Recipients ---
                         $mail->setFrom('admin@festival-web.com', 'Athina E-Shop');
                         $recipientName = !empty($user['full_name']) ? $user['full_name'] : 'Customer';
                         $mail->addAddress($email, $recipientName);
 
-                        // --- Content ---
                         $mail->CharSet = 'UTF-8';
                         $mail->isHTML(false);
                         $mail->Subject = 'Athina E-Shop - Password Reset';
 
-                        // ðŸ” Email text mentions 20 minutes
                         $mail->Body =
                             "Dear {$recipientName},\n\n" .
                             "We received a request to reset the password for your Athina E-Shop account.\n\n" .
@@ -138,19 +127,18 @@ if (isset($_POST["submit"])) {
                             "Athina E-Shop";
 
                         if (!$mail->send()) {
-                            // If mail failed, treat as generic error
+
                             $error = "We couldn't send the reset email right now. Please try again later.";
                         }
                     } catch (Exception $e) {
-                        // PHPMailer threw an exception
+
                         $error = "We couldn't send the reset email right now. Please try again later.";
                     }
                 }
             }
 
-            // 5) Generic message (even if user not found)
             if (empty($error)) {
-                $success = "If this email is registered with Athina E-Shop, we've sent a password reset link. 
+                $success = "If this email is registered with Athina E-Shop, we've sent a password reset link.
                             Please check your inbox and Spam folder.";
             }
         }
@@ -160,7 +148,7 @@ if (isset($_POST["submit"])) {
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8"> 
+    <meta charset="UTF-8">
     <title>Forgot Password - Athina E-Shop</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 

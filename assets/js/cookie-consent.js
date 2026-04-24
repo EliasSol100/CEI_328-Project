@@ -91,7 +91,7 @@
         try {
             window.localStorage.removeItem("language");
         } catch (error) {
-            // Ignore localStorage access issues silently.
+
         }
     }
 

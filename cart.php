@@ -40,7 +40,6 @@ function getCartLineAvailableStock(mysqli $conn, array $item): int {
     return max(0, (int)($product['inventory'] ?? 0));
 }
 
-// ---- POST: remove item or update quantity ----
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $action = $_POST['action'] ?? '';
@@ -153,7 +152,6 @@ function cartRecalc(array $items): array {
     ];
 }
 
-// ---- Read cart from session ----
 $cart   = $_SESSION['cart'] ?? null;
 $items  = $cart['items']  ?? [];
 $totals = $cart['totals'] ?? ['items_count' => 0, 'subtotal' => 0.0, 'addons_total' => 0.0, 'grand_total' => 0.0];
@@ -180,7 +178,6 @@ if ($cartCouponCode !== '' && !empty($items)) {
 $cartCouponDiscount = !empty($cartCouponEvaluation['valid']) ? (float)$cartCouponEvaluation['discount_amount'] : 0.0;
 $cartGrandTotal = max(0, (float)$totals['grand_total'] - $cartCouponDiscount);
 
-// Load one image per cart product (same style as wishlist/shop usage).
 $productImageMap = [];
 if (!empty($items)) {
     $productIds = [];
@@ -210,7 +207,6 @@ if (!empty($items)) {
     }
 }
 
-// ---- Header globals ----
 $GLOBALS['header_user_full_name'] = $_SESSION['user']['full_name'] ?? 'Guest';
 $GLOBALS['header_user_role']      = $_SESSION['user']['role']      ?? 'guest';
 
@@ -264,7 +260,6 @@ unset($_SESSION['cart_notice']);
         <?php else: ?>
         <div class="cart-layout">
 
-            <!-- Items list -->
             <div class="cart-items">
                 <?php foreach ($items as $idx => $item): ?>
                 <?php
@@ -314,7 +309,7 @@ unset($_SESSION['cart_notice']);
                     </div>
 
                     <div class="cart-item-controls">
-                        <!-- Quantity +/− -->
+
                         <form method="post" action="cart.php" class="qty-form">
                             <?= app_csrf_input() ?>
                             <input type="hidden" name="action"     value="update_qty">
@@ -324,12 +319,10 @@ unset($_SESSION['cart_notice']);
                             <button class="qty-btn" type="submit" name="qty" value="<?= (int)$item['quantity'] + 1 ?>">+</button>
                         </form>
 
-                        <!-- Line total -->
                         <div class="cart-item-line-total">
                             €<?= number_format((float)($item['pricing']['lineTotal'] ?? 0), 2) ?>
                         </div>
 
-                        <!-- Remove -->
                         <form method="post" action="cart.php">
                             <?= app_csrf_input() ?>
                             <input type="hidden" name="action"     value="remove">
@@ -343,7 +336,6 @@ unset($_SESSION['cart_notice']);
                 <?php endforeach; ?>
             </div>
 
-            <!-- Order summary -->
             <div class="cart-summary">
                 <h3 data-translate="orderSummary">Order Summary</h3>
 

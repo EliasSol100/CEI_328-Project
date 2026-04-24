@@ -4,9 +4,6 @@ require_once "authentication/database.php";
 require_once "authentication/get_config.php";
 require_once "include/translation_helpers.php";
 
-// --------------------------------------------------
-// Site configuration
-// --------------------------------------------------
 $system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
 $logo_path    = getSystemConfig("logo_path") ?: "assets/images/athina-eshop-logo.png";
 $logo_path    = str_replace("authentication/assets/", "assets/", $logo_path);
@@ -17,22 +14,18 @@ if (!file_exists($logo_path)) {
     $logo_path = "assets/images/athina-eshop-logo.png";
 }
 
-// --------------------------------------------------
-// User / Profile handling (new users table structure)
-// --------------------------------------------------
 $role        = "guest";
 $fullName    = "Guest";
 $isLoggedIn  = isset($_SESSION["user"]);
 $userInitial = "G";
 
 if ($isLoggedIn) {
-    // These come from your login / verification flows
+
     $userId    = $_SESSION["user"]["id"]          ?? null;
     $fullName  = $_SESSION["user"]["full_name"]   ?? 'User';
     $role      = $_SESSION["user"]["role"]        ?? 'user';
     $userEmail = $_SESSION["user"]["email"]       ?? ($_SESSION["email"] ?? null);
 
-    // Derive initials for header avatar
     $parts = preg_split('/\s+/', trim($fullName));
     if (!empty($parts)) {
         $first = strtoupper(substr($parts[0], 0, 1));
@@ -43,10 +36,10 @@ if ($isLoggedIn) {
     $user = null;
 
     if (!empty($userEmail)) {
-        // Fetch latest profile data from the users table using EMAIL (safe, unique)
+
         $stmt = $conn->prepare("
             SELECT country, city, address, postcode, dob, phone, profile_complete, is_verified
-            FROM users 
+            FROM users
             WHERE email = ?
             LIMIT 1
         ");
@@ -60,7 +53,6 @@ if ($isLoggedIn) {
         }
     }
 
-    // Determine if profile is complete based on DB columns
     $fieldsComplete =
         $user &&
         !empty($user["country"])  &&
@@ -70,26 +62,22 @@ if ($isLoggedIn) {
         !empty($user["dob"])      &&
         !empty($user["phone"]);
 
-    // Update session flags to match DB (if we managed to load a row)
     if ($user !== null) {
         $_SESSION["user"]["profile_complete"] = (bool)$fieldsComplete;
         $_SESSION["user"]["is_verified"]      = (int)($user["is_verified"] ?? 0);
     }
 
-    // Keep these for any other pages that rely on them
     if ($userId !== null) {
         $_SESSION['user_id'] = $userId;
     }
     $_SESSION['role'] = $role;
 
-    // If profile still incomplete, force user back to complete_profile wizard
     if (!$fieldsComplete) {
         header("Location: authentication/complete_profile.php");
         exit();
     }
 }
 
-// Make name/initials available to header.php
 $GLOBALS['header_user_full_name'] = $fullName;
 $GLOBALS['header_user_initials']  = $userInitial;
 $GLOBALS['header_user_role']      = $role;
@@ -113,7 +101,6 @@ $GLOBALS['header_user_role']      = $role;
     include __DIR__ . '/include/header.php';
     ?>
 
-    <!-- About Hero -->
     <section class="about-hero">
         <div class="container">
             <h1 data-translate="aboutPageTitle">About Us</h1>
@@ -121,7 +108,6 @@ $GLOBALS['header_user_role']      = $role;
         </div>
     </section>
 
-    <!-- Our Story -->
     <section class="about-story">
         <div class="container">
             <div class="about-card">
@@ -147,7 +133,6 @@ $GLOBALS['header_user_role']      = $role;
         </div>
     </section>
 
-    <!-- Call to Action -->
     <section class="view-all-section">
         <div class="container">
             <a href="shop.php" class="view-all-btn" data-translate="viewAllProducts">View All Products</a>

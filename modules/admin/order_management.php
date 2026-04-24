@@ -688,7 +688,6 @@ function sendReviewInvitationEmail(array $payload): array {
     return ['sent' => false, 'error' => $error !== '' ? $error : 'email delivery failed'];
 }
 
-/* Update order status */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $token = $_POST['csrf_token'] ?? '';
     if (!hash_equals($_SESSION['admin_order_token'], (string)$token)) {
@@ -899,7 +898,6 @@ if (isset($_GET['flash'])) {
     $flash = (string)$_GET['flash'];
 }
 
-/* Single order details (optional) */
 $viewOrder = null;
 $viewItems = [];
 
@@ -985,7 +983,6 @@ if (isset($_GET['view'])) {
     }
 }
 
-/* Orders list */
 $orders = [];
 $listSql = '
     SELECT

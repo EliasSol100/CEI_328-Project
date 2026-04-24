@@ -1,4 +1,4 @@
-// Live wishlist updates: no page reload, instant heart/counter/message updates.
+
 (function () {
     const endpoint = "wishlist_toggle.php";
 
@@ -45,7 +45,6 @@
 
         if (!actionInput || !button) return;
 
-        // Keep the expected action per form type.
         if (form.querySelector('input[name="product_key"]')) {
             actionInput.value = inWishlist ? "remove_wishlist_item" : "add_wishlist_item";
         } else {
@@ -152,7 +151,6 @@
         submitHeartForm(form);
     });
 
-    // Initialize active class from current icon class.
     document.querySelectorAll("form").forEach((form) => {
         if (!isHeartForm(form)) return;
         const icon = form.querySelector("i.fa-heart");

@@ -1,29 +1,13 @@
 <?php
-/**
- * Order Details Module
- *
- * Implements function 3.2.6.15: View Order Details (Including Gift Options & Variations)
- *
- * @package CreationsByAthina
- */
 
-// Prevent direct access
 if (!defined('INCLUDE_CHECK') && !defined('ORDER_DETAILS_DIRECT')) {
     die('Direct access not permitted');
 }
 
-/**
- * Get full order details including items, variations, gift options, payment, shipping.
- *
- * @param mysqli $conn     Database connection
- * @param int    $orderId  Order ID (order_id column in orders table)
- * @return array           Associative array with order details
- * @throws Exception       If order not found or database error
- */
 function getOrderDetails($conn, $orderId) {
-    // 1. Fetch order header with customer and guest info
+
     $stmt = $conn->prepare("
-        SELECT 
+        SELECT
             o.order_id,
             o.orderNumber,
             o.user_id,
@@ -66,7 +50,6 @@ function getOrderDetails($conn, $orderId) {
     $order = $result->fetch_assoc();
     $stmt->close();
 
-    // 2. Build customer info array
     $customer = [];
     if ($order['isGuestFlag']) {
         $customer = [
@@ -85,7 +68,6 @@ function getOrderDetails($conn, $orderId) {
         ];
     }
 
-    // 3. Shipping info (from orders + shipments)
     $shipping = [
         'address'       => $order['shipping_address'],
         'city'          => $order['shipping_city'],
@@ -97,7 +79,6 @@ function getOrderDetails($conn, $orderId) {
         'cost'          => (float)$order['shipping_cost']
     ];
 
-    // Add tracking info from shipments table if available
     $stmt = $conn->prepare("
         SELECT courierName, totalWeightKG, shippingCost, trackingCode
         FROM shipments
@@ -110,15 +91,14 @@ function getOrderDetails($conn, $orderId) {
         if ($row = $shipResult->fetch_assoc()) {
             $shipping['tracking_code'] = $row['trackingCode'];
             $shipping['weight_kg']     = (float)$row['totalWeightKG'];
-            // Use shipment's courierName if different? We'll keep order's courier.
+
         }
         $stmt->close();
     }
 
-    // 4. Payment info from payments table
     $payments = [];
     $stmt = $conn->prepare("
-        SELECT 
+        SELECT
             paymentID,
             provider,
             transactionID,
@@ -148,10 +128,9 @@ function getOrderDetails($conn, $orderId) {
         $stmt->close();
     }
 
-    // 5. Order items with variations, gift options, and addons
     $items = [];
     $stmt = $conn->prepare("
-        SELECT 
+        SELECT
             oi.item_id,
             oi.product_id,
             oi.product_name,
@@ -177,7 +156,7 @@ function getOrderDetails($conn, $orderId) {
     $stmt->execute();
     $itemsResult = $stmt->get_result();
     while ($row = $itemsResult->fetch_assoc()) {
-        // Decode JSON fields
+
         $variationDetails = null;
         if (!empty($row['variation_details'])) {
             $variationDetails = json_decode($row['variation_details'], true);
@@ -205,7 +184,6 @@ function getOrderDetails($conn, $orderId) {
     }
     $stmt->close();
 
-    // 6. Order totals
     $totals = [
         'subtotal'      => (float)$order['subtotal'],
         'discount'      => (float)($order['discountTotal'] ?? 0),
@@ -213,7 +191,6 @@ function getOrderDetails($conn, $orderId) {
         'total'         => (float)$order['total_amount']
     ];
 
-    // 7. Build final array
     return [
         'order_id'          => (int)$order['order_id'],
         'order_number'      => $order['orderNumber'] ?? null,

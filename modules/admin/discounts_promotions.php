@@ -22,7 +22,6 @@ function ensurePromotionCouponColumn(mysqli $conn): void {
 
 ensurePromotionCouponColumn($conn);
 
-/* ── Handle POST ── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $action = $_POST['action'] ?? '';
@@ -83,19 +82,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 if (isset($_GET['flash'])) $flash = $_GET['flash'];
 
-/* ── Load promotions ── */
 $promotions = [];
 $r = mysqli_query($conn, "SELECT p.*, c.categoryName FROM promotions p
       LEFT JOIN categories c ON c.categoryID = p.categoryID
       ORDER BY p.createdAt DESC");
 if ($r) { while ($row = mysqli_fetch_assoc($r)) $promotions[] = $row; }
 
-/* ── Load categories for form ── */
 $categories = [];
 $r = mysqli_query($conn, "SELECT categoryID, categoryName FROM categories ORDER BY categoryName");
 if ($r) { while ($row = mysqli_fetch_assoc($r)) $categories[] = $row; }
 
-/* ── Edit: find promo ── */
 $editPromo = null;
 if (isset($_GET['edit'])) {
     $eid = (int)$_GET['edit'];
@@ -133,7 +129,6 @@ if (isset($_GET['edit'])) {
         <div class="flash flash-<?= $type === 'ok' ? 'success' : 'error' ?>"><?= htmlspecialchars($msg) ?></div>
       <?php endif; ?>
 
-      <!-- ── Promotions table ── -->
       <div class="card mb-6">
         <div class="card-title">Active &amp; Upcoming Promotions</div>
         <table class="data-table">
@@ -202,7 +197,6 @@ if (isset($_GET['edit'])) {
         </table>
       </div>
 
-      <!-- ── Promotion rules info ── -->
       <div class="alert-card alert-blue">
         <div class="alert-title" style="font-size:14.5px"><i class="fas fa-circle-info"></i> Promotion Rules</div>
         <p class="alert-text" style="margin-bottom:8px">
@@ -224,7 +218,6 @@ if (isset($_GET['edit'])) {
   </main>
 </div>
 
-<!-- ── Add Promotion Modal ── -->
 <div class="modal-overlay" id="modalAdd">
   <div class="modal-box">
     <h3>Create Promotion</h3>
@@ -294,7 +287,6 @@ if (isset($_GET['edit'])) {
   </div>
 </div>
 
-<!-- ── Edit Promotion Modal ── -->
 <?php if ($editPromo): ?>
 <div class="modal-overlay show" id="modalEdit">
   <div class="modal-box">

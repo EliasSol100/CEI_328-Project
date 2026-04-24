@@ -31,7 +31,6 @@ function ensureProductSalesOverridesSchema(mysqli $conn): void {
         );
     }
 
-    // Backfill legacy rows so existing manual totals stay unchanged and future online sales continue from now.
     mysqli_query($conn, "
         UPDATE product_sales_overrides pso
         LEFT JOIN (
@@ -73,7 +72,6 @@ function stockColourSwatchHex(string $colorName): string
     return $map[$key] ?? '#ece6f6';
 }
 
-/* -- Handle POST: update product inventory / status -- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $action = $_POST['action'] ?? '';
@@ -150,7 +148,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$productID) {
             $flash = 'err:Select a product first.';
         } else {
-            // Remove existing colour-only variations (no size, no yarnType)
+
             $stmt = mysqli_prepare($conn,
                 "DELETE FROM product_variations
                  WHERE productID = ?
@@ -161,7 +159,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
 
-            // Insert new colour variations + stock entry
             foreach ($colorIDs as $colorID) {
                 $stmt = mysqli_prepare($conn,
                     "INSERT INTO product_variations (productID, colorID) VALUES (?, ?)");
@@ -170,10 +167,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $newVarID = (int)mysqli_insert_id($conn);
                 mysqli_stmt_close($stmt);
 
-                // No variation_stock row inserted — COALESCE in product.php falls back to p.inventory
             }
 
-            // Update hasVariants flag on the product
             $hasVariants = !empty($colorIDs) ? 1 : 0;
             $stmt = mysqli_prepare($conn,
                 "UPDATE products SET hasVariants = ? WHERE productID = ?");
@@ -217,7 +212,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($errors) {
             $flash = 'err:' . implode(' ', $errors);
         } else {
-            // Insert color — INSERT IGNORE keeps existing data if colorID already exists
+
             $stmt = mysqli_prepare($conn,
                 "INSERT IGNORE INTO colors (colorID, colorName, globalInventoryAvailable, isActive)
                  VALUES (?, ?, ?, 1)");
@@ -225,7 +220,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
 
-            // Handle optional photo upload
             $photoPath = null;
             if (!empty($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
                 $file     = $_FILES['photo'];
@@ -247,7 +241,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            // Link color ↔ yarn type (INSERT IGNORE — won't overwrite existing combination)
             $stmt = mysqli_prepare($conn,
                 "INSERT IGNORE INTO color_yarn_types (colorID, typeID, photoPath) VALUES (?, ?, ?)");
             mysqli_stmt_bind_param($stmt, 'iis', $colorID, $typeID, $photoPath);
@@ -266,7 +259,6 @@ if (isset($_GET['flash'])) {
     $flash = $_GET['flash'];
 }
 
-// Auto sales totals from placed order items.
 $autoSalesMap = [];
 $salesRes = mysqli_query($conn, "SELECT productID, COALESCE(SUM(quantity),0) AS total_qty FROM order_items GROUP BY productID");
 if ($salesRes) {
@@ -275,7 +267,6 @@ if ($salesRes) {
     }
 }
 
-// Manual overrides map.
 $manualSalesMap = [];
 $msRes = mysqli_query($conn, "SELECT productID, manual_total_sales, auto_sales_baseline FROM product_sales_overrides");
 if ($msRes) {
@@ -287,7 +278,6 @@ if ($msRes) {
     }
 }
 
-/* -- Load products -- */
 $products = [];
 $r = mysqli_query($conn, "SELECT productID, nameEN, category, inventory, cartStatus FROM products ORDER BY nameEN");
 if ($r) {
@@ -296,7 +286,6 @@ if ($r) {
     }
 }
 
-/* -- Load product-colour assignments [productID => [colorID => true]] -- */
 $productColorMap = [];
 $r = mysqli_query($conn, "
     SELECT productID, colorID FROM product_variations
@@ -310,7 +299,6 @@ if ($r) {
     }
 }
 
-/* -- Load yarn types -- */
 $yarnTypes = [];
 $r = mysqli_query($conn, "SELECT * FROM yarn_types ORDER BY typeName");
 if ($r) {
@@ -319,7 +307,6 @@ if ($r) {
     }
 }
 
-/* -- Load colours with yarn type labels. Colour previews stay as swatches here. -- */
 $colours = [];
 $r = mysqli_query($conn, "
     SELECT c.*,
@@ -377,7 +364,6 @@ $statusBadge = [
         <div class="flash flash-<?= $type === 'ok' ? 'success' : 'error' ?>"><?= htmlspecialchars($msg) ?></div>
       <?php endif; ?>
 
-      <!-- -- Product Stock Table -- -->
       <div class="card mb-6">
         <div class="card-title">Product Stock Levels</div>
         <p class="text-sm text-muted mb-4">
@@ -486,7 +472,6 @@ $statusBadge = [
         </table>
       </div>
 
-      <!-- -- Assign Colours to Products -- -->
       <div class="card mb-6">
         <div class="card-title">Assign Colours to Products</div>
         <p class="text-sm text-muted mb-4">
@@ -532,7 +517,6 @@ $statusBadge = [
         </form>
       </div>
 
-      <!-- -- Add Color -- -->
       <div class="card mb-6">
         <div class="card-title">Add Yarn Colour</div>
         <p class="text-sm text-muted mb-4">
@@ -542,21 +526,18 @@ $statusBadge = [
           <input type="hidden" name="action" value="add_color">
           <div style="display:grid;grid-template-columns:120px 1fr 1fr 120px;gap:12px;align-items:end;flex-wrap:wrap">
 
-            <!-- Color ID -->
             <div>
               <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Color ID *</label>
               <input type="number" name="colorID" min="1" placeholder="e.g. 55"
                 class="form-input" style="width:100%" required>
             </div>
 
-            <!-- Color Name -->
             <div>
               <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Color Name *</label>
               <input type="text" name="colorName" placeholder="e.g. White"
                 class="form-input" style="width:100%" required>
             </div>
 
-            <!-- Yarn Type -->
             <div>
               <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Yarn Type *</label>
               <select name="typeID" id="typeID-select" class="form-input" style="width:100%" required>
@@ -568,7 +549,6 @@ $statusBadge = [
               </select>
             </div>
 
-            <!-- Stock -->
             <div>
               <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Stock (units)</label>
               <input type="number" name="globalInventoryAvailable" value="50" min="0"
@@ -576,14 +556,12 @@ $statusBadge = [
             </div>
           </div>
 
-          <!-- New Yarn Type name (hidden until "Add New Type" selected) -->
           <div id="new-type-row" style="display:none;margin-top:12px;max-width:320px">
             <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">New Yarn Type Name *</label>
             <input type="text" name="newTypeName" id="new-type-name" placeholder="e.g. Soft & Elegant"
               class="form-input" style="width:100%">
           </div>
 
-          <!-- Photo upload -->
           <div style="margin-top:12px">
             <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Photo <span class="text-muted" style="font-weight:400">(optional, JPG/PNG/WebP, max 2MB)</span></label>
             <div style="display:flex;align-items:center;gap:12px">
@@ -604,7 +582,6 @@ $statusBadge = [
         </form>
       </div>
 
-      <!-- -- Colour Yarn Stock -- -->
       <div class="card">
         <div class="card-title">Yarn Colour Inventory</div>
         <p class="text-sm text-muted mb-4">
@@ -626,19 +603,19 @@ $statusBadge = [
             <?php foreach ($colours as $c): ?>
             <?php $swatchHex = stockColourSwatchHex((string)($c['colorName'] ?? '')); ?>
             <tr>
-              <!-- Thumbnail -->
+
               <td style="text-align:center;vertical-align:middle">
                 <span class="colour-swatch-preview" style="background:<?= htmlspecialchars($swatchHex) ?>"></span>
               </td>
-              <!-- ID -->
+
               <td class="text-muted" style="font-size:13px"><?= (int)$c['colorID'] ?></td>
-              <!-- Name -->
+
               <td class="font-600"><?= htmlspecialchars($c['colorName']) ?></td>
-              <!-- Yarn types -->
+
               <td class="text-muted" style="font-size:12px"><?= htmlspecialchars($c['typeNames'] ?? '—') ?></td>
-              <!-- Stock -->
+
               <td><?= (int)$c['globalInventoryAvailable'] ?></td>
-              <!-- Status badge -->
+
               <td>
                 <?php if ($c['isActive']): ?>
                   <span class="badge badge-green">Available</span>
@@ -646,7 +623,7 @@ $statusBadge = [
                   <span class="badge badge-red">Unavailable</span>
                 <?php endif; ?>
               </td>
-              <!-- Update form -->
+
               <td>
                 <form method="POST" style="display:flex;gap:8px;align-items:center" data-ignore-unsaved-warning data-stock-warning>
                   <input type="hidden" name="action"  value="update_color_stock">
@@ -681,7 +658,6 @@ $statusBadge = [
 <script>
 document.addEventListener('DOMContentLoaded', function () {
 
-  /* -- Assign Colours: product selector syncs checkboxes -- */
   var productColorMap = <?= json_encode($productColorMap, JSON_FORCE_OBJECT) ?>;
   var assignSelect = document.getElementById('assign-product-select');
   var colourCards  = document.querySelectorAll('.colour-assign-card');
@@ -705,7 +681,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   colourCards.forEach(function (card) {
     card.addEventListener('click', function (e) {
-      if (e.target.tagName === 'INPUT') return; // checkbox handled natively
+      if (e.target.tagName === 'INPUT') return;
       var checkbox = card.querySelector('.colour-checkbox');
       checkbox.checked = !checkbox.checked;
       card.style.borderColor = checkbox.checked ? '#111827' : '#e5e7eb';
@@ -716,7 +692,6 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
-  /* -- Add Color form: "New Type" toggle -- */
   var typeSelect   = document.getElementById('typeID-select');
   var newTypeRow   = document.getElementById('new-type-row');
   var newTypeInput = document.getElementById('new-type-name');
@@ -728,7 +703,6 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
-  /* -- Photo preview -- */
   var photoInput   = document.getElementById('color-photo-input');
   var photoName    = document.getElementById('color-photo-name');
   var photoPreview = document.getElementById('color-photo-preview');

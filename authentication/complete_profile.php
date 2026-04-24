@@ -6,11 +6,6 @@ require_once __DIR__ . "/../include/homepage_customization.php";
 require_once __DIR__ . "/../include/auth_branding.php";
 require_once __DIR__ . "/auth_mailer.php";
 
-/**
- * How the user reached this page:
- * - Social login (Google / Facebook): $_SESSION["user"] is already set with at least id + email.
- * - Manual email signup: registration.php set $_SESSION["manual_email"] and redirected here.
- */
 if (isset($_SESSION["user"])) {
     $userId        = $_SESSION["user"]["id"]    ?? null;
     $email         = $_SESSION["user"]["email"] ?? '';
@@ -20,7 +15,7 @@ if (isset($_SESSION["user"])) {
     $email         = $_SESSION["manual_email"];
     $isSocialLogin = false;
 } else {
-    // No context → back to registration
+
     header("Location: registration.php");
     exit();
 }
@@ -70,9 +65,7 @@ function profilePasswordHasAsciiSymbol(string $password): bool
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     app_require_csrf(false, "Invalid request token. Please refresh and try again.");
-    // -----------------------------
-    // 1. Collect & validate inputs
-    // -----------------------------
+
     $fullName        = trim($_POST["fullname"]         ?? '');
     $nameParts       = preg_split('/\s+/', $fullName, -1, PREG_SPLIT_NO_EMPTY);
     $username        = trim($_POST["username"]         ?? '');
@@ -86,7 +79,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $dob             = parseProfileDobInput($dobInput);
     $phone           = trim($_POST["phone"]            ?? '');
 
-    // Full name must be 2–3 words
     if (count($nameParts) < 2 || count($nameParts) > 3) {
         $errors[] = "Full name must be 2 or 3 words (e.g., First Last or First Middle Last).";
     }
@@ -97,7 +89,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         ? implode(" ", array_slice($nameParts, 1, -1))
         : null;
 
-    // Required fields check
     if (
         empty($fullName) || empty($username) || empty($password) || empty($repeat_password) ||
         empty($country)  || empty($city)     || empty($address)  || empty($postcode) ||
@@ -121,17 +112,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $errors[] = "Username must be 3-32 characters and use only letters, numbers, dots, underscores, or hyphens.";
     }
 
-    // Phone format
     if (!preg_match('/^\+?[0-9]{7,15}$/', $phone)) {
         $errors[] = "Phone number is not valid!";
     }
 
-    // Email format (email comes from session in both flows)
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $errors[] = "Email is not valid!";
     }
 
-    // Password strength
     if (
         strlen($password) < 8 ||
         !preg_match('/^[\x20-\x7E]+$/', $password) ||
@@ -142,12 +130,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $errors[] = "Password must be at least 8 characters and include an uppercase letter, a number, and an English keyboard symbol.";
     }
 
-    // Passwords match
     if ($password !== $repeat_password) {
         $errors[] = "Passwords do not match!";
     }
 
-    // Check for duplicate username
     if ($isSocialLogin && $userId) {
         $stmt = $conn->prepare("SELECT userID FROM users WHERE username = ? AND userID != ?");
     } else {
@@ -183,15 +169,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
     }
 
-    // -----------------------------
-    // 2. Save to DB if no errors
-    // -----------------------------
     if (empty($errors)) {
         $passwordHash = password_hash($password, PASSWORD_DEFAULT);
         $newUserId = null;
 
         if ($isSocialLogin && $userId) {
-            // Existing user (social login) completes their profile
+
             $stmt = $conn->prepare("
                 UPDATE users
                 SET full_name        = ?,
@@ -237,7 +220,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             }
 
         } else {
-            // New user from manual email flow
+
             $stmt = $conn->prepare("
                 INSERT INTO users (
                     full_name,
@@ -259,7 +242,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1
                 )
             ");
-            // 13 placeholders → 13 bound values (up to phone)
+
             if (!$stmt) {
                 $errors[] = "We couldn't create your account. Please try again.";
             } else {
@@ -287,7 +270,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     }
                 } else {
                     $newUserId = (int)$stmt->insert_id;
-                    // No longer need the temporary manual_email
+
                     unset($_SESSION["manual_email"]);
                 }
                 $stmt->close();
@@ -295,9 +278,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
 
         if (empty($errors) && !empty($newUserId)) {
-            // -----------------------------
-            // 3. Load fresh user row & set session
-            // -----------------------------
+
             $stmt = $conn->prepare("SELECT *, userID AS id FROM users WHERE userID = ?");
             $stmt->bind_param("i", $newUserId);
             $stmt->execute();
@@ -306,7 +287,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             $stmt->close();
 
             if ($userRow) {
-                // Core session keys used by the post-registration verification flow
+
                 $_SESSION["user_id"]   = $userRow["id"];
                 $_SESSION["email"]     = $userRow["email"];
                 $_SESSION["full_name"] = $userRow["full_name"];
@@ -375,11 +356,9 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
 </head>
 <body class="registration_page">
 
-    <!-- (Background handled by authentication.css / body) -->
-
     <div class="wizard-box">
         <div class="wizard-header">
-            <!-- Athina E-Shop crochet badge logo -->
+
             <div class="wizard-logo">
                 <img src="<?= htmlspecialchars($profileLogoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="Creations by Athina logo">
             </div>
@@ -394,7 +373,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
         <form method="post" id="complete-profile-form">
             <?= app_csrf_input() ?>
             <div class="wizard-content">
-                <!-- Step 1 -->
+
                 <div class="form-step active" id="step1">
                     <?php if (!empty($errors) && isset($_POST["fullname"])): ?>
                         <?php foreach ($errors as $error): ?>
@@ -476,7 +455,6 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                     </div>
                 </div>
 
-                <!-- Step 2 -->
                 <div class="form-step" id="step2">
                     <?php if (!empty($errors) && isset($_POST["password"])): ?>
                         <?php foreach ($errors as $error): ?>
@@ -520,7 +498,6 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                     </div>
                 </div>
 
-                <!-- Step 3 -->
                 <div class="form-step" id="step3">
                     <?php if (!empty($errors) && isset($_POST["country"])): ?>
                         <?php foreach ($errors as $error): ?>
@@ -555,7 +532,6 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                     </div>
                 </div>
 
-                <!-- Navigation -->
                 <div class="wizard-actions">
                     <button type="button" class="btn btn-secondary" id="prevBtn" style="display: none;">Back</button>
                     <button type="button" class="btn btn-primary" id="nextBtn">Next</button>
@@ -565,7 +541,6 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
         </form>
     </div>
 
-    <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/country-select-js/2.1.0/js/countrySelect.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/zxcvbn/4.4.2/zxcvbn.js"></script>
