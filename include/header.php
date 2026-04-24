@@ -171,7 +171,7 @@ if ($isLoggedIn && !$initials) {
         const dropdown = wrapper ? wrapper.querySelector('.user-dropdown') : null;
         const nav = header.querySelector('.nav');
         const navToggle = header.querySelector('.mobile-nav-toggle');
-        const mobileBreakpoint = window.matchMedia('(max-width: 1080px)');
+        const mobileBreakpoint = window.matchMedia('(max-width: 1180px)');
 
         function setMobileNavOpen(isOpen) {
             if (!nav || !navToggle) {
