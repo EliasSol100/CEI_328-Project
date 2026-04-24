@@ -52,12 +52,13 @@
 
 .custom-order-layout {
     display: grid;
-    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+    grid-template-columns: minmax(540px, 0.95fr) minmax(440px, 1.05fr);
     gap: 24px;
+    align-items: start;
 }
 
 .custom-order-layout.custom-order-layout-single {
-    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+    grid-template-columns: minmax(540px, 0.95fr) minmax(440px, 1.05fr);
 }
 
 .custom-order-card {
@@ -84,27 +85,26 @@
 .custom-order-guide {
     position: static;
     align-self: start;
-    grid-column: 1 / -1;
 }
 
 .custom-order-guide-intro {
     margin: 0 0 18px;
-    font-size: 15px;
-    line-height: 1.7;
+    font-size: 14px;
+    line-height: 1.6;
     color: #6a647b;
 }
 
 .custom-order-guide-paths {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 18px;
+    gap: 14px;
     align-items: start;
 }
 
 .custom-order-guide-section {
     display: grid;
-    gap: 12px;
-    padding: 20px;
+    gap: 10px;
+    padding: 16px;
     border-radius: 22px;
     background: rgba(255, 255, 255, 0.68);
     border: 1px solid #eadffd;
@@ -116,13 +116,13 @@
 
 .custom-order-guide-section h3 {
     margin: 0;
-    font-size: 20px;
+    font-size: 19px;
     color: #211538;
 }
 
 .custom-order-numbered-steps {
     display: grid;
-    gap: 12px;
+    gap: 10px;
     margin: 0;
     padding: 0;
     counter-reset: custom-order-step;
@@ -131,8 +131,8 @@
 
 .custom-order-numbered-steps li {
     position: relative;
-    padding: 14px 14px 14px 54px;
-    border-radius: 18px;
+    padding: 12px 12px 12px 48px;
+    border-radius: 16px;
     background: linear-gradient(180deg, #fff 0%, #faf5ff 100%);
     border: 1px solid #eadffd;
     counter-increment: custom-order-step;
@@ -141,10 +141,10 @@
 .custom-order-numbered-steps li::before {
     content: counter(custom-order-step);
     position: absolute;
-    top: 16px;
-    left: 16px;
-    width: 28px;
-    height: 28px;
+    top: 12px;
+    left: 12px;
+    width: 26px;
+    height: 26px;
     border-radius: 50%;
     background: #f3e8ff;
     color: #6a0dad;
@@ -157,23 +157,21 @@
 
 .custom-order-numbered-steps strong {
     display: block;
-    margin-bottom: 6px;
-    font-size: 16px;
+    margin-bottom: 4px;
+    font-size: 14px;
     line-height: 1.35;
     color: #3f266b;
 }
 
 .custom-order-numbered-steps p {
     margin: 0;
-    font-size: 13px;
-    line-height: 1.55;
+    font-size: 12px;
+    line-height: 1.5;
     color: #6a647b;
 }
 
 .custom-order-layout-single .custom-order-info-card {
-    grid-column: 1 / -1;
-    width: min(100%, 920px);
-    justify-self: center;
+    width: 100%;
 }
 
 .custom-order-steps {
@@ -718,7 +716,7 @@
     color: #675f79;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1100px) {
     .custom-order-layout,
     .custom-order-layout.custom-order-layout-single {
         grid-template-columns: 1fr;
