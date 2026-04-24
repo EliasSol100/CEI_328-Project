@@ -321,7 +321,7 @@
 
 .form-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
     gap: 14px;
 }
 
@@ -343,6 +343,12 @@
     color: #283548;
     background: #fff;
     outline: none;
+}
+
+.form-field input::placeholder,
+.form-field textarea::placeholder {
+    color: #6f6a77;
+    opacity: 1;
 }
 
 .form-field textarea {
