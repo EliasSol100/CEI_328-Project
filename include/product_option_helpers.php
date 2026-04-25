@@ -43,6 +43,7 @@ if (!function_exists('app_product_options_ensure_schema')) {
                 'customColorLabel2GR' => "ALTER TABLE products ADD COLUMN customColorLabel2GR VARCHAR(120) NULL AFTER customColorLabel1GR",
                 'customColorHelpText' => "ALTER TABLE products ADD COLUMN customColorHelpText VARCHAR(255) NULL AFTER customColorLabel2GR",
                 'customColorHelpTextGR' => "ALTER TABLE products ADD COLUMN customColorHelpTextGR VARCHAR(255) NULL AFTER customColorHelpText",
+                'availableSizes' => "ALTER TABLE products ADD COLUMN availableSizes TEXT NULL DEFAULT NULL",
             ];
 
             foreach ($productColumns as $columnName => $sql) {
@@ -79,6 +80,11 @@ if (!function_exists('app_product_options_ensure_schema')) {
                      ELSE 'small'
                  END
                  WHERE shippingSizeCode IS NULL OR TRIM(shippingSizeCode) = ''"
+            );
+            mysqli_query(
+                $conn,
+                "UPDATE products SET availableSizes = 'Small,Medium,Large'
+                 WHERE availableSizes IS NULL OR TRIM(availableSizes) = ''"
             );
         }
 

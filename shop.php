@@ -520,6 +520,7 @@ $sql = "
                )
            END AS totalSales,
            p.isSellingFast,
+           p.availableSizes,
            GROUP_CONCAT(ph.imageID ORDER BY ph.imageID ASC SEPARATOR ',') AS imageIDs
     FROM products p
     LEFT JOIN photos ph ON ph.productID = p.productID
@@ -684,6 +685,38 @@ if ($vpRes) {
         }
     }
 }
+
+$sizesByProduct = [];
+$szRes = $conn->query("
+    SELECT DISTINCT productID, size
+    FROM product_variations
+    WHERE size IS NOT NULL AND TRIM(size) != ''
+    ORDER BY productID ASC
+");
+if ($szRes) {
+    $sizeOrderMap = array_flip(['XS', 'S', 'Small', 'M', 'Medium', 'L', 'Large', 'XL', 'XXL', 'One Size', '2XL', '3XL']);
+    while ($row = $szRes->fetch_assoc()) {
+        $sizesByProduct[(int)$row['productID']][] = (string)$row['size'];
+    }
+    foreach ($sizesByProduct as $pid => &$sizes) {
+        usort($sizes, static function (string $a, string $b) use ($sizeOrderMap): int {
+            $ai = $sizeOrderMap[$a] ?? 999;
+            $bi = $sizeOrderMap[$b] ?? 999;
+            return $ai !== $bi ? $ai <=> $bi : strcasecmp($a, $b);
+        });
+    }
+    unset($sizes);
+}
+// Merge sizes from products.availableSizes for products with no variation-based sizes
+foreach ($products as $p) {
+    $pid = (int)$p['productID'];
+    if (!isset($sizesByProduct[$pid]) && !empty($p['availableSizes'])) {
+        $infoSizes = array_values(array_filter(array_map('trim', explode(',', $p['availableSizes'])), 'strlen'));
+        if (!empty($infoSizes)) {
+            $sizesByProduct[$pid] = $infoSizes;
+        }
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -801,6 +834,23 @@ if ($vpRes) {
     }
     @media (hover: none), (pointer: coarse) {
         .shop-carousel-dots { display: none; }
+    }
+    .shop-size-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin: 8px 0 4px;
+    }
+    .shop-size-pill {
+        font-size: 11px;
+        font-weight: 500;
+        color: #6b5b8a;
+        background: #f3eeff;
+        border: 1px solid #ddd2f5;
+        border-radius: 20px;
+        padding: 2px 10px;
+        line-height: 1.6;
+        white-space: nowrap;
     }
     .filter-color-dot {
         display: inline-block;
@@ -1099,6 +1149,14 @@ if ($vpRes) {
                                 <div class="shop-review-count" style="margin-top:4px;display:block;">
                                     <span<?= app_translate_text_attrs((int)($p['totalSales'] ?? 0) . ' sold', (int)($p['totalSales'] ?? 0) . ' πωλήθηκαν') ?>><?= (int)($p['totalSales'] ?? 0) ?> sold</span>
                                 </div>
+                                <?php $cardSizes = $sizesByProduct[$pid] ?? []; ?>
+                                <?php if (!empty($cardSizes)): ?>
+                                <div class="shop-size-pills">
+                                    <?php foreach ($cardSizes as $sz): ?>
+                                    <span class="shop-size-pill"><?= htmlspecialchars($sz) ?></span>
+                                    <?php endforeach; ?>
+                                </div>
+                                <?php endif; ?>
                                 <button class="shop-atc-btn"
                                         data-product-id="<?= $pid ?>"
                                         data-has-variants="<?= (int)$p['hasVariants'] ?>"

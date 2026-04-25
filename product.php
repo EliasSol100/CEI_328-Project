@@ -424,6 +424,7 @@ $product = null;
 $productStmt = $conn->prepare(
     "SELECT p.productID, p.sku, p.nameEN, p.nameGR, p.descriptionEN, p.descriptionGR,
             p.basePrice, p.inventory, p.cartStatus, p.hasVariants, p.category,
+            p.availableSizes,
             p.customColorFields, p.customColorLabel1, p.customColorLabel2,
             p.customColorLabel1GR, p.customColorLabel2GR, p.customColorHelpText, p.customColorHelpTextGR,
             CASE
@@ -644,6 +645,24 @@ foreach ($variations as $variation) {
         "hex" => $variation["hexCode"] ?? "#ece6f6",
         "photoPath" => $variation["photoPath"] ?? null,
     ];
+}
+
+// Sizes from product column (informational, independent of variations)
+$productInfoSizes = [];
+if (!empty($product['availableSizes'])) {
+    $sizeOrderMap = array_flip(['XS', 'S', 'Small', 'M', 'Medium', 'L', 'Large', 'XL', 'XXL', 'One Size', '2XL', '3XL']);
+    $rawSizes = array_values(array_filter(array_map('trim', explode(',', $product['availableSizes'])), 'strlen'));
+    $productInfoSizes = array_values(array_unique($rawSizes));
+    usort($productInfoSizes, static function (string $a, string $b) use ($sizeOrderMap): int {
+        $ai = $sizeOrderMap[$a] ?? 999;
+        $bi = $sizeOrderMap[$b] ?? 999;
+        return $ai !== $bi ? $ai <=> $bi : strcasecmp($a, $b);
+    });
+}
+// "Informational" = sizes come from product column, not from variations (no variation matching needed)
+$sizesAreInformational = !empty($productInfoSizes) && empty($uniqueSizes);
+if ($sizesAreInformational) {
+    $uniqueSizes = $productInfoSizes;
 }
 
 // Only fall back to product_color_photos colors if no colors are defined via product_variations
@@ -1446,6 +1465,7 @@ include __DIR__ . "/include/header.php";
     var hasVariants = <?= (int)$product["hasVariants"] ?> === 1;
     var variations = <?= json_encode($variations, JSON_UNESCAPED_UNICODE) ?>;
     var hasSelectableVariations = hasVariants && Array.isArray(variations) && variations.length > 0;
+    var sizesAreInformational = <?= $sizesAreInformational ? 'true' : 'false' ?>;
     var cartStatus = <?= json_encode((string)$product["cartStatus"], JSON_UNESCAPED_UNICODE) ?>;
     var productInventory = <?= (int)$product["inventory"] ?>;
 
@@ -1654,7 +1674,8 @@ include __DIR__ . "/include/header.php";
             return null;
         }
 
-        var requireSizeSelection = variationUsesSize && sizeChips.length > 0;
+        // Informational sizes are display-only; variation is matched by colour only
+        var requireSizeSelection = !sizesAreInformational && variationUsesSize && sizeChips.length > 0;
         var requireColorSelection = variationUsesColor && hasPresetColorChoices;
         if (requireSizeSelection && !selectedSize) {
             return null;
@@ -2195,7 +2216,7 @@ include __DIR__ . "/include/header.php";
                 if (variationUsesColor && selectedColorId) {
                     payload.variation.color_id = selectedColorId;
                 }
-                if (variationUsesSize && selectedSize) {
+                if (variationUsesSize && !sizesAreInformational && selectedSize) {
                     payload.variation.size = selectedSize;
                 }
                 if (state.selectedVariation && state.selectedVariation.yarnType) {
@@ -2204,6 +2225,10 @@ include __DIR__ . "/include/header.php";
                 if (state.selectedVariation && state.selectedVariation.variationID) {
                     payload.variation_id = state.selectedVariation.variationID;
                 }
+            }
+            // Informational size → stored as order note (not used for variation matching)
+            if (sizesAreInformational && selectedSize) {
+                payload.customizationNote = 'Size: ' + selectedSize;
             }
 
             fetch("cart_api.php", {

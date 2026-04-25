@@ -198,16 +198,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $privateAccessToken = $status === 'made_to_order' ? generateMadeToOrderAccessToken() : '';
             $privateLinkSentAt = $status === 'made_to_order' ? date('Y-m-d H:i:s') : null;
 
+            $defaultSizes = 'Small,Medium,Large';
             $stmt = mysqli_prepare(
                 $conn,
                 "INSERT INTO products
-                 (sku, nameEN, nameGR, descriptionEN, descriptionGR, basePrice, costPrice, inventory, cartStatus, category, isSellingFast, privateCustomerEmail, privateAccessToken, privateLinkSentAt)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                 (sku, nameEN, nameGR, descriptionEN, descriptionGR, basePrice, costPrice, inventory, cartStatus, category, isSellingFast, privateCustomerEmail, privateAccessToken, privateLinkSentAt, availableSizes)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             );
 
             mysqli_stmt_bind_param(
                 $stmt,
-                'sssssddississs',
+                'sssssddississss',
                 $sku,
                 $nameEN,
                 $nameGR,
@@ -221,7 +222,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $isSellingFast,
                 $privateCustomerEmail,
                 $privateAccessToken,
-                $privateLinkSentAt
+                $privateLinkSentAt,
+                $defaultSizes
             );
             mysqli_stmt_execute($stmt);
             $newProductID = mysqli_insert_id($conn);
@@ -322,6 +324,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $id
             );
             mysqli_stmt_execute($stmt);
+
+            // Save available sizes (comma-separated, cleaned)
+            $rawSizesPost = array_values(array_filter(
+                array_map('trim', explode(',', (string)($_POST['availableSizes'] ?? ''))),
+                'strlen'
+            ));
+            $availableSizesSave = implode(',', array_unique($rawSizesPost));
+            $szSaveStmt = mysqli_prepare($conn, "UPDATE products SET availableSizes = ? WHERE productID = ?");
+            if ($szSaveStmt) {
+                mysqli_stmt_bind_param($szSaveStmt, 'si', $availableSizesSave, $id);
+                mysqli_stmt_execute($szSaveStmt);
+                mysqli_stmt_close($szSaveStmt);
+            }
 
             if (isset($_FILES['photos']) && is_array($_FILES['photos']['tmp_name'])) {
                 $existing = 0;
@@ -1149,6 +1164,16 @@ $statusFilterOptions = [
         <input name="inventory" type="number" min="0" class="form-input" value="<?= (int)$editProduct['inventory'] ?>">
       </div>
       <div class="form-group">
+        <label class="form-label">Available Sizes</label>
+        <div id="pm-size-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:28px;"></div>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="pm-size-input" class="form-input" placeholder="e.g. Small, Medium, Large" style="flex:1;">
+          <button type="button" id="pm-size-add-btn" class="btn-save" style="padding:8px 14px;white-space:nowrap;">Add</button>
+        </div>
+        <input type="hidden" name="availableSizes" id="pm-sizes-hidden" value="<?= htmlspecialchars($editProduct['availableSizes'] ?? '') ?>">
+        <p class="text-sm text-muted" style="margin-top:6px;">Type a size and press Add or Enter. These appear as selectable chips on the product page.</p>
+      </div>
+      <div class="form-group">
         <label class="form-label">Homepage Promotion</label>
         <label style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
           <div>
@@ -1507,6 +1532,63 @@ function mcsDeletePhoto(id, btn) {
       }
     });
 }
+
+// Available Sizes tag input
+(function () {
+    var chipsWrap  = document.getElementById('pm-size-chips');
+    var hiddenInput = document.getElementById('pm-sizes-hidden');
+    var textInput  = document.getElementById('pm-size-input');
+    var addBtn     = document.getElementById('pm-size-add-btn');
+    if (!chipsWrap || !hiddenInput || !textInput) return;
+
+    function getSizes() {
+        return hiddenInput.value.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+    }
+
+    function setSizes(arr) {
+        hiddenInput.value = arr.filter(Boolean).join(',');
+    }
+
+    function renderChips() {
+        chipsWrap.innerHTML = '';
+        getSizes().forEach(function(size) {
+            var chip = document.createElement('span');
+            chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#f3eeff;border:1px solid #ddd2f5;border-radius:20px;padding:3px 10px;font-size:13px;color:#6b5b8a;font-weight:500;';
+            chip.textContent = size;
+            var del = document.createElement('button');
+            del.type = 'button';
+            del.textContent = '×';
+            del.style.cssText = 'background:none;border:none;cursor:pointer;font-size:15px;color:#9b7fc7;padding:0 0 0 4px;line-height:1;';
+            del.addEventListener('click', function() {
+                setSizes(getSizes().filter(function(s){ return s !== size; }));
+                renderChips();
+            });
+            chip.appendChild(del);
+            chipsWrap.appendChild(chip);
+        });
+    }
+
+    function addSize() {
+        var raw = textInput.value.trim();
+        if (!raw) return;
+        var parts = raw.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+        var current = getSizes();
+        parts.forEach(function(s) {
+            if (s && !current.includes(s)) current.push(s);
+        });
+        setSizes(current);
+        renderChips();
+        textInput.value = '';
+        textInput.focus();
+    }
+
+    addBtn.addEventListener('click', addSize);
+    textInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); addSize(); }
+    });
+
+    renderChips(); // init from existing value
+})();
 </script>
 </body>
 </html>
