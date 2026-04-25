@@ -702,19 +702,58 @@ if ($vpRes) {
     .shop-carousel .carousel-item {
         height: 100%;
     }
+    .shop-carousel {
+        position: relative;
+    }
+    .shop-carousel .carousel-inner {
+        position: relative;
+        overflow: hidden;
+    }
+    /* Non-active: invisible but rendered so images load in background.
+       display:block overrides Bootstrap's default display:none. */
     .shop-carousel .carousel-item {
-        display: none;
-        transition: none !important;
-        transform: none !important;
-    }
-    .shop-carousel .carousel-item.active {
         display: block;
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        pointer-events: none;
     }
+    /* Active: in normal flow to anchor the container height */
+    .shop-carousel .carousel-item.active {
+        position: relative;
+        opacity: 1;
+        pointer-events: auto;
+    }
+    /* Prevent Bootstrap from applying its own slide transforms */
     .shop-carousel .carousel-item-next,
     .shop-carousel .carousel-item-prev,
     .shop-carousel .active.carousel-item-start,
     .shop-carousel .active.carousel-item-end {
         transform: none !important;
+    }
+    /* Smooth slide animation on hover */
+    .shop-carousel .carousel-item.shop-entering,
+    .shop-carousel .carousel-item.shop-leaving {
+        position: absolute;
+        inset: 0;
+        opacity: 1;
+        pointer-events: none;
+    }
+    .shop-carousel .carousel-item.shop-entering {
+        animation: shopSlideIn 0.42s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+        z-index: 2;
+    }
+    .shop-carousel .carousel-item.shop-leaving {
+        animation: shopSlideOut 0.42s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+        z-index: 1;
+    }
+    @keyframes shopSlideIn {
+        from { transform: translateX(100%); }
+        to   { transform: translateX(0);    }
+    }
+    @keyframes shopSlideOut {
+        from { transform: translateX(0);     }
+        to   { transform: translateX(-100%); }
     }
     .shop-carousel .carousel-item img {
         width: 100%;
