@@ -607,7 +607,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                 return false;
             }
             if (!isValidDobInput(dobVal)) {
-                showDobError("Please choose a valid date that is not in the future.");
+                showDobError("Please choose a valid date of birth.");
                 return false;
             }
             clearDobError();
@@ -793,7 +793,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                 $("#dob-error").hide();
             } else {
                 $(this).addClass("is-invalid");
-                $("#dob-error").text("Please choose a valid date that is not in the future.").show();
+                $("#dob-error").text("Please choose a valid date of birth.").show();
             }
         });
 
