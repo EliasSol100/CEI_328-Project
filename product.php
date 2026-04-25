@@ -646,9 +646,15 @@ foreach ($variations as $variation) {
     ];
 }
 
+// Only fall back to product_color_photos colors if no colors are defined via product_variations
+$variationHasColors = !empty(array_filter($variations, static fn($v) => ($v['colorID'] ?? 0) > 0));
+
 foreach ($productColorChoices as $colorId => $colorChoice) {
     if (isset($uniqueColors[$colorId])) {
         continue;
+    }
+    if ($variationHasColors) {
+        continue; // admin has assigned colors via variations — don't mix in photo-based colors
     }
     $colorName = trim((string)($colorChoice['name'] ?? ''));
     $uniqueColors[$colorId] = [
