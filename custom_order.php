@@ -70,7 +70,9 @@ $loginRedirect = '/custom_order.php';
 $loginHref = 'authentication/login.php?redirect=' . rawurlencode($loginRedirect);
 $registerHref = 'authentication/registration.php';
 $successMessage = '';
+$successMessageKey = '';
 $errorMessage = '';
+$errorMessageKey = '';
 
 function coStatusClass(string $status): string
 {
@@ -232,12 +234,29 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 if (isset($_GET['created'])) {
     $successMessage = 'Your website custom order request was sent to Athina.';
+    $successMessageKey = 'customOrderSuccessCreated';
 } elseif (isset($_GET['message_sent'])) {
     $successMessage = 'Your reply was sent.';
+    $successMessageKey = 'customOrderSuccessReplySent';
 } elseif (isset($_GET['offer_accepted'])) {
     $successMessage = 'You accepted the offer. Athina has been notified.';
+    $successMessageKey = 'customOrderSuccessOfferAccepted';
 } elseif (isset($_GET['offer_declined'])) {
     $successMessage = 'You declined the offer. You can reply with changes if needed.';
+    $successMessageKey = 'customOrderSuccessOfferDeclined';
+}
+
+$errorMessageKeys = [
+    'Please complete your profile before sending a website custom order request.' => 'customOrderCompleteProfileNote',
+    'Please verify your email before sending a website custom order request.' => 'customOrderVerifyEmailNote',
+    'Please add a short title for your custom idea.' => 'customOrderErrorAddTitle',
+    'Please describe your idea with a little more detail.' => 'customOrderErrorDescribeMore',
+    'Please choose a valid needed-by date.' => 'customOrderErrorNeededBy',
+    'Please write a reply before sending.' => 'customOrderErrorWriteReply',
+    'Something went wrong. Please try again.' => 'customOrderErrorGeneric',
+];
+if ($errorMessage !== '') {
+    $errorMessageKey = $errorMessageKeys[$errorMessage] ?? '';
 }
 
 $customerOrders = $isLoggedIn ? getCustomOrdersForUser($conn, $userId) : [];
@@ -362,10 +381,10 @@ include __DIR__ . '/include/header.php';
 
             <div class="custom-order-card custom-order-info-card">
                 <?php if ($successMessage !== ''): ?>
-                    <div class="custom-order-alert success"><?= htmlspecialchars($successMessage) ?></div>
+                    <div class="custom-order-alert success"<?= $successMessageKey !== '' ? ' data-co-text="' . htmlspecialchars($successMessageKey, ENT_QUOTES, 'UTF-8') . '"' : '' ?>><?= htmlspecialchars($successMessage) ?></div>
                 <?php endif; ?>
                 <?php if ($errorMessage !== ''): ?>
-                    <div class="custom-order-alert error"><?= htmlspecialchars($errorMessage) ?></div>
+                    <div class="custom-order-alert error"<?= $errorMessageKey !== '' ? ' data-co-text="' . htmlspecialchars($errorMessageKey, ENT_QUOTES, 'UTF-8') . '"' : '' ?>><?= htmlspecialchars($errorMessage) ?></div>
                 <?php endif; ?>
 
                 <h2 data-co-text="customOrderChooseTitle">Choose how to start</h2>
@@ -442,7 +461,7 @@ include __DIR__ . '/include/header.php';
                                     <input type="file" id="referencePhoto" name="referencePhoto" accept=".jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif">
                                 </div>
                                 <p data-co-text="customOrderReferencePhotoHelp">Optional. Uploaded PNG, WEBP, or GIF files are converted to JPG automatically.</p>
-                                <div class="upload-preview" id="referencePreview"><img src="" alt="Reference preview"></div>
+                                <div class="upload-preview" id="referencePreview"><img src="" alt="Reference preview" data-co-alt="customOrderReferencePreviewAlt"></div>
                             </div>
                             <button type="submit" class="custom-order-btn">
                                 <i class="fas fa-paper-plane"></i>
@@ -474,7 +493,7 @@ include __DIR__ . '/include/header.php';
                         <a href="custom_order.php?view=<?= $orderId ?>#discussion" class="custom-order-list-item<?= $isSelected ? ' is-selected' : '' ?>">
                             <div class="custom-order-list-top">
                                 <strong>#<?= $orderId ?></strong>
-                                <span class="custom-order-status-pill <?= coStatusClass($status) ?>"><?= htmlspecialchars($label) ?></span>
+                                <span class="custom-order-status-pill <?= coStatusClass($status) ?>" data-co-status="<?= htmlspecialchars($status, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($label) ?></span>
                             </div>
                             <div class="custom-order-list-bottom">
                                 <span><?= htmlspecialchars(coFormatDate((string)($orderRow['created_at'] ?? ''))) ?></span>
@@ -500,10 +519,10 @@ include __DIR__ . '/include/header.php';
                     ?>
                     <div class="discussion-section-header">
                         <div>
-                            <h2>Request #<?= $selectedId ?></h2>
+                            <h2><span data-co-text="customOrderRequestLabel">Request</span> #<?= $selectedId ?></h2>
                             <p data-co-text="customOrderDiscussionHelp">Use this thread if Athina needs more information about your idea.</p>
                         </div>
-                        <span class="custom-order-status-pill <?= coStatusClass($selectedStatus) ?>"><?= htmlspecialchars($selectedLabel) ?></span>
+                        <span class="custom-order-status-pill <?= coStatusClass($selectedStatus) ?>" data-co-status="<?= htmlspecialchars($selectedStatus, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($selectedLabel) ?></span>
                     </div>
 
                     <div class="custom-order-summary">
@@ -579,7 +598,7 @@ include __DIR__ . '/include/header.php';
                                 </div>
                                 <div>
                                     <span data-co-text="customOrderStatusLabel">Status</span>
-                                    <strong><?= htmlspecialchars(ucwords(str_replace('_', ' ', (string)$latestOffer['offerStatus']))) ?></strong>
+                                    <strong data-co-offer-status="<?= htmlspecialchars((string)$latestOffer['offerStatus'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars(ucwords(str_replace('_', ' ', (string)$latestOffer['offerStatus']))) ?></strong>
                                 </div>
                             </div>
                         </div>
@@ -593,7 +612,7 @@ include __DIR__ . '/include/header.php';
                     <?php if ($photoUrl !== ''): ?>
                         <div class="custom-order-reference">
                             <h3 data-co-text="customOrderReferencePhotoLabel">Reference photo</h3>
-                            <img src="<?= htmlspecialchars($photoUrl) ?>" alt="Custom order reference">
+                            <img src="<?= htmlspecialchars($photoUrl) ?>" alt="Custom order reference" data-co-alt="customOrderReferenceAlt">
                         </div>
                     <?php endif; ?>
 
@@ -607,7 +626,7 @@ include __DIR__ . '/include/header.php';
                                     <?php $senderRole = strtolower((string)($message['senderRole'] ?? 'system')); ?>
                                     <div class="message-bubble is-<?= htmlspecialchars($senderRole) ?>">
                                         <div class="message-meta">
-                                            <strong><?= htmlspecialchars(ucfirst($senderRole)) ?></strong>
+                                            <strong data-co-sender-role="<?= htmlspecialchars($senderRole, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars(ucfirst($senderRole)) ?></strong>
                                             <span><?= htmlspecialchars(coFormatDate((string)($message['createdAt'] ?? ''))) ?></span>
                                         </div>
                                         <p class="message-body"><?= nl2br(htmlspecialchars((string)$message['messageBody'])) ?></p>
