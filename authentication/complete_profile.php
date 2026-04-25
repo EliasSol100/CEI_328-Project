@@ -117,6 +117,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
     if (!preg_match('/^\+?[0-9]{7,15}$/', $phone)) {
         $errors[] = "Phone number is not valid!";
+    } elseif (preg_match('/^\+357/', $phone)) {
+        $nationalNumber = preg_replace('/^\+357/', '', $phone);
+        if (!preg_match('/^[0-9]{8}$/', $nationalNumber)) {
+            $errors[] = "Cyprus phone numbers must have exactly 8 digits.";
+        }
     }
 
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -705,6 +710,24 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                 if (!validateDobField()) {
                     valid = false;
                 }
+
+                if (typeof iti !== 'undefined') {
+                    if (!iti.isValidNumber()) {
+                        $("#phone").addClass("is-invalid");
+                        $("#phone-error").text("Please enter a valid phone number.").show();
+                        valid = false;
+                    } else {
+                        const fullPhone = iti.getNumber();
+                        if (fullPhone.startsWith('+357')) {
+                            const national = fullPhone.replace('+357', '');
+                            if (!/^[0-9]{8}$/.test(national)) {
+                                $("#phone").addClass("is-invalid");
+                                $("#phone-error").text("Cyprus phone numbers must have exactly 8 digits.").show();
+                                valid = false;
+                            }
+                        }
+                    }
+                }
             }
 
             if (currentStep === 2) {
@@ -803,8 +826,18 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
             if (!iti.isValidNumber()) {
                 e.preventDefault();
                 $("#phone").addClass("is-invalid");
-                alert("Please enter a valid phone number.");
+                $("#phone-error").text("Please enter a valid phone number.").show();
                 return false;
+            }
+
+            if (fullPhone.startsWith('+357')) {
+                const national = fullPhone.replace('+357', '');
+                if (!/^[0-9]{8}$/.test(national)) {
+                    e.preventDefault();
+                    $("#phone").addClass("is-invalid");
+                    $("#phone-error").text("Cyprus phone numbers must have exactly 8 digits.").show();
+                    return false;
+                }
             }
 
             $('#phone').val(fullPhone);
