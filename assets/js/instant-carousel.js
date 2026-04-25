@@ -37,6 +37,14 @@
             item.classList.toggle("active", itemIndex === normalizedIndex);
         });
         carousel.dataset.instantCarouselIndex = String(normalizedIndex);
+
+        // sync dots
+        var dotsWrap = carousel.querySelector(".shop-carousel-dots");
+        if (dotsWrap) {
+            dotsWrap.querySelectorAll(".shop-carousel-dot").forEach(function (dot, dotIndex) {
+                dot.classList.toggle("is-active", dotIndex === normalizedIndex);
+            });
+        }
     }
 
     function step(carousel, direction) {
@@ -63,6 +71,23 @@
                 preload.src = img.currentSrc || img.src;
             }
         });
+    }
+
+    function startHoverCycle(carousel) {
+        if (carousel._hoverTimer) return;
+        var items = getItems(carousel);
+        if (items.length < 2) return;
+        carousel._hoverTimer = setInterval(function () {
+            step(carousel, 1);
+        }, 850);
+    }
+
+    function stopHoverCycle(carousel) {
+        if (carousel._hoverTimer) {
+            clearInterval(carousel._hoverTimer);
+            carousel._hoverTimer = null;
+        }
+        setActive(carousel, 0);
     }
 
     function initCarousel(carousel) {
@@ -105,6 +130,24 @@
                 step(carousel, directionFromControl(control));
             }, true);
         });
+
+        // Hover auto-advance: desktop/mouse only, not touch devices
+        var hoverMq = window.matchMedia("(hover: hover) and (pointer: fine)");
+        if (hoverMq.matches) {
+            var items = getItems(carousel);
+            if (items.length < 2) return;
+
+            var imageWrap = carousel.closest(".shop-product-image") || carousel;
+
+            imageWrap.addEventListener("mouseenter", function () {
+                preloadCarouselImages(carousel);
+                startHoverCycle(carousel);
+            });
+
+            imageWrap.addEventListener("mouseleave", function () {
+                stopHoverCycle(carousel);
+            });
+        }
     }
 
     function initAll() {

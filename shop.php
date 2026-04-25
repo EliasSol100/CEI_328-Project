@@ -730,13 +730,38 @@ if ($vpRes) {
     }
     .shop-carousel .carousel-control-prev,
     .shop-carousel .carousel-control-next {
-        width: 30px;
+        display: none;
+    }
+
+    /* Slide-count dots shown on hover (desktop only) */
+    .shop-carousel-dots {
+        position: absolute;
+        bottom: 7px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 5px;
         opacity: 0;
         transition: opacity 0.2s;
+        pointer-events: none;
+        z-index: 5;
     }
-    .shop-product-card:hover .shop-carousel .carousel-control-prev,
-    .shop-product-card:hover .shop-carousel .carousel-control-next {
-        opacity: 0.7;
+    .shop-product-card:hover .shop-carousel-dots {
+        opacity: 1;
+    }
+    .shop-carousel-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.55);
+        transition: background 0.2s, transform 0.2s;
+    }
+    .shop-carousel-dot.is-active {
+        background: #fff;
+        transform: scale(1.3);
+    }
+    @media (hover: none), (pointer: coarse) {
+        .shop-carousel-dots { display: none; }
     }
     .filter-color-dot {
         display: inline-block;
@@ -991,12 +1016,11 @@ if ($vpRes) {
                                         <?php endforeach; ?>
                                     </div>
                                     <?php if (count($allSlides) > 1): ?>
-                                    <button class="carousel-control-prev" type="button" data-bs-target="#carousel-<?= $pid ?>" data-bs-slide="prev">
-                                        <span class="carousel-control-prev-icon"></span>
-                                    </button>
-                                    <button class="carousel-control-next" type="button" data-bs-target="#carousel-<?= $pid ?>" data-bs-slide="next">
-                                        <span class="carousel-control-next-icon"></span>
-                                    </button>
+                                    <div class="shop-carousel-dots" aria-hidden="true">
+                                        <?php for ($di = 0; $di < count($allSlides); $di++): ?>
+                                        <span class="shop-carousel-dot<?= $di === 0 ? ' is-active' : '' ?>"></span>
+                                        <?php endfor; ?>
+                                    </div>
                                     <?php endif; ?>
                                 </div>
                                 <?php endif; ?>
