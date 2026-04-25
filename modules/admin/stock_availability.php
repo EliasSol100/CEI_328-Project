@@ -594,31 +594,26 @@ $statusBadge = [
           <thead>
             <tr>
               <th style="width:52px"></th>
-              <th style="width:70px">ID</th>
+              <th style="width:60px">ID</th>
               <th>Colour Name</th>
-              <th>Yarn Type(s)</th>
-              <th style="width:110px">Stock (units)</th>
-              <th style="width:130px">Global Status</th>
-              <th>Update</th>
+              <th>Category</th>
+              <th style="width:100px">Stock</th>
+              <th style="width:110px">Status</th>
+              <th style="width:120px">Quick Save</th>
+              <th style="width:60px"></th>
             </tr>
           </thead>
           <tbody>
             <?php foreach ($colours as $c): ?>
             <?php $swatchHex = preg_match('/^#[0-9a-fA-F]{6}$/', (string)($c['hexCode'] ?? '')) ? $c['hexCode'] : '#ece6f6'; ?>
             <tr>
-
               <td style="text-align:center;vertical-align:middle">
                 <span class="colour-swatch-preview" style="background:<?= htmlspecialchars($swatchHex) ?>"></span>
               </td>
-
               <td class="text-muted" style="font-size:13px"><?= (int)$c['colorID'] ?></td>
-
               <td class="font-600"><?= htmlspecialchars($c['colorName']) ?></td>
-
               <td class="text-muted" style="font-size:12px"><?= htmlspecialchars($c['typeNames'] ?? '—') ?></td>
-
               <td><?= (int)$c['globalInventoryAvailable'] ?></td>
-
               <td>
                 <?php if ($c['isActive']): ?>
                   <span class="badge badge-green">Available</span>
@@ -626,54 +621,99 @@ $statusBadge = [
                   <span class="badge badge-red">Unavailable</span>
                 <?php endif; ?>
               </td>
-
               <td>
-                <form method="POST" style="display:flex;flex-direction:column;gap:8px" data-ignore-unsaved-warning data-stock-warning>
+                <form method="POST" style="display:flex;gap:6px;align-items:center" data-ignore-unsaved-warning data-stock-warning>
                   <input type="hidden" name="action"  value="update_color_stock">
                   <input type="hidden" name="colorID" value="<?= $c['colorID'] ?>">
-                  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                    <input
-                      type="number"
-                      name="globalInventoryAvailable"
-                      value="<?= (int)$c['globalInventoryAvailable'] ?>"
-                      min="0"
-                      class="form-input"
-                      style="width:80px;padding:6px 8px"
-                    >
-                    <select name="isActive" class="form-input" style="width:130px">
-                      <option value="1" <?= $c['isActive'] ? 'selected' : '' ?>>Available</option>
-                      <option value="0" <?= !$c['isActive'] ? 'selected' : '' ?>>Unavailable</option>
-                    </select>
-                    <input
-                      type="color"
-                      name="hexCode"
-                      value="<?= htmlspecialchars($swatchHex) ?>"
-                      title="Colour hex"
-                      style="width:36px;height:32px;padding:2px;border:1px solid #d1d5db;border-radius:6px;cursor:pointer"
-                    >
-                  </div>
-                  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                    <span style="font-size:12px;color:#6b7280;white-space:nowrap">Category:</span>
-                    <select name="typeIDs[]" multiple class="form-input"
-                      style="font-size:12px;padding:4px 6px;min-width:160px;height:auto"
-                      title="Hold Ctrl/Cmd to select multiple">
-                      <?php foreach ($yarnTypes as $yt): ?>
-                        <option value="<?= (int)$yt['typeID'] ?>"
-                          <?= in_array((int)$yt['typeID'], $c['typeIDsArray'], true) ? 'selected' : '' ?>>
-                          <?= htmlspecialchars($yt['typeName']) ?>
-                        </option>
-                      <?php endforeach; ?>
-                    </select>
-                    <button type="submit" class="btn-primary" style="padding:6px 12px;font-size:12px">
-                      <i class="fas fa-save"></i> Save
-                    </button>
-                  </div>
+                  <?php foreach ($c['typeIDsArray'] as $tid): ?>
+                  <input type="hidden" name="typeIDs[]" value="<?= (int)$tid ?>">
+                  <?php endforeach; ?>
+                  <input type="number" name="globalInventoryAvailable"
+                    value="<?= (int)$c['globalInventoryAvailable'] ?>" min="0"
+                    class="form-input" style="width:70px;padding:5px 7px">
+                  <select name="isActive" class="form-input" style="width:110px;padding:5px 7px">
+                    <option value="1" <?= $c['isActive'] ? 'selected' : '' ?>>Available</option>
+                    <option value="0" <?= !$c['isActive'] ? 'selected' : '' ?>>Unavailable</option>
+                  </select>
+                  <button type="submit" class="btn-primary" style="padding:5px 10px;font-size:12px">
+                    <i class="fas fa-save"></i>
+                  </button>
                 </form>
+              </td>
+              <td style="text-align:center">
+                <button type="button" class="btn-secondary colour-edit-btn"
+                  style="padding:5px 10px;font-size:12px"
+                  data-color-id="<?= (int)$c['colorID'] ?>"
+                  data-color-name="<?= htmlspecialchars($c['colorName'], ENT_QUOTES) ?>"
+                  data-hex="<?= htmlspecialchars($swatchHex, ENT_QUOTES) ?>"
+                  data-stock="<?= (int)$c['globalInventoryAvailable'] ?>"
+                  data-active="<?= (int)$c['isActive'] ?>"
+                  data-type-ids="<?= htmlspecialchars(json_encode($c['typeIDsArray']), ENT_QUOTES) ?>"
+                  title="Edit colour details">
+                  <i class="fas fa-pencil-alt"></i>
+                </button>
               </td>
             </tr>
             <?php endforeach; ?>
           </tbody>
         </table>
+      </div>
+
+      <!-- Colour Edit Modal -->
+      <div id="colour-edit-modal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(17,24,39,.45);align-items:center;justify-content:center">
+        <div style="background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.2);width:min(480px,95vw);padding:28px 28px 24px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+            <h3 style="margin:0;font-size:17px;color:#111827">
+              <span id="modal-swatch" style="display:inline-block;width:20px;height:20px;border-radius:50%;border:2px solid #e5e7eb;vertical-align:middle;margin-right:8px"></span>
+              Edit: <span id="modal-color-name"></span>
+              <span style="font-size:13px;color:#9ca3af;font-weight:400"> #<span id="modal-color-id"></span></span>
+            </h3>
+            <button type="button" id="modal-close" style="background:none;border:none;font-size:20px;color:#6b7280;cursor:pointer;line-height:1">&times;</button>
+          </div>
+
+          <form method="POST" enctype="multipart/form-data" id="colour-edit-form">
+            <input type="hidden" name="action" value="update_color_stock">
+            <input type="hidden" name="colorID" id="modal-input-id">
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
+              <div>
+                <label style="display:block;font-size:13px;font-weight:600;margin-bottom:5px">Stock (units)</label>
+                <input type="number" name="globalInventoryAvailable" id="modal-input-stock"
+                  min="0" class="form-input" style="width:100%">
+              </div>
+              <div>
+                <label style="display:block;font-size:13px;font-weight:600;margin-bottom:5px">Status</label>
+                <select name="isActive" id="modal-input-active" class="form-input" style="width:100%">
+                  <option value="1">Available</option>
+                  <option value="0">Unavailable</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="margin-bottom:16px">
+              <label style="display:block;font-size:13px;font-weight:600;margin-bottom:5px">Colour Swatch</label>
+              <input type="color" name="hexCode" id="modal-input-hex"
+                style="width:60px;height:38px;padding:2px;border:1px solid #d1d5db;border-radius:8px;cursor:pointer">
+            </div>
+
+            <div style="margin-bottom:20px">
+              <label style="display:block;font-size:13px;font-weight:600;margin-bottom:8px">Category (yarn type)</label>
+              <div id="modal-type-checkboxes" style="display:flex;flex-wrap:wrap;gap:8px">
+                <?php foreach ($yarnTypes as $yt): ?>
+                <label style="display:flex;align-items:center;gap:6px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:13px;user-select:none" class="modal-type-label">
+                  <input type="checkbox" name="typeIDs[]" value="<?= (int)$yt['typeID'] ?>" class="modal-type-cb" style="width:15px;height:15px;cursor:pointer">
+                  <?= htmlspecialchars($yt['typeName']) ?>
+                </label>
+                <?php endforeach; ?>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:10px;justify-content:flex-end">
+              <button type="button" id="modal-cancel" class="btn-secondary">Cancel</button>
+              <button type="submit" class="btn-primary"><i class="fas fa-save"></i> Save Changes</button>
+            </div>
+          </form>
+        </div>
       </div>
 
     </div>
@@ -810,6 +850,55 @@ document.addEventListener('DOMContentLoaded', function () {
     dirtyForms.clear();
     isSubmitting = true;
   });
+
+  // Colour Edit Modal
+  var modal       = document.getElementById('colour-edit-modal');
+  var modalForm   = document.getElementById('colour-edit-form');
+  var modalSwatch = document.getElementById('modal-swatch');
+  var modalHexInput = document.getElementById('modal-input-hex');
+
+  function openModal(btn) {
+    var colorId   = btn.dataset.colorId;
+    var colorName = btn.dataset.colorName;
+    var hex       = btn.dataset.hex || '#ece6f6';
+    var stock     = btn.dataset.stock;
+    var active    = btn.dataset.active;
+    var typeIds   = JSON.parse(btn.dataset.typeIds || '[]');
+
+    document.getElementById('modal-color-name').textContent = colorName;
+    document.getElementById('modal-color-id').textContent   = colorId;
+    document.getElementById('modal-input-id').value         = colorId;
+    document.getElementById('modal-input-stock').value      = stock;
+    document.getElementById('modal-input-active').value     = active;
+    modalHexInput.value = hex;
+    modalSwatch.style.background = hex;
+
+    modalForm.querySelectorAll('.modal-type-cb').forEach(function (cb) {
+      cb.checked = typeIds.indexOf(parseInt(cb.value)) !== -1;
+      cb.closest('.modal-type-label').style.borderColor = cb.checked ? '#111827' : '#e5e7eb';
+    });
+
+    modal.style.display = 'flex';
+  }
+
+  document.querySelectorAll('.colour-edit-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () { openModal(btn); });
+  });
+
+  modalHexInput && modalHexInput.addEventListener('input', function () {
+    modalSwatch.style.background = this.value;
+  });
+
+  modalForm && modalForm.querySelectorAll('.modal-type-cb').forEach(function (cb) {
+    cb.addEventListener('change', function () {
+      cb.closest('.modal-type-label').style.borderColor = cb.checked ? '#111827' : '#e5e7eb';
+    });
+  });
+
+  function closeModal() { modal.style.display = 'none'; }
+  document.getElementById('modal-close')  && document.getElementById('modal-close').addEventListener('click', closeModal);
+  document.getElementById('modal-cancel') && document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  modal && modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
 
 });
 </script>
