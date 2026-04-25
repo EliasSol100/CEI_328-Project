@@ -106,6 +106,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         if ($dobDate instanceof DateTime && $dobDate > $today) {
             $errors[] = "Date of birth cannot be in the future.";
         }
+        if ($dobDate instanceof DateTime && (int)$dobDate->format('Y') < 1900) {
+            $errors[] = "Date of birth year cannot be before 1900.";
+        }
     }
 
     if (!app_is_valid_username($username)) {
@@ -437,6 +440,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                                name="dob"
                                class="form-control"
                                id="dob"
+                               min="1900-01-01"
                                max="<?= date('Y-m-d') ?>"
                                value="<?= htmlspecialchars(formatProfileDobInputValue($_POST['dob'] ?? '')) ?>"
                                required>
