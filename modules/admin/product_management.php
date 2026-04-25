@@ -330,7 +330,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 array_map('trim', explode(',', (string)($_POST['availableSizes'] ?? ''))),
                 'strlen'
             ));
-            $availableSizesSave = implode(',', array_unique($rawSizesPost));
+            $availableSizesSave = !empty($rawSizesPost)
+                ? implode(',', array_unique($rawSizesPost))
+                : 'Small,Medium,Large'; // fallback: never allow empty
             $szSaveStmt = mysqli_prepare($conn, "UPDATE products SET availableSizes = ? WHERE productID = ?");
             if ($szSaveStmt) {
                 mysqli_stmt_bind_param($szSaveStmt, 'si', $availableSizesSave, $id);
@@ -1560,7 +1562,9 @@ function mcsDeletePhoto(id, btn) {
             del.textContent = '×';
             del.style.cssText = 'background:none;border:none;cursor:pointer;font-size:15px;color:#9b7fc7;padding:0 0 0 4px;line-height:1;';
             del.addEventListener('click', function() {
-                setSizes(getSizes().filter(function(s){ return s !== size; }));
+                var remaining = getSizes().filter(function(s){ return s !== size; });
+                if (remaining.length === 0) return; // at least one size required
+                setSizes(remaining);
                 renderChips();
             });
             chip.appendChild(del);
