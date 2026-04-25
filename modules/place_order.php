@@ -417,6 +417,9 @@ function placeOrder(mysqli $conn, array $input): array {
         }
         $customizationNote = trim((string)($item['customization']['summary'] ?? ''));
         if ($customizationNote === '') {
+            $customizationNote = trim((string)($item['customizationNote'] ?? ''));
+        }
+        if ($customizationNote === '') {
             $customizationNote = null;
         }
 

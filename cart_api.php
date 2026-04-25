@@ -102,6 +102,7 @@ try {
     $yarnType    = trim((string)($variationInput['yarn_type'] ?? ''));
     $colorId     = toInt($variationInput['color_id'] ?? null);
     $customizationInput = is_array($payload['customization'] ?? null) ? $payload['customization'] : [];
+    $payloadCustomizationNote = mb_substr(trim((string)($payload['customizationNote'] ?? '')), 0, 255);
 
     $addons = normalizeAddons($payload['addons'] ?? []);
 
@@ -180,7 +181,8 @@ try {
         $productId,
         $effectiveHasVariants ? ($variation ?? $customVariation) : null,
         $customization,
-        $addons
+        $addons,
+        $payloadCustomizationNote
     );
 
     $newQty = $qty;
@@ -201,6 +203,11 @@ try {
     $lineTotal = $unitTotal * $newQty;
 
     $customizationSummary = app_product_options_build_customization_summary($product, $customization);
+    if ($payloadCustomizationNote !== '') {
+        $customizationSummary = $customizationSummary !== ''
+            ? $payloadCustomizationNote . ' | ' . $customizationSummary
+            : $payloadCustomizationNote;
+    }
     $lineItem = [
         'product' => [
             'id' => (int)$product['productID'],
@@ -227,6 +234,7 @@ try {
             'giftMessage' => $addons['message'],
             'addonsCost' => round($addonsCost, 2),
         ],
+        'customizationNote' => $payloadCustomizationNote,
         'customization' => [
             'field1'       => $customization['field1'],
             'field2'       => $customization['field2'],
@@ -351,7 +359,7 @@ function &getOrInitCart(): array {
     }
     return $_SESSION['cart'];
 }
-function findExistingLineIndex(array $items, int $productId, ?array $variation, array $customization, array $addons): ?int {
+function findExistingLineIndex(array $items, int $productId, ?array $variation, array $customization, array $addons, string $customizationNote = ''): ?int {
     $targetCsA = app_product_options_pick_color_scheme_value($customization, 'A');
     $targetCsB = app_product_options_pick_color_scheme_value($customization, 'B');
     $targetCsC = app_product_options_pick_color_scheme_value($customization, 'C');
@@ -395,6 +403,7 @@ function findExistingLineIndex(array $items, int $productId, ?array $variation, 
         if ((bool)($ad['giftWrapping'] ?? false) !== (bool)$addons['gift_wrapping']) continue;
         if ((bool)($ad['giftBagFlag'] ?? false) !== (bool)$addons['gift_bag']) continue;
         if ((string)($ad['giftMessage'] ?? '') !== (string)$addons['message']) continue;
+        if ((string)($item['customizationNote'] ?? '') !== $customizationNote) continue;
         return (int)$i;
     }
     return null;
