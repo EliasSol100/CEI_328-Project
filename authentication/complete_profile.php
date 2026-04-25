@@ -489,7 +489,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                             <li id="check-length"><span class="text-danger">✖</span> At least 8 characters</li>
                             <li id="check-uppercase"><span class="text-danger">✖</span> At least 1 uppercase letter</li>
                             <li id="check-number"><span class="text-danger">✖</span> At least 1 number</li>
-                            <li id="check-symbol"><span class="text-danger">✖</span> At least 1 English keyboard symbol</li>
+                            <li id="check-symbol"><span class="text-danger">✖</span> At least 1 symbol</li>
                         </ul>
                     </div>
 
@@ -790,7 +790,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
             $("#check-length").html((checks.length ? '✅' : '<span class="text-danger">✖</span>') + ' At least 8 characters');
             $("#check-uppercase").html((checks.uppercase ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 uppercase letter');
             $("#check-number").html((checks.number ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 number');
-            $("#check-symbol").html((checks.symbol ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 English keyboard symbol');
+            $("#check-symbol").html((checks.symbol ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 symbol');
             $("#confirm_password").trigger("input");
         });
 
