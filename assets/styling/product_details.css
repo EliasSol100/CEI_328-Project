@@ -213,6 +213,58 @@
     margin: 0 0 18px;
 }
 
+.product-option-select {
+    width: 100%;
+    padding: 11px 14px;
+    border: 1.5px solid #d9cfec;
+    border-radius: 10px;
+    background: #fff;
+    color: #2d2142;
+    font-size: 15px;
+    font-family: inherit;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='8' viewBox='0 0 14 8'%3E%3Cpath d='M1 1l6 6 6-6' stroke='%239ca3af' stroke-width='1.8' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+    padding-right: 38px;
+    margin-bottom: 18px;
+    transition: border-color 0.2s;
+}
+
+.product-option-select:focus {
+    outline: none;
+    border-color: #9227f5;
+    box-shadow: 0 0 0 3px rgba(146, 39, 245, 0.12);
+}
+
+.product-option-select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.colour-select-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.colour-select-row .product-option-select {
+    flex: 1;
+    margin-bottom: 18px;
+}
+
+#colour-swatch-preview {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid #e5e7eb;
+    flex-shrink: 0;
+    margin-bottom: 16px;
+    transition: background 0.2s;
+}
+
 .color-catalogue-btn {
     display: inline-flex;
     align-items: center;

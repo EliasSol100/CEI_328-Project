@@ -45,32 +45,6 @@ function ensureProductSalesOverridesSchema(mysqli $conn): void {
 
 ensureProductSalesOverridesSchema($conn);
 
-function stockColourSwatchHex(string $colorName): string
-{
-    $map = [
-        'sunshine yellow' => '#f8ea75',
-        'honey blend' => '#dda157',
-        'bluebell' => '#cad7ff',
-        'sugar pink' => '#f5dce8',
-        'lavender mist' => '#d6c9ff',
-        'blush pink' => '#ffdbe5',
-        'lemon yellow' => '#f8ea75',
-        'deep plum' => '#5b2a63',
-        'berry plum' => '#99566a',
-        'soft lilac' => '#d9dcfb',
-        'forest sage' => '#7f9d88',
-        'sky mist' => '#dce8ff',
-        'lavender cloud' => '#d7c5ff',
-        'mint frost' => '#d6f0ea',
-        'peach sorbet' => '#ffca9a',
-        'seafoam' => '#bce7da',
-        'lavender pop' => '#c8aaf8',
-        'snow white' => '#f4f3fb',
-        'warm oatmeal' => '#ccb594',
-    ];
-    $key = strtolower(trim($colorName));
-    return $map[$key] ?? '#ece6f6';
-}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
@@ -91,9 +65,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $colorID  = (int)$_POST['colorID'];
         $stock    = (int)$_POST['globalInventoryAvailable'];
         $isActive = (int)$_POST['isActive'];
+        $hexRaw   = trim($_POST['hexCode'] ?? '');
+        $hexCode  = preg_match('/^#[0-9a-fA-F]{6}$/', $hexRaw) ? $hexRaw : '#ece6f6';
 
-        $stmt = mysqli_prepare($conn, "UPDATE colors SET globalInventoryAvailable=?, isActive=? WHERE colorID=?");
-        mysqli_stmt_bind_param($stmt, 'iii', $stock, $isActive, $colorID);
+        $stmt = mysqli_prepare($conn, "UPDATE colors SET globalInventoryAvailable=?, isActive=?, hexCode=? WHERE colorID=?");
+        mysqli_stmt_bind_param($stmt, 'iisi', $stock, $isActive, $hexCode, $colorID);
         mysqli_stmt_execute($stmt);
         $flash = 'ok:Colour stock updated.';
     }
@@ -213,10 +189,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flash = 'err:' . implode(' ', $errors);
         } else {
 
+            $hexRaw  = trim($_POST['hexCode'] ?? '');
+            $hexCode = preg_match('/^#[0-9a-fA-F]{6}$/', $hexRaw) ? $hexRaw : '#ece6f6';
+
             $stmt = mysqli_prepare($conn,
-                "INSERT IGNORE INTO colors (colorID, colorName, globalInventoryAvailable, isActive)
-                 VALUES (?, ?, ?, 1)");
-            mysqli_stmt_bind_param($stmt, 'isi', $colorID, $colorName, $stock);
+                "INSERT INTO colors (colorID, colorName, hexCode, globalInventoryAvailable, isActive)
+                 VALUES (?, ?, ?, ?, 1)
+                 ON DUPLICATE KEY UPDATE hexCode = VALUES(hexCode)");
+            mysqli_stmt_bind_param($stmt, 'issi', $colorID, $colorName, $hexCode, $stock);
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
 
@@ -502,7 +482,7 @@ $statusBadge = [
           <?php else: ?>
           <div id="colour-assign-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px">
             <?php foreach ($colours as $c): ?>
-            <?php $swatchHex = stockColourSwatchHex((string)($c['colorName'] ?? '')); ?>
+            <?php $swatchHex = preg_match('/^#[0-9a-fA-F]{6}$/', (string)($c['hexCode'] ?? '')) ? $c['hexCode'] : '#ece6f6'; ?>
             <label class="colour-assign-card" data-color-id="<?= $c['colorID'] ?>"
                    style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 8px;border:2px solid #e5e7eb;border-radius:10px;cursor:pointer;user-select:none;transition:border-color .15s">
               <span class="colour-swatch-preview is-large" style="background:<?= htmlspecialchars($swatchHex) ?>"></span>
@@ -524,7 +504,7 @@ $statusBadge = [
         </p>
         <form method="POST" enctype="multipart/form-data" id="add-color-form">
           <input type="hidden" name="action" value="add_color">
-          <div style="display:grid;grid-template-columns:120px 1fr 1fr 120px;gap:12px;align-items:end;flex-wrap:wrap">
+          <div style="display:grid;grid-template-columns:100px 1fr 1fr 80px 80px;gap:12px;align-items:end;flex-wrap:wrap">
 
             <div>
               <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Color ID *</label>
@@ -550,9 +530,16 @@ $statusBadge = [
             </div>
 
             <div>
-              <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Stock (units)</label>
+              <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Stock</label>
               <input type="number" name="globalInventoryAvailable" value="50" min="0"
                 class="form-input" style="width:100%">
+            </div>
+
+            <div>
+              <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Colour</label>
+              <input type="color" name="hexCode" value="#ece6f6"
+                title="Colour swatch hex"
+                style="width:100%;height:38px;padding:2px;border:1px solid #d1d5db;border-radius:6px;cursor:pointer">
             </div>
           </div>
 
@@ -601,7 +588,7 @@ $statusBadge = [
           </thead>
           <tbody>
             <?php foreach ($colours as $c): ?>
-            <?php $swatchHex = stockColourSwatchHex((string)($c['colorName'] ?? '')); ?>
+            <?php $swatchHex = preg_match('/^#[0-9a-fA-F]{6}$/', (string)($c['hexCode'] ?? '')) ? $c['hexCode'] : '#ece6f6'; ?>
             <tr>
 
               <td style="text-align:center;vertical-align:middle">
@@ -625,7 +612,7 @@ $statusBadge = [
               </td>
 
               <td>
-                <form method="POST" style="display:flex;gap:8px;align-items:center" data-ignore-unsaved-warning data-stock-warning>
+                <form method="POST" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap" data-ignore-unsaved-warning data-stock-warning>
                   <input type="hidden" name="action"  value="update_color_stock">
                   <input type="hidden" name="colorID" value="<?= $c['colorID'] ?>">
                   <input
@@ -640,6 +627,13 @@ $statusBadge = [
                     <option value="1" <?= $c['isActive'] ? 'selected' : '' ?>>Available</option>
                     <option value="0" <?= !$c['isActive'] ? 'selected' : '' ?>>Unavailable</option>
                   </select>
+                  <input
+                    type="color"
+                    name="hexCode"
+                    value="<?= htmlspecialchars($swatchHex) ?>"
+                    title="Colour swatch hex"
+                    style="width:36px;height:32px;padding:2px;border:1px solid #d1d5db;border-radius:6px;cursor:pointer"
+                  >
                   <button type="submit" class="btn-primary" style="padding:6px 12px;font-size:12px">
                     <i class="fas fa-save"></i> Save
                   </button>

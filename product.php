@@ -525,7 +525,7 @@ if (empty($photos)) {
 $colorPhotos = [];
 $productColorChoices = [];
 $cpStmt = $conn->prepare(
-    "SELECT pcp.colorID, pcp.photoPath, c.colorName
+    "SELECT pcp.colorID, pcp.photoPath, c.colorName, c.hexCode
      FROM product_color_photos pcp
      JOIN colors c ON c.colorID = pcp.colorID
      WHERE pcp.productID = ? AND c.isActive = 1
@@ -544,9 +544,11 @@ if ($cpStmt) {
         }
         $colorPhotos[$colorId][] = $photoPath;
         if (!isset($productColorChoices[$colorId])) {
+            $hexCode = trim((string)($row['hexCode'] ?? ''));
             $productColorChoices[$colorId] = [
                 'id' => $colorId,
                 'name' => $colorName !== '' ? $colorName : ('Color ' . $colorId),
+                'hex' => preg_match('/^#[0-9a-fA-F]{6}$/', $hexCode) ? $hexCode : '#ece6f6',
                 'photoPath' => $photoPath,
             ];
         }
@@ -557,7 +559,7 @@ if ($cpStmt) {
 $variations = [];
 $variationStmt = $conn->prepare(
     "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, pv.price,
-            c.colorName,
+            c.colorName, c.hexCode,
             COALESCE(vs.quantityAvailable, p.inventory, 0) AS stock,
             cyt.photoPath
      FROM product_variations pv
@@ -578,12 +580,14 @@ if ($variationStmt) {
     $variationStmt->execute();
     $variationRes = $variationStmt->get_result();
     while ($variationRes && ($row = $variationRes->fetch_assoc())) {
+        $varHex = trim((string)($row["hexCode"] ?? ''));
         $variations[] = [
             "variationID" => (int)$row["variationID"],
             "size" => trim((string)($row["size"] ?? "")),
             "yarnType" => trim((string)($row["yarnType"] ?? "")),
             "colorID" => isset($row["colorID"]) ? (int)$row["colorID"] : null,
             "colorName" => trim((string)($row["colorName"] ?? "")),
+            "hexCode" => preg_match('/^#[0-9a-fA-F]{6}$/', $varHex) ? $varHex : '#ece6f6',
             "price" => isset($row["price"]) ? (float)$row["price"] : null,
             "stock" => (int)($row["stock"] ?? 0),
             "photoPath" => app_image_prefer_optimized_asset_path((string)($row["photoPath"] ?? '')),
@@ -615,39 +619,6 @@ if ($variationPhotoStmt) {
     $variationPhotoStmt->close();
 }
 
-$colorHexMap = [
-    "cream white" => "#efe8db",
-    "soft pink" => "#f3d9dd",
-    "mint green" => "#dbeedd",
-    "coral" => "#f7c9bc",
-    "sky blue" => "#d7e8fb",
-    "lavender" => "#e3daf4",
-    "white" => "#f3f2ef",
-    "yellow" => "#efe3a4",
-    "blue" => "#afc9f2",
-    "pink" => "#f5c7d8",
-    "selected colour" => "#ece6f6",
-    "selected colourway" => "#ece6f6",
-    "snow white" => "#f4f3fb",
-    "blush pink" => "#ffdbe5",
-    "peach sorbet" => "#ffca9a",
-    "seafoam" => "#bce7da",
-    "lavender pop" => "#c8aaf8",
-    "sunshine yellow" => "#f8ea75",
-    "honey blend" => "#dda157",
-    "bluebell" => "#cad7ff",
-    "sugar pink" => "#f5dce8",
-    "lavender mist" => "#d6c9ff",
-    "deep plum" => "#5b2a63",
-    "berry plum" => "#99566a",
-    "soft lilac" => "#d9dcfb",
-    "forest sage" => "#7f9d88",
-    "sky mist" => "#dce8ff",
-    "lavender cloud" => "#d7c5ff",
-    "mint frost" => "#d6f0ea",
-    "warm oatmeal" => "#ccb594",
-];
-
 $uniqueColors = [];
 $uniqueSizes = [];
 $variationPrices = [];
@@ -667,11 +638,10 @@ foreach ($variations as $variation) {
         continue;
     }
     $colorName = trim((string)($variation["colorName"] ?? ""));
-    $colorKey = strtolower($colorName);
     $uniqueColors[$colorId] = [
         "id" => $colorId,
         "name" => $colorName !== "" ? $colorName : ("Color " . $colorId),
-        "hex" => $colorHexMap[$colorKey] ?? "#ece6f6",
+        "hex" => $variation["hexCode"] ?? "#ece6f6",
         "photoPath" => $variation["photoPath"] ?? null,
     ];
 }
@@ -681,16 +651,81 @@ foreach ($productColorChoices as $colorId => $colorChoice) {
         continue;
     }
     $colorName = trim((string)($colorChoice['name'] ?? ''));
-    $colorKey = strtolower($colorName);
     $uniqueColors[$colorId] = [
         "id" => $colorId,
         "name" => $colorName !== "" ? $colorName : ("Color " . $colorId),
-        "hex" => $colorHexMap[$colorKey] ?? "#ece6f6",
+        "hex" => $colorChoice["hex"] ?? "#ece6f6",
         "photoPath" => $colorChoice["photoPath"] ?? null,
     ];
 }
 
 $uniqueColors = array_values($uniqueColors);
+
+// Build color→yarn-type mapping for grouping display
+$colorsByYarnType = [];
+if (!empty($uniqueColors)) {
+    $ucIds = array_filter(array_map(static fn($c) => (int)($c['id'] ?? 0), $uniqueColors), static fn($id) => $id > 0);
+    if (!empty($ucIds)) {
+        $ctPlaceholders = implode(',', array_fill(0, count($ucIds), '?'));
+        $ctStmt = $conn->prepare("
+            SELECT cyt.colorID, yt.typeID, yt.typeName
+            FROM color_yarn_types cyt
+            JOIN yarn_types yt ON yt.typeID = cyt.typeID
+            WHERE cyt.colorID IN ($ctPlaceholders)
+            ORDER BY yt.typeName ASC
+        ");
+        if ($ctStmt) {
+            $ctTypes = str_repeat('i', count($ucIds));
+            $ctParams = [$ctTypes];
+            $ucIdsValues = array_values($ucIds);
+            foreach ($ucIdsValues as $idx => $cid) {
+                $ctParams[] = &$ucIdsValues[$idx];
+            }
+            call_user_func_array([$ctStmt, 'bind_param'], $ctParams);
+            $ctStmt->execute();
+            $ctRes = $ctStmt->get_result();
+            $colorTypeMap = []; // colorID → [['typeId', 'typeName'], ...]
+            while ($ctRes && ($row = $ctRes->fetch_assoc())) {
+                $colorTypeMap[(int)$row['colorID']][] = ['typeId' => (int)$row['typeID'], 'typeName' => (string)$row['typeName']];
+            }
+            $ctStmt->close();
+
+            foreach ($uniqueColors as $color) {
+                $cid = (int)($color['id'] ?? 0);
+                $types = $colorTypeMap[$cid] ?? [];
+                if (empty($types)) {
+                    $colorsByYarnType[''][$cid] = $color;
+                } else {
+                    foreach ($types as $type) {
+                        $colorsByYarnType[$type['typeName']][$cid] = array_merge($color, [
+                            'typeId' => $type['typeId'],
+                            'typeName' => $type['typeName'],
+                        ]);
+                    }
+                }
+            }
+        }
+    }
+    // Fallback: if no yarn types found, put all colors in ungrouped bucket
+    if (empty($colorsByYarnType)) {
+        foreach ($uniqueColors as $color) {
+            $colorsByYarnType[''][(int)$color['id']] = $color;
+        }
+    }
+}
+
+// JSON for JS dropdown population
+$colorsByYarnTypeJson = [];
+foreach ($colorsByYarnType as $typeName => $typeColors) {
+    $colorsByYarnTypeJson[$typeName] = array_values(array_map(static fn($c) => [
+        'id'       => (int)($c['id'] ?? 0),
+        'name'     => (string)($c['name'] ?? ''),
+        'hex'      => (string)($c['hex'] ?? '#ece6f6'),
+        'typeId'   => (int)($c['typeId'] ?? 0),
+        'typeName' => (string)($c['typeName'] ?? ''),
+    ], $typeColors));
+}
+
 $colorCatalogue = [];
 $catalogueColorIds = array_values(array_unique(array_map(static function (array $color): int {
     return (int)($color['id'] ?? 0);
@@ -700,14 +735,14 @@ $catalogueColorIds = array_values(array_filter($catalogueColorIds, static fn(int
 if (!empty($catalogueColorIds)) {
     $cataloguePlaceholders = implode(',', array_fill(0, count($catalogueColorIds), '?'));
     $catalogStmt = $conn->prepare("
-        SELECT c.colorID, c.colorName, c.globalInventoryAvailable, c.isActive,
+        SELECT c.colorID, c.colorName, c.hexCode, c.globalInventoryAvailable, c.isActive,
                COALESCE(yt.typeName, 'General') AS typeName,
                MIN(cyt.photoPath) AS photoPath
         FROM colors c
         LEFT JOIN color_yarn_types cyt ON cyt.colorID = c.colorID
         LEFT JOIN yarn_types yt ON yt.typeID = cyt.typeID
         WHERE c.colorID IN ($cataloguePlaceholders)
-        GROUP BY c.colorID, c.colorName, c.globalInventoryAvailable, c.isActive, yt.typeName
+        GROUP BY c.colorID, c.colorName, c.hexCode, c.globalInventoryAvailable, c.isActive, yt.typeName
         ORDER BY typeName ASC, c.colorName ASC
     ");
     if ($catalogStmt) {
@@ -720,9 +755,11 @@ if (!empty($catalogueColorIds)) {
         $catalogStmt->execute();
         $catalogRes = $catalogStmt->get_result();
         while ($catalogRes && ($row = $catalogRes->fetch_assoc())) {
+            $catHex = trim((string)($row['hexCode'] ?? ''));
             $colorCatalogue[] = [
                 'id' => (int)$row['colorID'],
                 'name' => (string)$row['colorName'],
+                'hex' => preg_match('/^#[0-9a-fA-F]{6}$/', $catHex) ? $catHex : '#ece6f6',
                 'typeName' => (string)$row['typeName'],
                 'available' => (int)($row['isActive'] ?? 0) === 1 && (int)($row['globalInventoryAvailable'] ?? 0) > 0,
                 'stock' => (int)($row['globalInventoryAvailable'] ?? 0),
@@ -1038,29 +1075,52 @@ include __DIR__ . "/include/header.php";
                 </div>
             <?php endif; ?>
 
-            <?php if (!empty($uniqueColors)): ?>
+            <?php if (!empty($colorsByYarnType)): ?>
+                <?php $hasMultipleYarnTypes = count($colorsByYarnType) > 1 || (count($colorsByYarnType) === 1 && key($colorsByYarnType) !== ''); ?>
+
+                <?php if ($hasMultipleYarnTypes): ?>
+                    <div class="option-label">Yarn Type</div>
+                    <select id="yarn-type-select" class="product-option-select">
+                        <option value="">— Choose yarn type —</option>
+                        <?php foreach ($colorsByYarnType as $typeName => $typeColors): ?>
+                            <option value="<?= htmlspecialchars($typeName) ?>"><?= htmlspecialchars($typeName) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                <?php endif; ?>
+
                 <div class="option-label" data-translate="productColorLabel">Colour</div>
-                <div class="color-row" id="color-row">
-                    <?php foreach ($uniqueColors as $color): ?>
-                        <button
-                            type="button"
-                            class="color-chip-btn"
-                            data-color-id="<?= (int)$color["id"] ?>"
-                            data-color-name="<?= htmlspecialchars($color["name"], ENT_QUOTES, 'UTF-8') ?>"
-                            title="<?= htmlspecialchars($color["name"]) ?>">
-                            <span class="color-chip-swatch" style="background: <?= htmlspecialchars((string)$color["hex"]) ?>;"></span>
-                            <span class="color-chip-name"><?= htmlspecialchars((string)$color["name"]) ?></span>
-                        </button>
+                <div class="colour-select-row">
+                    <select id="color-select" class="product-option-select" <?= $hasMultipleYarnTypes ? 'disabled' : '' ?>>
+                        <option value="">— Choose colour —</option>
+                        <?php if (!$hasMultipleYarnTypes): ?>
+                            <?php foreach (reset($colorsByYarnType) ?: [] as $color): ?>
+                                <option value="<?= (int)$color['id'] ?>"
+                                    data-hex="<?= htmlspecialchars((string)($color['hex'] ?? '#ece6f6')) ?>"
+                                    data-color-name="<?= htmlspecialchars((string)($color['name'] ?? ''), ENT_QUOTES) ?>"
+                                    data-yarn-type-name="<?= htmlspecialchars((string)($color['typeName'] ?? ''), ENT_QUOTES) ?>">
+                                    <?= htmlspecialchars((string)($color['name'] ?? '')) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </select>
+                    <span id="colour-swatch-preview" style="display:none"></span>
+                </div>
+
+                <!-- Hidden chip buttons keep existing JS variation/stock logic intact -->
+                <div id="color-chips-hidden" style="display:none" aria-hidden="true">
+                    <?php foreach ($colorsByYarnType as $typeName => $typeColors): ?>
+                        <?php foreach ($typeColors as $color): ?>
+                            <button type="button" class="color-chip-btn"
+                                data-color-id="<?= (int)$color['id'] ?>"
+                                data-color-name="<?= htmlspecialchars((string)($color['name'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
+                                data-yarn-type-id="<?= (int)($color['typeId'] ?? 0) ?>"
+                                data-yarn-type-name="<?= htmlspecialchars((string)($color['typeName'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
+                            </button>
+                        <?php endforeach; ?>
                     <?php endforeach; ?>
                 </div>
             <?php endif; ?>
 
-            <?php if (!empty($colorCatalogue)): ?>
-                <button type="button" class="color-catalogue-btn" id="open-color-catalogue">
-                    <i class="fas fa-palette"></i>
-                    <span data-translate="viewColorCatalogue">View colour catalogue</span>
-                </button>
-            <?php endif; ?>
 
             <?php if ($customColorFields > 0): ?>
                 <div class="gift-box custom-request-box">
@@ -1221,7 +1281,7 @@ include __DIR__ . "/include/header.php";
                     <?php if ($catalogueColor['photoPath'] !== ''): ?>
                         <img src="<?= htmlspecialchars($catalogueColor['photoPath']) ?>" alt="<?= htmlspecialchars($catalogueColor['name']) ?>" loading="lazy">
                     <?php else: ?>
-                        <span class="color-catalogue-swatch" style="background: <?= htmlspecialchars($colorHexMap[strtolower($catalogueColor['name'])] ?? '#ece6f6') ?>;"></span>
+                        <span class="color-catalogue-swatch" style="background: <?= htmlspecialchars($catalogueColor['hex'] ?? '#ece6f6') ?>;"></span>
                     <?php endif; ?>
                     <div>
                         <strong><?= htmlspecialchars($catalogueColor['name']) ?></strong>
@@ -1386,6 +1446,7 @@ include __DIR__ . "/include/header.php";
     var qty = 1;
     var selectedColorId = null;
     var selectedColorName = "";
+    var selectedYarnTypeName = "";
     var selectedSize = null;
 
     var colorPhotos   = <?= json_encode($colorPhotos, JSON_UNESCAPED_UNICODE) ?>;
@@ -1599,7 +1660,8 @@ include __DIR__ . "/include/header.php";
         return variations.find(function (item) {
             var sizeOk = !requireSizeSelection || normalize(item.size) === normalize(selectedSize);
             var colorOk = !requireColorSelection || Number(item.colorID || 0) === Number(selectedColorId || 0);
-            return sizeOk && colorOk;
+            var yarnOk = !selectedYarnTypeName || !item.yarnType || normalize(item.yarnType) === normalize(selectedYarnTypeName);
+            return sizeOk && colorOk && yarnOk;
         }) || null;
     }
 
@@ -1860,11 +1922,94 @@ include __DIR__ . "/include/header.php";
                 }
                 selectedColorId = parseInt(chip.getAttribute("data-color-id") || "0", 10) || null;
                 selectedColorName = chip.getAttribute("data-color-name") || "";
+                selectedYarnTypeName = chip.getAttribute("data-yarn-type-name") || "";
                 updateColorStockDisplay();
                 updateAddToCartState(validationStarted);
             });
         });
         updateColorChips();
+    }
+
+    // Dropdown colour UI
+    var colorsByYarnTypeData = <?= json_encode($colorsByYarnTypeJson, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
+    var yarnTypeSelectEl = document.getElementById("yarn-type-select");
+    var colorSelectEl    = document.getElementById("color-select");
+    var swatchPreview    = document.getElementById("colour-swatch-preview");
+
+    function updateSwatchPreview(hex) {
+        if (!swatchPreview) return;
+        if (hex) {
+            swatchPreview.style.background = hex;
+            swatchPreview.style.display = "inline-block";
+        } else {
+            swatchPreview.style.display = "none";
+        }
+    }
+
+    function populateColorDropdown(typeName) {
+        if (!colorSelectEl) return;
+        colorSelectEl.innerHTML = '<option value="">— Choose colour —</option>';
+        var colors = colorsByYarnTypeData[typeName] || [];
+        colors.forEach(function (color) {
+            var opt = document.createElement("option");
+            opt.value = color.id;
+            opt.textContent = color.name;
+            opt.dataset.hex = color.hex;
+            opt.dataset.colorName = color.name;
+            opt.dataset.yarnTypeName = color.typeName || typeName;
+            colorSelectEl.appendChild(opt);
+        });
+        colorSelectEl.disabled = colors.length === 0;
+        colorSelectEl.value = "";
+        selectedColorId = null;
+        selectedColorName = "";
+        updateSwatchPreview(null);
+    }
+
+    function triggerColorChip(colorId) {
+        var matchingChip = null;
+        for (var ci = 0; ci < colorChips.length; ci++) {
+            if (parseInt(colorChips[ci].getAttribute("data-color-id") || "0", 10) === colorId) {
+                matchingChip = colorChips[ci];
+                break;
+            }
+        }
+        if (matchingChip && !matchingChip.disabled) {
+            matchingChip.click();
+        } else if (colorId) {
+            selectedColorId = colorId;
+            updateColorChips();
+            updateColorStockDisplay();
+            updateAddToCartState(validationStarted);
+        }
+    }
+
+    if (yarnTypeSelectEl) {
+        yarnTypeSelectEl.addEventListener("change", function () {
+            selectedYarnTypeName = this.value;
+            selectedColorId = null;
+            selectedColorName = "";
+            populateColorDropdown(this.value);
+            updateColorChips();
+            updateColorStockDisplay();
+            updateAddToCartState(validationStarted);
+        });
+    }
+
+    if (colorSelectEl) {
+        colorSelectEl.addEventListener("change", function () {
+            var colorId = parseInt(this.value || "0", 10) || 0;
+            var opt = this.options[this.selectedIndex];
+            var hex = opt ? (opt.dataset.hex || "#ece6f6") : "#ece6f6";
+            if (opt && opt.dataset.yarnTypeName) {
+                selectedYarnTypeName = opt.dataset.yarnTypeName;
+            }
+            updateSwatchPreview(colorId ? hex : null);
+            triggerColorChip(colorId);
+            if (opt && opt.dataset.colorName) {
+                selectedColorName = opt.dataset.colorName;
+            }
+        });
     }
 
     [customField1Input, customField2Input].forEach(function (input) {
