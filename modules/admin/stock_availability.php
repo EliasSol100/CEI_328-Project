@@ -586,7 +586,15 @@ $statusBadge = [
       </div>
 
       <div class="card">
-        <div class="card-title">Yarn Colour Inventory</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:6px">
+          <div class="card-title" style="margin:0">Yarn Colour Inventory</div>
+          <div style="position:relative;width:220px">
+            <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#9ca3af;font-size:13px;pointer-events:none"></i>
+            <input type="text" id="colour-inventory-search" placeholder="Enter colour ID or name…"
+              style="width:100%;padding:7px 10px 7px 30px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;box-sizing:border-box"
+              autocomplete="off">
+          </div>
+        </div>
         <p class="text-sm text-muted mb-4">
           Track how many units of each yarn colour you have in stock. Disabling a colour globally removes it from all product pages.
         </p>
@@ -850,6 +858,29 @@ document.addEventListener('DOMContentLoaded', function () {
     dirtyForms.clear();
     isSubmitting = true;
   });
+
+  // Colour inventory search
+  var inventorySearch = document.getElementById('colour-inventory-search');
+  if (inventorySearch) {
+    var inventoryRows = document.querySelectorAll('.data-table tbody tr');
+    inventorySearch.addEventListener('input', function () {
+      var q = this.value.trim().toLowerCase();
+      var count = 0;
+      inventoryRows.forEach(function (row) {
+        var id   = (row.cells[1] ? row.cells[1].textContent.trim() : '');
+        var name = (row.cells[2] ? row.cells[2].textContent.trim().toLowerCase() : '');
+        var show = !q || id === q || name.indexOf(q) !== -1;
+        row.style.display = show ? '' : 'none';
+        if (show) count++;
+      });
+    });
+    inventorySearch.addEventListener('focus', function () {
+      this.style.borderColor = '#6a0dad';
+    });
+    inventorySearch.addEventListener('blur', function () {
+      this.style.borderColor = '#e5e7eb';
+    });
+  }
 
   // Colour Edit Modal
   var modal       = document.getElementById('colour-edit-modal');
