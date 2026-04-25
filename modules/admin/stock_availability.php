@@ -71,7 +71,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = mysqli_prepare($conn, "UPDATE colors SET globalInventoryAvailable=?, isActive=?, hexCode=? WHERE colorID=?");
         mysqli_stmt_bind_param($stmt, 'iisi', $stock, $isActive, $hexCode, $colorID);
         mysqli_stmt_execute($stmt);
-        $flash = 'ok:Colour stock updated.';
+
+        // Update yarn type assignments
+        $submittedTypeIDs = array_filter(array_map('intval', $_POST['typeIDs'] ?? []));
+        $delStmt = mysqli_prepare($conn, "DELETE FROM color_yarn_types WHERE colorID=?");
+        mysqli_stmt_bind_param($delStmt, 'i', $colorID);
+        mysqli_stmt_execute($delStmt);
+        mysqli_stmt_close($delStmt);
+        foreach ($submittedTypeIDs as $typeID) {
+            $insStmt = mysqli_prepare($conn, "INSERT IGNORE INTO color_yarn_types (colorID, typeID) VALUES (?,?)");
+            mysqli_stmt_bind_param($insStmt, 'ii', $colorID, $typeID);
+            mysqli_stmt_execute($insStmt);
+            mysqli_stmt_close($insStmt);
+        }
+
+        $flash = 'ok:Colour updated.';
     }
 
     if ($action === 'update_sales_override') {
@@ -290,7 +304,8 @@ if ($r) {
 $colours = [];
 $r = mysqli_query($conn, "
     SELECT c.*,
-           GROUP_CONCAT(DISTINCT yt.typeName ORDER BY yt.typeName SEPARATOR ', ') AS typeNames
+           GROUP_CONCAT(DISTINCT yt.typeName ORDER BY yt.typeName SEPARATOR ', ') AS typeNames,
+           GROUP_CONCAT(DISTINCT cyt.typeID ORDER BY cyt.typeID SEPARATOR ',') AS typeIDs
     FROM colors c
     LEFT JOIN color_yarn_types cyt ON cyt.colorID = c.colorID
     LEFT JOIN yarn_types yt ON yt.typeID = cyt.typeID
@@ -299,6 +314,7 @@ $r = mysqli_query($conn, "
 ");
 if ($r) {
     while ($row = mysqli_fetch_assoc($r)) {
+        $row['typeIDsArray'] = $row['typeIDs'] ? array_map('intval', explode(',', $row['typeIDs'])) : [];
         $colours[] = $row;
     }
 }
@@ -612,31 +628,46 @@ $statusBadge = [
               </td>
 
               <td>
-                <form method="POST" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap" data-ignore-unsaved-warning data-stock-warning>
+                <form method="POST" style="display:flex;flex-direction:column;gap:8px" data-ignore-unsaved-warning data-stock-warning>
                   <input type="hidden" name="action"  value="update_color_stock">
                   <input type="hidden" name="colorID" value="<?= $c['colorID'] ?>">
-                  <input
-                    type="number"
-                    name="globalInventoryAvailable"
-                    value="<?= (int)$c['globalInventoryAvailable'] ?>"
-                    min="0"
-                    class="form-input"
-                    style="width:80px;padding:6px 8px"
-                  >
-                  <select name="isActive" class="form-input" style="width:130px">
-                    <option value="1" <?= $c['isActive'] ? 'selected' : '' ?>>Available</option>
-                    <option value="0" <?= !$c['isActive'] ? 'selected' : '' ?>>Unavailable</option>
-                  </select>
-                  <input
-                    type="color"
-                    name="hexCode"
-                    value="<?= htmlspecialchars($swatchHex) ?>"
-                    title="Colour swatch hex"
-                    style="width:36px;height:32px;padding:2px;border:1px solid #d1d5db;border-radius:6px;cursor:pointer"
-                  >
-                  <button type="submit" class="btn-primary" style="padding:6px 12px;font-size:12px">
-                    <i class="fas fa-save"></i> Save
-                  </button>
+                  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                    <input
+                      type="number"
+                      name="globalInventoryAvailable"
+                      value="<?= (int)$c['globalInventoryAvailable'] ?>"
+                      min="0"
+                      class="form-input"
+                      style="width:80px;padding:6px 8px"
+                    >
+                    <select name="isActive" class="form-input" style="width:130px">
+                      <option value="1" <?= $c['isActive'] ? 'selected' : '' ?>>Available</option>
+                      <option value="0" <?= !$c['isActive'] ? 'selected' : '' ?>>Unavailable</option>
+                    </select>
+                    <input
+                      type="color"
+                      name="hexCode"
+                      value="<?= htmlspecialchars($swatchHex) ?>"
+                      title="Colour hex"
+                      style="width:36px;height:32px;padding:2px;border:1px solid #d1d5db;border-radius:6px;cursor:pointer"
+                    >
+                  </div>
+                  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                    <span style="font-size:12px;color:#6b7280;white-space:nowrap">Category:</span>
+                    <select name="typeIDs[]" multiple class="form-input"
+                      style="font-size:12px;padding:4px 6px;min-width:160px;height:auto"
+                      title="Hold Ctrl/Cmd to select multiple">
+                      <?php foreach ($yarnTypes as $yt): ?>
+                        <option value="<?= (int)$yt['typeID'] ?>"
+                          <?= in_array((int)$yt['typeID'], $c['typeIDsArray'], true) ? 'selected' : '' ?>>
+                          <?= htmlspecialchars($yt['typeName']) ?>
+                        </option>
+                      <?php endforeach; ?>
+                    </select>
+                    <button type="submit" class="btn-primary" style="padding:6px 12px;font-size:12px">
+                      <i class="fas fa-save"></i> Save
+                    </button>
+                  </div>
                 </form>
               </td>
             </tr>
