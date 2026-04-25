@@ -117,7 +117,35 @@
             customOrderNoRepliesYet: 'No replies yet.',
             customOrderReplyTitle: 'Reply to Athina',
             customOrderReplyPlaceholder: 'Write your reply or extra information...',
-            customOrderSendReplyAction: 'Send Reply'
+            customOrderSendReplyAction: 'Send Reply',
+            customOrderRequestLabel: 'Request',
+            customOrderReferencePreviewAlt: 'Reference preview',
+            customOrderReferenceAlt: 'Custom order reference',
+            customOrderSuccessCreated: 'Your website custom order request was sent to Athina.',
+            customOrderSuccessReplySent: 'Your reply was sent.',
+            customOrderSuccessOfferAccepted: 'You accepted the offer. Athina has been notified.',
+            customOrderSuccessOfferDeclined: 'You declined the offer. You can reply with changes if needed.',
+            customOrderErrorAddTitle: 'Please add a short title for your custom idea.',
+            customOrderErrorDescribeMore: 'Please describe your idea with a little more detail.',
+            customOrderErrorNeededBy: 'Please choose a valid needed-by date.',
+            customOrderErrorWriteReply: 'Please write a reply before sending.',
+            customOrderErrorGeneric: 'Something went wrong. Please try again.',
+            customOrderStatusPending: 'Pending',
+            customOrderStatusInDiscussion: 'In Discussion',
+            customOrderStatusAccepted: 'Accepted',
+            customOrderStatusInProduction: 'In Production',
+            customOrderStatusReadyForCheckout: 'Ready for Checkout',
+            customOrderStatusCompleted: 'Completed',
+            customOrderStatusDeclined: 'Declined',
+            customOrderStatusCancelled: 'Cancelled',
+            customOrderStatusInProgress: 'In Progress',
+            customOrderOfferStatusPending: 'Pending',
+            customOrderOfferStatusAccepted: 'Accepted',
+            customOrderOfferStatusDeclined: 'Declined',
+            customOrderOfferStatusSuperseded: 'Superseded',
+            customOrderSenderCustomer: 'Customer',
+            customOrderSenderAdmin: 'Admin',
+            customOrderSenderSystem: 'System'
         },
         el: {
             pageTitle: 'Creations by Athina - Εξατομικευμένη Παραγγελία',
@@ -204,9 +232,72 @@
             customOrderNoRepliesYet: 'Δεν υπάρχουν απαντήσεις ακόμα.',
             customOrderReplyTitle: 'Απάντηση στην Athina',
             customOrderReplyPlaceholder: 'Γράψτε την απάντησή σας ή επιπλέον πληροφορίες...',
-            customOrderSendReplyAction: 'Αποστολή Απάντησης'
+            customOrderSendReplyAction: 'Αποστολή Απάντησης',
+            customOrderRequestLabel: 'Αίτημα',
+            customOrderReferencePreviewAlt: 'Προεπισκόπηση φωτογραφίας αναφοράς',
+            customOrderReferenceAlt: 'Φωτογραφία αναφοράς custom παραγγελίας',
+            customOrderSuccessCreated: 'Το αίτημα custom παραγγελίας από το website στάλθηκε στην Athina.',
+            customOrderSuccessReplySent: 'Η απάντησή σας στάλθηκε.',
+            customOrderSuccessOfferAccepted: 'Αποδεχτήκατε την προσφορά. Η Athina έχει ειδοποιηθεί.',
+            customOrderSuccessOfferDeclined: 'Απορρίψατε την προσφορά. Μπορείτε να απαντήσετε με αλλαγές αν χρειάζεται.',
+            customOrderErrorAddTitle: 'Παρακαλώ προσθέστε έναν σύντομο τίτλο για την custom ιδέα σας.',
+            customOrderErrorDescribeMore: 'Παρακαλώ περιγράψτε την ιδέα σας με λίγες περισσότερες λεπτομέρειες.',
+            customOrderErrorNeededBy: 'Παρακαλώ επιλέξτε έγκυρη ημερομηνία.',
+            customOrderErrorWriteReply: 'Παρακαλώ γράψτε μια απάντηση πριν την αποστολή.',
+            customOrderErrorGeneric: 'Κάτι πήγε στραβά. Παρακαλώ δοκιμάστε ξανά.',
+            customOrderStatusPending: 'Σε αναμονή',
+            customOrderStatusInDiscussion: 'Σε συζήτηση',
+            customOrderStatusAccepted: 'Αποδεκτό',
+            customOrderStatusInProduction: 'Σε παραγωγή',
+            customOrderStatusReadyForCheckout: 'Έτοιμο για checkout',
+            customOrderStatusCompleted: 'Ολοκληρωμένο',
+            customOrderStatusDeclined: 'Απορρίφθηκε',
+            customOrderStatusCancelled: 'Ακυρώθηκε',
+            customOrderStatusInProgress: 'Σε εξέλιξη',
+            customOrderOfferStatusPending: 'Σε αναμονή',
+            customOrderOfferStatusAccepted: 'Αποδεκτή',
+            customOrderOfferStatusDeclined: 'Απορρίφθηκε',
+            customOrderOfferStatusSuperseded: 'Αντικαταστάθηκε',
+            customOrderSenderCustomer: 'Πελάτης',
+            customOrderSenderAdmin: 'Athina',
+            customOrderSenderSystem: 'Σύστημα'
         }
     };
+
+    var statusKeyMap = {
+        pending: 'customOrderStatusPending',
+        in_discussion: 'customOrderStatusInDiscussion',
+        accepted: 'customOrderStatusAccepted',
+        in_production: 'customOrderStatusInProduction',
+        ready_for_checkout: 'customOrderStatusReadyForCheckout',
+        completed: 'customOrderStatusCompleted',
+        declined: 'customOrderStatusDeclined',
+        cancelled: 'customOrderStatusCancelled',
+        in_progress: 'customOrderStatusInProgress'
+    };
+
+    var offerStatusKeyMap = {
+        pending: 'customOrderOfferStatusPending',
+        accepted: 'customOrderOfferStatusAccepted',
+        declined: 'customOrderOfferStatusDeclined',
+        superseded: 'customOrderOfferStatusSuperseded'
+    };
+
+    var senderRoleKeyMap = {
+        customer: 'customOrderSenderCustomer',
+        admin: 'customOrderSenderAdmin',
+        system: 'customOrderSenderSystem'
+    };
+
+    function setMappedText(selector, attr, keyMap, map) {
+        document.querySelectorAll(selector).forEach(function (element) {
+            var value = String(element.getAttribute(attr) || '').toLowerCase();
+            var key = keyMap[value];
+            if (key && map[key]) {
+                element.textContent = map[key];
+            }
+        });
+    }
 
     function applyCustomOrderTranslations(lang) {
         var normalizedLang = normalizeLanguage(lang);
@@ -243,6 +334,17 @@
                 element.setAttribute('aria-label', map[key]);
             }
         });
+
+        document.querySelectorAll('[data-co-alt]').forEach(function (element) {
+            var key = element.getAttribute('data-co-alt');
+            if (key && map[key]) {
+                element.setAttribute('alt', map[key]);
+            }
+        });
+
+        setMappedText('[data-co-status]', 'data-co-status', statusKeyMap, map);
+        setMappedText('[data-co-offer-status]', 'data-co-offer-status', offerStatusKeyMap, map);
+        setMappedText('[data-co-sender-role]', 'data-co-sender-role', senderRoleKeyMap, map);
     }
 
     function getActiveLanguage() {
