@@ -124,6 +124,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
     }
 
+    $allowedCountries = ['Greece', 'Cyprus', 'Ελλάδα', 'Κύπρος'];
+    if (!empty($country) && !in_array($country, $allowedCountries, true)) {
+        $errors[] = "We currently ship only to Greece and Cyprus.";
+    }
+
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $errors[] = "Email is not valid!";
     }
@@ -627,7 +632,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
             }
         });
 
-        $("#country").countrySelect({ defaultCountry: "cy" });
+        $("#country").countrySelect({ defaultCountry: "cy", onlyCountries: ["cy", "gr"] });
 
         const iti = window.intlTelInput(document.querySelector("#phone"), {
             separateDialCode: true,
