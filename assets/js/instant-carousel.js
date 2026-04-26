@@ -1,8 +1,8 @@
 (function () {
     "use strict";
 
-    var SLIDE_DUR = 420; // ms — must match CSS animation duration
-    var HOVER_INTERVAL = 2000; // ms between auto-advances on hover
+    var SLIDE_DUR = 420;
+    var HOVER_INTERVAL = 2000;
 
     var MOVING_CLASSES = [
         "carousel-item-next",
@@ -32,7 +32,6 @@
         });
     }
 
-    // Instant jump — no animation (used for reset on mouse-leave)
     function setActive(carousel, index) {
         var items = getItems(carousel);
         if (items.length === 0) return;
@@ -46,7 +45,6 @@
         syncDots(carousel, n);
     }
 
-    // Smooth slide to next/prev — used by hover auto-advance
     function smoothStep(carousel, direction) {
         if (carousel._sliding) return;
         var items = getItems(carousel);
@@ -58,8 +56,8 @@
         var entering = items[toIdx];
 
         carousel._sliding = true;
+        carousel._pendingIndex = toIdx;
 
-        // entering starts off-screen; add active so it's visible, then animate in
         entering.classList.add("active", "shop-entering");
         leaving.classList.add("shop-leaving");
 
@@ -69,6 +67,7 @@
             carousel.dataset.instantCarouselIndex = String(toIdx);
             syncDots(carousel, toIdx);
             carousel._sliding = false;
+            carousel._pendingIndex = null;
         }, SLIDE_DUR);
     }
 
@@ -93,7 +92,6 @@
     function startHoverCycle(carousel) {
         if (carousel._hoverTimer) return;
         if (getItems(carousel).length < 2) return;
-        // First advance fires after the interval (not immediately)
         carousel._hoverTimer = setInterval(function () {
             smoothStep(carousel, 1);
         }, HOVER_INTERVAL);
@@ -104,12 +102,71 @@
         carousel._hoverTimer = null;
         clearTimeout(carousel._slideTimer);
         carousel._slideTimer = null;
-        // Clean up any in-progress animation classes before resetting
-        getItems(carousel).forEach(function (item) {
-            item.classList.remove("shop-entering", "shop-leaving");
-        });
+        var keepIndex = carousel._sliding && carousel._pendingIndex !== null
+            ? carousel._pendingIndex
+            : getActiveIndex(getItems(carousel));
         carousel._sliding = false;
-        setActive(carousel, 0);
+        carousel._pendingIndex = null;
+        setActive(carousel, keepIndex);
+    }
+
+    function initTouchNavigation(carousel) {
+        if (carousel.dataset.instantCarouselTouchReady === "1") return;
+        if (getItems(carousel).length < 2) return;
+
+        carousel.dataset.instantCarouselTouchReady = "1";
+
+        var startX = 0;
+        var startY = 0;
+        var lastX = 0;
+        var lastY = 0;
+        var isTracking = false;
+        var isHorizontalSwipe = false;
+
+        carousel.addEventListener("touchstart", function (e) {
+            if (!e.touches || e.touches.length !== 1) return;
+            preloadCarouselImages(carousel);
+            isTracking = true;
+            isHorizontalSwipe = false;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            lastX = startX;
+            lastY = startY;
+        }, { passive: true });
+
+        carousel.addEventListener("touchmove", function (e) {
+            if (!isTracking || !e.touches || e.touches.length !== 1) return;
+            lastX = e.touches[0].clientX;
+            lastY = e.touches[0].clientY;
+
+            var dx = lastX - startX;
+            var dy = lastY - startY;
+            if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.25) {
+                isHorizontalSwipe = true;
+                if (e.cancelable) e.preventDefault();
+            }
+        }, { passive: false });
+
+        carousel.addEventListener("touchend", function () {
+            if (!isTracking) return;
+            var dx = lastX - startX;
+            isTracking = false;
+
+            if (!isHorizontalSwipe || Math.abs(dx) < 38) return;
+            step(carousel, dx < 0 ? 1 : -1);
+            carousel._suppressNextClick = true;
+            setTimeout(function () {
+                carousel._suppressNextClick = false;
+            }, 450);
+        }, { passive: true });
+
+        carousel.addEventListener("click", function (e) {
+            if (!carousel._suppressNextClick) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+            carousel._suppressNextClick = false;
+        }, true);
     }
 
     function initCarousel(carousel) {
@@ -130,8 +187,8 @@
         carousel.addEventListener("mouseenter", function () { preloadCarouselImages(carousel); }, { once: true });
         carousel.addEventListener("focusin",    function () { preloadCarouselImages(carousel); }, { once: true });
         carousel.addEventListener("touchstart", function () { preloadCarouselImages(carousel); }, { once: true, passive: true });
+        initTouchNavigation(carousel);
 
-        // Prev/next button clicks (instant, not animated)
         carousel.querySelectorAll(".carousel-control-prev, .carousel-control-next").forEach(function (ctrl) {
             ctrl.addEventListener("click", function (e) {
                 e.preventDefault();
@@ -142,7 +199,6 @@
             }, true);
         });
 
-        // Hover auto-advance: mouse devices only
         if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
         if (getItems(carousel).length < 2) return;
 

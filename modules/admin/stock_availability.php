@@ -3,9 +3,12 @@ require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/../../include/security.php';
 require_once __DIR__ . '/../../include/image_storage.php';
+require_once __DIR__ . '/../../include/product_option_helpers.php';
 
 $current_page = 'stock_availability';
 $flash = '';
+
+app_product_options_ensure_schema($conn);
 
 function ensureProductSalesOverridesSchema(mysqli $conn): void {
     static $checked = false;
@@ -72,7 +75,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         mysqli_stmt_bind_param($stmt, 'iisi', $stock, $isActive, $hexCode, $colorID);
         mysqli_stmt_execute($stmt);
 
-        // Update yarn type assignments
         $submittedTypeIDs = array_filter(array_map('intval', $_POST['typeIDs'] ?? []));
         $delStmt = mysqli_prepare($conn, "DELETE FROM color_yarn_types WHERE colorID=?");
         mysqli_stmt_bind_param($delStmt, 'i', $colorID);
@@ -667,7 +669,6 @@ $statusBadge = [
         </table>
       </div>
 
-      <!-- Colour Edit Modal -->
       <div id="colour-edit-modal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(17,24,39,.45);align-items:center;justify-content:center">
         <div style="background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.2);width:min(480px,95vw);padding:28px 28px 24px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
@@ -859,7 +860,6 @@ document.addEventListener('DOMContentLoaded', function () {
     isSubmitting = true;
   });
 
-  // Colour inventory search
   var inventorySearch = document.getElementById('colour-inventory-search');
   if (inventorySearch) {
     var inventoryRows = document.querySelectorAll('.data-table tbody tr');
@@ -882,7 +882,6 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
-  // Colour Edit Modal
   var modal       = document.getElementById('colour-edit-modal');
   var modalForm   = document.getElementById('colour-edit-form');
   var modalSwatch = document.getElementById('modal-swatch');

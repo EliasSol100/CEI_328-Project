@@ -425,6 +425,7 @@ $productStmt = $conn->prepare(
     "SELECT p.productID, p.sku, p.nameEN, p.nameGR, p.descriptionEN, p.descriptionGR,
             p.basePrice, p.inventory, p.cartStatus, p.hasVariants, p.category,
             p.availableSizes,
+            p.productWarningEN, p.productWarningGR,
             p.customColorFields, p.customColorLabel1, p.customColorLabel2,
             p.customColorLabel1GR, p.customColorLabel2GR, p.customColorHelpText, p.customColorHelpTextGR,
             CASE
@@ -647,7 +648,6 @@ foreach ($variations as $variation) {
     ];
 }
 
-// Sizes from product column (informational, independent of variations)
 $productInfoSizes = [];
 if (!empty($product['availableSizes'])) {
     $sizeOrderMap = array_flip(['XS', 'S', 'Small', 'M', 'Medium', 'L', 'Large', 'XL', 'XXL', 'One Size', '2XL', '3XL']);
@@ -659,13 +659,11 @@ if (!empty($product['availableSizes'])) {
         return $ai !== $bi ? $ai <=> $bi : strcasecmp($a, $b);
     });
 }
-// "Informational" = sizes come from product column, not from variations (no variation matching needed)
 $sizesAreInformational = !empty($productInfoSizes) && empty($uniqueSizes);
 if ($sizesAreInformational) {
     $uniqueSizes = $productInfoSizes;
 }
 
-// Only fall back to product_color_photos colors if no colors are defined via product_variations
 $variationHasColors = !empty(array_filter($variations, static fn($v) => ($v['colorID'] ?? 0) > 0));
 
 foreach ($productColorChoices as $colorId => $colorChoice) {
@@ -673,7 +671,7 @@ foreach ($productColorChoices as $colorId => $colorChoice) {
         continue;
     }
     if ($variationHasColors) {
-        continue; // admin has assigned colors via variations — don't mix in photo-based colors
+        continue;
     }
     $colorName = trim((string)($colorChoice['name'] ?? ''));
     $uniqueColors[$colorId] = [
@@ -686,7 +684,6 @@ foreach ($productColorChoices as $colorId => $colorChoice) {
 
 $uniqueColors = array_values($uniqueColors);
 
-// Build color→yarn-type mapping for grouping display
 $colorsByYarnType = [];
 if (!empty($uniqueColors)) {
     $ucIds = array_filter(array_map(static fn($c) => (int)($c['id'] ?? 0), $uniqueColors), static fn($id) => $id > 0);
@@ -709,7 +706,7 @@ if (!empty($uniqueColors)) {
             call_user_func_array([$ctStmt, 'bind_param'], $ctParams);
             $ctStmt->execute();
             $ctRes = $ctStmt->get_result();
-            $colorTypeMap = []; // colorID → [['typeId', 'typeName'], ...]
+            $colorTypeMap = [];
             while ($ctRes && ($row = $ctRes->fetch_assoc())) {
                 $colorTypeMap[(int)$row['colorID']][] = ['typeId' => (int)$row['typeID'], 'typeName' => (string)$row['typeName']];
             }
@@ -731,7 +728,6 @@ if (!empty($uniqueColors)) {
             }
         }
     }
-    // Fallback: if no yarn types found, put all colors in ungrouped bucket
     if (empty($colorsByYarnType)) {
         foreach ($uniqueColors as $color) {
             $colorsByYarnType[''][(int)$color['id']] = $color;
@@ -739,7 +735,6 @@ if (!empty($uniqueColors)) {
     }
 }
 
-// JSON for JS dropdown population
 $colorsByYarnTypeJson = [];
 foreach ($colorsByYarnType as $typeName => $typeColors) {
     $colorsByYarnTypeJson[$typeName] = array_values(array_map(static fn($c) => [
@@ -1084,7 +1079,7 @@ include __DIR__ . "/include/header.php";
                 $descriptionElHtml = app_product_description_html((string)($product["descriptionGR"] ?: $product["descriptionEN"] ?: ''), "Χειροποίητο προϊόν από το Creations by Athina.");
             ?>
             <p class="desc-text"<?= app_translate_html_attrs($descriptionEnHtml, $descriptionElHtml) ?>><?= $descriptionEnHtml ?></p>
-            <?= app_product_warning_box_html() ?>
+            <?= app_product_warning_box_html($product) ?>
 
             <?php if (!empty($uniqueSizes)): ?>
                 <div class="option-label" data-translate="productSizeLabel">Size</div>
@@ -1131,7 +1126,6 @@ include __DIR__ . "/include/header.php";
                     <span id="colour-swatch-preview" style="display:none"></span>
                 </div>
 
-                <!-- Hidden chip buttons keep existing JS variation/stock logic intact -->
                 <div id="color-chips-hidden" style="display:none" aria-hidden="true">
                     <?php foreach ($colorsByYarnType as $typeName => $typeColors): ?>
                         <?php foreach ($typeColors as $color): ?>
@@ -1674,7 +1668,6 @@ include __DIR__ . "/include/header.php";
             return null;
         }
 
-        // Informational sizes are display-only; variation is matched by colour only
         var requireSizeSelection = !sizesAreInformational && variationUsesSize && sizeChips.length > 0;
         var requireColorSelection = variationUsesColor && hasPresetColorChoices;
         if (requireSizeSelection && !selectedSize) {
@@ -1957,7 +1950,6 @@ include __DIR__ . "/include/header.php";
         updateColorChips();
     }
 
-    // Dropdown colour UI
     var colorsByYarnTypeData = <?= json_encode($colorsByYarnTypeJson, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
     var yarnTypeSelectEl = document.getElementById("yarn-type-select");
     var colorSelectEl    = document.getElementById("color-select");
@@ -2226,7 +2218,6 @@ include __DIR__ . "/include/header.php";
                     payload.variation_id = state.selectedVariation.variationID;
                 }
             }
-            // Informational size → stored as order note (not used for variation matching)
             if (sizesAreInformational && selectedSize) {
                 payload.customizationNote = 'Size: ' + selectedSize;
             }

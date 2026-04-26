@@ -3,9 +3,46 @@
 require_once __DIR__ . '/translation_helpers.php';
 require_once __DIR__ . '/security.php';
 
-if (!function_exists('app_product_warning_messages')) {
-    function app_product_warning_messages(): array
+if (!function_exists('app_product_warning_lines')) {
+    function app_product_warning_lines(string $text): array
     {
+        $text = trim(str_replace(["\r\n", "\r"], "\n", $text));
+        if ($text === '') {
+            return [];
+        }
+
+        $lines = preg_split('/\n+/u', $text) ?: [];
+        $lines = array_map(static function (string $line): string {
+            return trim(preg_replace('/^\s*[-*]\s*/u', '', $line) ?? $line);
+        }, $lines);
+
+        return array_values(array_filter($lines, static fn(string $line): bool => $line !== ''));
+    }
+}
+
+if (!function_exists('app_product_warning_messages')) {
+    function app_product_warning_messages(?array $product = null): array
+    {
+        $customEn = trim((string)($product['productWarningEN'] ?? ''));
+        $customEl = trim((string)($product['productWarningGR'] ?? ''));
+        if ($customEn !== '' || $customEl !== '') {
+            $englishLines = app_product_warning_lines($customEn !== '' ? $customEn : $customEl);
+            $greekLines = app_product_warning_lines($customEl !== '' ? $customEl : $customEn);
+            $count = max(count($englishLines), count($greekLines));
+            $lastEnglishLine = $englishLines !== [] ? $englishLines[count($englishLines) - 1] : '';
+            $lastGreekLine = $greekLines !== [] ? $greekLines[count($greekLines) - 1] : '';
+            $messages = [];
+            for ($i = 0; $i < $count; $i++) {
+                $messages[] = [
+                    'en' => $englishLines[$i] ?? $lastEnglishLine,
+                    'el' => $greekLines[$i] ?? $lastGreekLine,
+                ];
+            }
+            return array_values(array_filter($messages, static function (array $warning): bool {
+                return trim((string)$warning['en']) !== '' || trim((string)$warning['el']) !== '';
+            }));
+        }
+
         return [
             [
                 'en' => 'Important: Small pieces and safety eyes on this plushie require parent supervision for babies and small children.',
@@ -56,13 +93,16 @@ if (!function_exists('app_product_description_html')) {
 }
 
 if (!function_exists('app_product_warning_box_html')) {
-    function app_product_warning_box_html(): string
+    function app_product_warning_box_html(?array $product = null): string
     {
         $englishItems = [];
         $greekItems = [];
-        foreach (app_product_warning_messages() as $warning) {
+        foreach (app_product_warning_messages($product) as $warning) {
             $englishItems[] = '<li>' . app_h($warning['en']) . '</li>';
             $greekItems[] = '<li>' . app_h($warning['el']) . '</li>';
+        }
+        if (empty($englishItems)) {
+            return '';
         }
 
         $english = '<div class="product-warning-title">Product warnings</div><ul>' . implode('', $englishItems) . '</ul>';

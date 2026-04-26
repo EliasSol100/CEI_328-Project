@@ -892,7 +892,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
             });
         });
 
-        showStep(currentStep); // initialize first step
+        showStep(currentStep);
     });
     </script>
 </body>

@@ -26,6 +26,15 @@
     line-height: 1.6;
     color: var(--text-dark);
     background-color: var(--white);
+    overflow-x: hidden;
+}
+
+.site-page img,
+.site-page iframe,
+.site-page video,
+.site-page canvas,
+.site-page svg {
+    max-width: 100%;
 }
 
 body.account-page {

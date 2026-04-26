@@ -1165,7 +1165,7 @@ if (file_exists($headerPath)) {
                     <?php if (isset($errors['accept_terms'])): ?><span class="error"><?= $errors['accept_terms'] ?></span><?php endif; ?>
                 </div>
 
-                <button type="submit" class="btn-primary"><span data-translate="checkoutPlaceOrder">Place Order</span> &bull; &euro;<span id="placeOrderTotal"><?= number_format($displayTotal,2) ?></span></button>
+                <button type="submit" class="btn-primary"><span data-translate="checkoutPlaceOrder">Continue to Payment</span> &bull; &euro;<span id="placeOrderTotal"><?= number_format($displayTotal,2) ?></span></button>
             </form>
         </div>
 
@@ -1948,4 +1948,3 @@ if (file_exists($footerPath)) {
     echo "</body></html>";
 }
 ?>
-

@@ -707,7 +707,6 @@ if ($szRes) {
     }
     unset($sizes);
 }
-// Merge sizes from products.availableSizes for products with no variation-based sizes
 foreach ($products as $p) {
     $pid = (int)$p['productID'];
     if (!isset($sizesByProduct[$pid]) && !empty($p['availableSizes'])) {
@@ -742,8 +741,6 @@ foreach ($products as $p) {
         position: relative;
         overflow: hidden;
     }
-    /* Non-active: invisible but rendered so images load in background.
-       display:block overrides Bootstrap's default display:none. */
     .shop-carousel .carousel-item {
         display: block;
         position: absolute;
@@ -751,20 +748,17 @@ foreach ($products as $p) {
         opacity: 0;
         pointer-events: none;
     }
-    /* Active: in normal flow to anchor the container height */
     .shop-carousel .carousel-item.active {
         position: relative;
         opacity: 1;
         pointer-events: auto;
     }
-    /* Prevent Bootstrap from applying its own slide transforms */
     .shop-carousel .carousel-item-next,
     .shop-carousel .carousel-item-prev,
     .shop-carousel .active.carousel-item-start,
     .shop-carousel .active.carousel-item-end {
         transform: none !important;
     }
-    /* Smooth slide animation on hover */
     .shop-carousel .carousel-item.shop-entering,
     .shop-carousel .carousel-item.shop-leaving {
         position: absolute;
@@ -805,7 +799,6 @@ foreach ($products as $p) {
         display: none;
     }
 
-    /* Slide-count dots shown on hover (desktop only) */
     .shop-carousel-dots {
         position: absolute;
         bottom: 7px;
@@ -833,7 +826,15 @@ foreach ($products as $p) {
         transform: scale(1.3);
     }
     @media (hover: none), (pointer: coarse) {
-        .shop-carousel-dots { display: none; }
+        .shop-carousel-dots {
+            display: flex;
+            opacity: 1;
+            bottom: 8px;
+        }
+        .shop-carousel-dot {
+            background: rgba(255,255,255,0.72);
+            box-shadow: 0 1px 3px rgba(17,24,39,0.22);
+        }
     }
     .shop-size-pills {
         display: flex;
