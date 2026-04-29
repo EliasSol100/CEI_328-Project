@@ -143,6 +143,7 @@ $sellingFastSql = "
     SELECT
         p.productID,
         p.nameEN,
+        p.nameGR,
         p.basePrice,
         p.inventory,
         p.cartStatus,
