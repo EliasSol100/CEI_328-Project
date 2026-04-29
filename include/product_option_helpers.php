@@ -43,6 +43,9 @@ if (!function_exists('app_product_options_ensure_schema')) {
                 'customColorLabel2GR' => "ALTER TABLE products ADD COLUMN customColorLabel2GR VARCHAR(120) NULL AFTER customColorLabel1GR",
                 'customColorHelpText' => "ALTER TABLE products ADD COLUMN customColorHelpText VARCHAR(255) NULL AFTER customColorLabel2GR",
                 'customColorHelpTextGR' => "ALTER TABLE products ADD COLUMN customColorHelpTextGR VARCHAR(255) NULL AFTER customColorHelpText",
+                'availableSizes' => "ALTER TABLE products ADD COLUMN availableSizes TEXT NULL DEFAULT NULL",
+                'productWarningEN' => "ALTER TABLE products ADD COLUMN productWarningEN TEXT NULL AFTER availableSizes",
+                'productWarningGR' => "ALTER TABLE products ADD COLUMN productWarningGR TEXT NULL AFTER productWarningEN",
             ];
 
             foreach ($productColumns as $columnName => $sql) {
@@ -79,6 +82,49 @@ if (!function_exists('app_product_options_ensure_schema')) {
                      ELSE 'small'
                  END
                  WHERE shippingSizeCode IS NULL OR TRIM(shippingSizeCode) = ''"
+            );
+            mysqli_query(
+                $conn,
+                "UPDATE products SET availableSizes = 'Small,Medium,Large'
+                 WHERE availableSizes IS NULL OR TRIM(availableSizes) = ''"
+            );
+        }
+
+        if (app_product_options_table_exists($conn, 'colors')) {
+            $addedColorHexColumn = false;
+            if (!app_product_options_column_exists($conn, 'colors', 'hexCode')) {
+                mysqli_query($conn, "ALTER TABLE colors ADD COLUMN hexCode VARCHAR(7) NOT NULL DEFAULT '#ece6f6' AFTER colorName");
+                $addedColorHexColumn = true;
+            }
+
+            $seedColorHexSql = "UPDATE colors
+                SET hexCode = CASE LOWER(TRIM(colorName))
+                    WHEN 'sunshine yellow' THEN '#f8ea75'
+                    WHEN 'honey blend' THEN '#dda157'
+                    WHEN 'bluebell' THEN '#cad7ff'
+                    WHEN 'sugar pink' THEN '#f5dce8'
+                    WHEN 'lavender mist' THEN '#d6c9ff'
+                    WHEN 'blush pink' THEN '#ffdbe5'
+                    WHEN 'lemon yellow' THEN '#f8ea75'
+                    WHEN 'deep plum' THEN '#5b2a63'
+                    WHEN 'berry plum' THEN '#99566a'
+                    WHEN 'soft lilac' THEN '#d9dcfb'
+                    WHEN 'forest sage' THEN '#7f9d88'
+                    WHEN 'sky mist' THEN '#dce8ff'
+                    WHEN 'lavender cloud' THEN '#d7c5ff'
+                    WHEN 'mint frost' THEN '#d6f0ea'
+                    WHEN 'peach sorbet' THEN '#ffca9a'
+                    WHEN 'seafoam' THEN '#bce7da'
+                    WHEN 'lavender pop' THEN '#c8aaf8'
+                    WHEN 'snow white' THEN '#f4f3fb'
+                    WHEN 'warm oatmeal' THEN '#ccb594'
+                    ELSE '#ece6f6'
+                END";
+            mysqli_query(
+                $conn,
+                $addedColorHexColumn
+                    ? $seedColorHexSql
+                    : $seedColorHexSql . " WHERE hexCode IS NULL OR TRIM(hexCode) = ''"
             );
         }
 

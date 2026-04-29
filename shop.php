@@ -520,6 +520,7 @@ $sql = "
                )
            END AS totalSales,
            p.isSellingFast,
+           p.availableSizes,
            GROUP_CONCAT(ph.imageID ORDER BY ph.imageID ASC SEPARATOR ',') AS imageIDs
     FROM products p
     LEFT JOIN photos ph ON ph.productID = p.productID
@@ -684,6 +685,37 @@ if ($vpRes) {
         }
     }
 }
+
+$sizesByProduct = [];
+$szRes = $conn->query("
+    SELECT DISTINCT productID, size
+    FROM product_variations
+    WHERE size IS NOT NULL AND TRIM(size) != ''
+    ORDER BY productID ASC
+");
+if ($szRes) {
+    $sizeOrderMap = array_flip(['XS', 'S', 'Small', 'M', 'Medium', 'L', 'Large', 'XL', 'XXL', 'One Size', '2XL', '3XL']);
+    while ($row = $szRes->fetch_assoc()) {
+        $sizesByProduct[(int)$row['productID']][] = (string)$row['size'];
+    }
+    foreach ($sizesByProduct as $pid => &$sizes) {
+        usort($sizes, static function (string $a, string $b) use ($sizeOrderMap): int {
+            $ai = $sizeOrderMap[$a] ?? 999;
+            $bi = $sizeOrderMap[$b] ?? 999;
+            return $ai !== $bi ? $ai <=> $bi : strcasecmp($a, $b);
+        });
+    }
+    unset($sizes);
+}
+foreach ($products as $p) {
+    $pid = (int)$p['productID'];
+    if (!isset($sizesByProduct[$pid]) && !empty($p['availableSizes'])) {
+        $infoSizes = array_values(array_filter(array_map('trim', explode(',', $p['availableSizes'])), 'strlen'));
+        if (!empty($infoSizes)) {
+            $sizesByProduct[$pid] = $infoSizes;
+        }
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -702,19 +734,53 @@ if ($vpRes) {
     .shop-carousel .carousel-item {
         height: 100%;
     }
+    .shop-carousel {
+        position: relative;
+    }
+    .shop-carousel .carousel-inner {
+        position: relative;
+        overflow: hidden;
+    }
     .shop-carousel .carousel-item {
-        display: none;
-        transition: none !important;
-        transform: none !important;
+        display: block;
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        pointer-events: none;
     }
     .shop-carousel .carousel-item.active {
-        display: block;
+        position: relative;
+        opacity: 1;
+        pointer-events: auto;
     }
     .shop-carousel .carousel-item-next,
     .shop-carousel .carousel-item-prev,
     .shop-carousel .active.carousel-item-start,
     .shop-carousel .active.carousel-item-end {
         transform: none !important;
+    }
+    .shop-carousel .carousel-item.shop-entering,
+    .shop-carousel .carousel-item.shop-leaving {
+        position: absolute;
+        inset: 0;
+        opacity: 1;
+        pointer-events: none;
+    }
+    .shop-carousel .carousel-item.shop-entering {
+        animation: shopSlideIn 0.42s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+        z-index: 2;
+    }
+    .shop-carousel .carousel-item.shop-leaving {
+        animation: shopSlideOut 0.42s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+        z-index: 1;
+    }
+    @keyframes shopSlideIn {
+        from { transform: translateX(100%); }
+        to   { transform: translateX(0);    }
+    }
+    @keyframes shopSlideOut {
+        from { transform: translateX(0);     }
+        to   { transform: translateX(-100%); }
     }
     .shop-carousel .carousel-item img {
         width: 100%;
@@ -730,13 +796,62 @@ if ($vpRes) {
     }
     .shop-carousel .carousel-control-prev,
     .shop-carousel .carousel-control-next {
-        width: 30px;
+        display: none;
+    }
+
+    .shop-carousel-dots {
+        position: absolute;
+        bottom: 7px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 5px;
         opacity: 0;
         transition: opacity 0.2s;
+        pointer-events: none;
+        z-index: 5;
     }
-    .shop-product-card:hover .shop-carousel .carousel-control-prev,
-    .shop-product-card:hover .shop-carousel .carousel-control-next {
-        opacity: 0.7;
+    .shop-product-card:hover .shop-carousel-dots {
+        opacity: 1;
+    }
+    .shop-carousel-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.55);
+        transition: background 0.2s, transform 0.2s;
+    }
+    .shop-carousel-dot.is-active {
+        background: #fff;
+        transform: scale(1.3);
+    }
+    @media (hover: none), (pointer: coarse) {
+        .shop-carousel-dots {
+            display: flex;
+            opacity: 1;
+            bottom: 8px;
+        }
+        .shop-carousel-dot {
+            background: rgba(255,255,255,0.72);
+            box-shadow: 0 1px 3px rgba(17,24,39,0.22);
+        }
+    }
+    .shop-size-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin: 8px 0 4px;
+    }
+    .shop-size-pill {
+        font-size: 11px;
+        font-weight: 500;
+        color: #6b5b8a;
+        background: #f3eeff;
+        border: 1px solid #ddd2f5;
+        border-radius: 20px;
+        padding: 2px 10px;
+        line-height: 1.6;
+        white-space: nowrap;
     }
     .filter-color-dot {
         display: inline-block;
@@ -991,12 +1106,11 @@ if ($vpRes) {
                                         <?php endforeach; ?>
                                     </div>
                                     <?php if (count($allSlides) > 1): ?>
-                                    <button class="carousel-control-prev" type="button" data-bs-target="#carousel-<?= $pid ?>" data-bs-slide="prev">
-                                        <span class="carousel-control-prev-icon"></span>
-                                    </button>
-                                    <button class="carousel-control-next" type="button" data-bs-target="#carousel-<?= $pid ?>" data-bs-slide="next">
-                                        <span class="carousel-control-next-icon"></span>
-                                    </button>
+                                    <div class="shop-carousel-dots" aria-hidden="true">
+                                        <?php for ($di = 0; $di < count($allSlides); $di++): ?>
+                                        <span class="shop-carousel-dot<?= $di === 0 ? ' is-active' : '' ?>"></span>
+                                        <?php endfor; ?>
+                                    </div>
                                     <?php endif; ?>
                                 </div>
                                 <?php endif; ?>
@@ -1036,6 +1150,14 @@ if ($vpRes) {
                                 <div class="shop-review-count" style="margin-top:4px;display:block;">
                                     <span<?= app_translate_text_attrs((int)($p['totalSales'] ?? 0) . ' sold', (int)($p['totalSales'] ?? 0) . ' πωλήθηκαν') ?>><?= (int)($p['totalSales'] ?? 0) ?> sold</span>
                                 </div>
+                                <?php $cardSizes = $sizesByProduct[$pid] ?? []; ?>
+                                <?php if (!empty($cardSizes)): ?>
+                                <div class="shop-size-pills">
+                                    <?php foreach ($cardSizes as $sz): ?>
+                                    <span class="shop-size-pill"><?= htmlspecialchars($sz) ?></span>
+                                    <?php endforeach; ?>
+                                </div>
+                                <?php endif; ?>
                                 <button class="shop-atc-btn"
                                         data-product-id="<?= $pid ?>"
                                         data-has-variants="<?= (int)$p['hasVariants'] ?>"

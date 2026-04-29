@@ -106,6 +106,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         if ($dobDate instanceof DateTime && $dobDate > $today) {
             $errors[] = "Date of birth cannot be in the future.";
         }
+        if ($dobDate instanceof DateTime && (int)$dobDate->format('Y') < 1900) {
+            $errors[] = "Date of birth year cannot be before 1900.";
+        }
     }
 
     if (!app_is_valid_username($username)) {
@@ -114,6 +117,16 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
     if (!preg_match('/^\+?[0-9]{7,15}$/', $phone)) {
         $errors[] = "Phone number is not valid!";
+    } elseif (preg_match('/^\+357/', $phone)) {
+        $nationalNumber = preg_replace('/^\+357/', '', $phone);
+        if (!preg_match('/^[0-9]{8}$/', $nationalNumber)) {
+            $errors[] = "Cyprus phone numbers must have exactly 8 digits.";
+        }
+    }
+
+    $allowedCountries = ['Greece', 'Cyprus', 'Ελλάδα', 'Κύπρος'];
+    if (!empty($country) && !in_array($country, $allowedCountries, true)) {
+        $errors[] = "We currently ship only to Greece and Cyprus.";
     }
 
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -437,6 +450,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                                name="dob"
                                class="form-control"
                                id="dob"
+                               min="1900-01-01"
                                max="<?= date('Y-m-d') ?>"
                                value="<?= htmlspecialchars(formatProfileDobInputValue($_POST['dob'] ?? '')) ?>"
                                required>
@@ -480,7 +494,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                             <li id="check-length"><span class="text-danger">✖</span> At least 8 characters</li>
                             <li id="check-uppercase"><span class="text-danger">✖</span> At least 1 uppercase letter</li>
                             <li id="check-number"><span class="text-danger">✖</span> At least 1 number</li>
-                            <li id="check-symbol"><span class="text-danger">✖</span> At least 1 English keyboard symbol</li>
+                            <li id="check-symbol"><span class="text-danger">✖</span> At least 1 symbol</li>
                         </ul>
                     </div>
 
@@ -603,7 +617,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                 return false;
             }
             if (!isValidDobInput(dobVal)) {
-                showDobError("Please choose a valid date that is not in the future.");
+                showDobError("Please choose a valid date of birth.");
                 return false;
             }
             clearDobError();
@@ -618,7 +632,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
             }
         });
 
-        $("#country").countrySelect({ defaultCountry: "cy" });
+        $("#country").countrySelect({ defaultCountry: "cy", onlyCountries: ["cy", "gr"] });
 
         const iti = window.intlTelInput(document.querySelector("#phone"), {
             separateDialCode: true,
@@ -701,6 +715,24 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                 if (!validateDobField()) {
                     valid = false;
                 }
+
+                if (typeof iti !== 'undefined') {
+                    if (!iti.isValidNumber()) {
+                        $("#phone").addClass("is-invalid");
+                        $("#phone-error").text("Please enter a valid phone number.").show();
+                        valid = false;
+                    } else {
+                        const fullPhone = iti.getNumber();
+                        if (fullPhone.startsWith('+357')) {
+                            const national = fullPhone.replace('+357', '');
+                            if (!/^[0-9]{8}$/.test(national)) {
+                                $("#phone").addClass("is-invalid");
+                                $("#phone-error").text("Cyprus phone numbers must have exactly 8 digits.").show();
+                                valid = false;
+                            }
+                        }
+                    }
+                }
             }
 
             if (currentStep === 2) {
@@ -763,7 +795,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
             $("#check-length").html((checks.length ? '✅' : '<span class="text-danger">✖</span>') + ' At least 8 characters');
             $("#check-uppercase").html((checks.uppercase ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 uppercase letter');
             $("#check-number").html((checks.number ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 number');
-            $("#check-symbol").html((checks.symbol ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 English keyboard symbol');
+            $("#check-symbol").html((checks.symbol ? '✅' : '<span class="text-danger">✖</span>') + ' At least 1 symbol');
             $("#confirm_password").trigger("input");
         });
 
@@ -789,7 +821,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                 $("#dob-error").hide();
             } else {
                 $(this).addClass("is-invalid");
-                $("#dob-error").text("Please choose a valid date that is not in the future.").show();
+                $("#dob-error").text("Please choose a valid date of birth.").show();
             }
         });
 
@@ -799,8 +831,18 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
             if (!iti.isValidNumber()) {
                 e.preventDefault();
                 $("#phone").addClass("is-invalid");
-                alert("Please enter a valid phone number.");
+                $("#phone-error").text("Please enter a valid phone number.").show();
                 return false;
+            }
+
+            if (fullPhone.startsWith('+357')) {
+                const national = fullPhone.replace('+357', '');
+                if (!/^[0-9]{8}$/.test(national)) {
+                    e.preventDefault();
+                    $("#phone").addClass("is-invalid");
+                    $("#phone-error").text("Cyprus phone numbers must have exactly 8 digits.").show();
+                    return false;
+                }
             }
 
             $('#phone').val(fullPhone);
@@ -850,7 +892,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
             });
         });
 
-        showStep(currentStep); // initialize first step
+        showStep(currentStep);
     });
     </script>
 </body>

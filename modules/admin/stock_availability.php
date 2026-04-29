@@ -3,9 +3,12 @@ require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/../../include/security.php';
 require_once __DIR__ . '/../../include/image_storage.php';
+require_once __DIR__ . '/../../include/product_option_helpers.php';
 
 $current_page = 'stock_availability';
 $flash = '';
+
+app_product_options_ensure_schema($conn);
 
 function ensureProductSalesOverridesSchema(mysqli $conn): void {
     static $checked = false;
@@ -45,32 +48,6 @@ function ensureProductSalesOverridesSchema(mysqli $conn): void {
 
 ensureProductSalesOverridesSchema($conn);
 
-function stockColourSwatchHex(string $colorName): string
-{
-    $map = [
-        'sunshine yellow' => '#f8ea75',
-        'honey blend' => '#dda157',
-        'bluebell' => '#cad7ff',
-        'sugar pink' => '#f5dce8',
-        'lavender mist' => '#d6c9ff',
-        'blush pink' => '#ffdbe5',
-        'lemon yellow' => '#f8ea75',
-        'deep plum' => '#5b2a63',
-        'berry plum' => '#99566a',
-        'soft lilac' => '#d9dcfb',
-        'forest sage' => '#7f9d88',
-        'sky mist' => '#dce8ff',
-        'lavender cloud' => '#d7c5ff',
-        'mint frost' => '#d6f0ea',
-        'peach sorbet' => '#ffca9a',
-        'seafoam' => '#bce7da',
-        'lavender pop' => '#c8aaf8',
-        'snow white' => '#f4f3fb',
-        'warm oatmeal' => '#ccb594',
-    ];
-    $key = strtolower(trim($colorName));
-    return $map[$key] ?? '#ece6f6';
-}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
@@ -91,11 +68,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $colorID  = (int)$_POST['colorID'];
         $stock    = (int)$_POST['globalInventoryAvailable'];
         $isActive = (int)$_POST['isActive'];
+        $hexRaw   = trim($_POST['hexCode'] ?? '');
+        $hexCode  = preg_match('/^#[0-9a-fA-F]{6}$/', $hexRaw) ? $hexRaw : '#ece6f6';
 
-        $stmt = mysqli_prepare($conn, "UPDATE colors SET globalInventoryAvailable=?, isActive=? WHERE colorID=?");
-        mysqli_stmt_bind_param($stmt, 'iii', $stock, $isActive, $colorID);
+        $stmt = mysqli_prepare($conn, "UPDATE colors SET globalInventoryAvailable=?, isActive=?, hexCode=? WHERE colorID=?");
+        mysqli_stmt_bind_param($stmt, 'iisi', $stock, $isActive, $hexCode, $colorID);
         mysqli_stmt_execute($stmt);
-        $flash = 'ok:Colour stock updated.';
+
+        $submittedTypeIDs = array_filter(array_map('intval', $_POST['typeIDs'] ?? []));
+        $delStmt = mysqli_prepare($conn, "DELETE FROM color_yarn_types WHERE colorID=?");
+        mysqli_stmt_bind_param($delStmt, 'i', $colorID);
+        mysqli_stmt_execute($delStmt);
+        mysqli_stmt_close($delStmt);
+        foreach ($submittedTypeIDs as $typeID) {
+            $insStmt = mysqli_prepare($conn, "INSERT IGNORE INTO color_yarn_types (colorID, typeID) VALUES (?,?)");
+            mysqli_stmt_bind_param($insStmt, 'ii', $colorID, $typeID);
+            mysqli_stmt_execute($insStmt);
+            mysqli_stmt_close($insStmt);
+        }
+
+        $flash = 'ok:Colour updated.';
     }
 
     if ($action === 'update_sales_override') {
@@ -213,10 +205,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flash = 'err:' . implode(' ', $errors);
         } else {
 
+            $hexRaw  = trim($_POST['hexCode'] ?? '');
+            $hexCode = preg_match('/^#[0-9a-fA-F]{6}$/', $hexRaw) ? $hexRaw : '#ece6f6';
+
             $stmt = mysqli_prepare($conn,
-                "INSERT IGNORE INTO colors (colorID, colorName, globalInventoryAvailable, isActive)
-                 VALUES (?, ?, ?, 1)");
-            mysqli_stmt_bind_param($stmt, 'isi', $colorID, $colorName, $stock);
+                "INSERT INTO colors (colorID, colorName, hexCode, globalInventoryAvailable, isActive)
+                 VALUES (?, ?, ?, ?, 1)
+                 ON DUPLICATE KEY UPDATE hexCode = VALUES(hexCode)");
+            mysqli_stmt_bind_param($stmt, 'issi', $colorID, $colorName, $hexCode, $stock);
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
 
@@ -310,7 +306,8 @@ if ($r) {
 $colours = [];
 $r = mysqli_query($conn, "
     SELECT c.*,
-           GROUP_CONCAT(DISTINCT yt.typeName ORDER BY yt.typeName SEPARATOR ', ') AS typeNames
+           GROUP_CONCAT(DISTINCT yt.typeName ORDER BY yt.typeName SEPARATOR ', ') AS typeNames,
+           GROUP_CONCAT(DISTINCT cyt.typeID ORDER BY cyt.typeID SEPARATOR ',') AS typeIDs
     FROM colors c
     LEFT JOIN color_yarn_types cyt ON cyt.colorID = c.colorID
     LEFT JOIN yarn_types yt ON yt.typeID = cyt.typeID
@@ -319,6 +316,7 @@ $r = mysqli_query($conn, "
 ");
 if ($r) {
     while ($row = mysqli_fetch_assoc($r)) {
+        $row['typeIDsArray'] = $row['typeIDs'] ? array_map('intval', explode(',', $row['typeIDs'])) : [];
         $colours[] = $row;
     }
 }
@@ -502,7 +500,7 @@ $statusBadge = [
           <?php else: ?>
           <div id="colour-assign-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px">
             <?php foreach ($colours as $c): ?>
-            <?php $swatchHex = stockColourSwatchHex((string)($c['colorName'] ?? '')); ?>
+            <?php $swatchHex = preg_match('/^#[0-9a-fA-F]{6}$/', (string)($c['hexCode'] ?? '')) ? $c['hexCode'] : '#ece6f6'; ?>
             <label class="colour-assign-card" data-color-id="<?= $c['colorID'] ?>"
                    style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 8px;border:2px solid #e5e7eb;border-radius:10px;cursor:pointer;user-select:none;transition:border-color .15s">
               <span class="colour-swatch-preview is-large" style="background:<?= htmlspecialchars($swatchHex) ?>"></span>
@@ -524,7 +522,7 @@ $statusBadge = [
         </p>
         <form method="POST" enctype="multipart/form-data" id="add-color-form">
           <input type="hidden" name="action" value="add_color">
-          <div style="display:grid;grid-template-columns:120px 1fr 1fr 120px;gap:12px;align-items:end;flex-wrap:wrap">
+          <div style="display:grid;grid-template-columns:100px 1fr 1fr 80px 80px;gap:12px;align-items:end;flex-wrap:wrap">
 
             <div>
               <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Color ID *</label>
@@ -550,9 +548,16 @@ $statusBadge = [
             </div>
 
             <div>
-              <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Stock (units)</label>
+              <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Stock</label>
               <input type="number" name="globalInventoryAvailable" value="50" min="0"
                 class="form-input" style="width:100%">
+            </div>
+
+            <div>
+              <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Colour</label>
+              <input type="color" name="hexCode" value="#ece6f6"
+                title="Colour swatch hex"
+                style="width:100%;height:38px;padding:2px;border:1px solid #d1d5db;border-radius:6px;cursor:pointer">
             </div>
           </div>
 
@@ -583,7 +588,15 @@ $statusBadge = [
       </div>
 
       <div class="card">
-        <div class="card-title">Yarn Colour Inventory</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:6px">
+          <div class="card-title" style="margin:0">Yarn Colour Inventory</div>
+          <div style="position:relative;width:220px">
+            <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#9ca3af;font-size:13px;pointer-events:none"></i>
+            <input type="text" id="colour-inventory-search" placeholder="Enter colour ID or name…"
+              style="width:100%;padding:7px 10px 7px 30px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;box-sizing:border-box"
+              autocomplete="off">
+          </div>
+        </div>
         <p class="text-sm text-muted mb-4">
           Track how many units of each yarn colour you have in stock. Disabling a colour globally removes it from all product pages.
         </p>
@@ -591,31 +604,26 @@ $statusBadge = [
           <thead>
             <tr>
               <th style="width:52px"></th>
-              <th style="width:70px">ID</th>
+              <th style="width:60px">ID</th>
               <th>Colour Name</th>
-              <th>Yarn Type(s)</th>
-              <th style="width:110px">Stock (units)</th>
-              <th style="width:130px">Global Status</th>
-              <th>Update</th>
+              <th>Category</th>
+              <th style="width:100px">Stock</th>
+              <th style="width:110px">Status</th>
+              <th style="width:120px">Quick Save</th>
+              <th style="width:60px"></th>
             </tr>
           </thead>
           <tbody>
             <?php foreach ($colours as $c): ?>
-            <?php $swatchHex = stockColourSwatchHex((string)($c['colorName'] ?? '')); ?>
+            <?php $swatchHex = preg_match('/^#[0-9a-fA-F]{6}$/', (string)($c['hexCode'] ?? '')) ? $c['hexCode'] : '#ece6f6'; ?>
             <tr>
-
               <td style="text-align:center;vertical-align:middle">
                 <span class="colour-swatch-preview" style="background:<?= htmlspecialchars($swatchHex) ?>"></span>
               </td>
-
               <td class="text-muted" style="font-size:13px"><?= (int)$c['colorID'] ?></td>
-
               <td class="font-600"><?= htmlspecialchars($c['colorName']) ?></td>
-
               <td class="text-muted" style="font-size:12px"><?= htmlspecialchars($c['typeNames'] ?? '—') ?></td>
-
               <td><?= (int)$c['globalInventoryAvailable'] ?></td>
-
               <td>
                 <?php if ($c['isActive']): ?>
                   <span class="badge badge-green">Available</span>
@@ -623,32 +631,98 @@ $statusBadge = [
                   <span class="badge badge-red">Unavailable</span>
                 <?php endif; ?>
               </td>
-
               <td>
-                <form method="POST" style="display:flex;gap:8px;align-items:center" data-ignore-unsaved-warning data-stock-warning>
+                <form method="POST" style="display:flex;gap:6px;align-items:center" data-ignore-unsaved-warning data-stock-warning>
                   <input type="hidden" name="action"  value="update_color_stock">
                   <input type="hidden" name="colorID" value="<?= $c['colorID'] ?>">
-                  <input
-                    type="number"
-                    name="globalInventoryAvailable"
-                    value="<?= (int)$c['globalInventoryAvailable'] ?>"
-                    min="0"
-                    class="form-input"
-                    style="width:80px;padding:6px 8px"
-                  >
-                  <select name="isActive" class="form-input" style="width:130px">
+                  <?php foreach ($c['typeIDsArray'] as $tid): ?>
+                  <input type="hidden" name="typeIDs[]" value="<?= (int)$tid ?>">
+                  <?php endforeach; ?>
+                  <input type="number" name="globalInventoryAvailable"
+                    value="<?= (int)$c['globalInventoryAvailable'] ?>" min="0"
+                    class="form-input" style="width:70px;padding:5px 7px">
+                  <select name="isActive" class="form-input" style="width:110px;padding:5px 7px">
                     <option value="1" <?= $c['isActive'] ? 'selected' : '' ?>>Available</option>
                     <option value="0" <?= !$c['isActive'] ? 'selected' : '' ?>>Unavailable</option>
                   </select>
-                  <button type="submit" class="btn-primary" style="padding:6px 12px;font-size:12px">
-                    <i class="fas fa-save"></i> Save
+                  <button type="submit" class="btn-primary" style="padding:5px 10px;font-size:12px">
+                    <i class="fas fa-save"></i>
                   </button>
                 </form>
+              </td>
+              <td style="text-align:center">
+                <button type="button" class="btn-secondary colour-edit-btn"
+                  style="padding:5px 10px;font-size:12px"
+                  data-color-id="<?= (int)$c['colorID'] ?>"
+                  data-color-name="<?= htmlspecialchars($c['colorName'], ENT_QUOTES) ?>"
+                  data-hex="<?= htmlspecialchars($swatchHex, ENT_QUOTES) ?>"
+                  data-stock="<?= (int)$c['globalInventoryAvailable'] ?>"
+                  data-active="<?= (int)$c['isActive'] ?>"
+                  data-type-ids="<?= htmlspecialchars(json_encode($c['typeIDsArray']), ENT_QUOTES) ?>"
+                  title="Edit colour details">
+                  <i class="fas fa-pencil-alt"></i>
+                </button>
               </td>
             </tr>
             <?php endforeach; ?>
           </tbody>
         </table>
+      </div>
+
+      <div id="colour-edit-modal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(17,24,39,.45);align-items:center;justify-content:center">
+        <div style="background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.2);width:min(480px,95vw);padding:28px 28px 24px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+            <h3 style="margin:0;font-size:17px;color:#111827">
+              <span id="modal-swatch" style="display:inline-block;width:20px;height:20px;border-radius:50%;border:2px solid #e5e7eb;vertical-align:middle;margin-right:8px"></span>
+              Edit: <span id="modal-color-name"></span>
+              <span style="font-size:13px;color:#9ca3af;font-weight:400"> #<span id="modal-color-id"></span></span>
+            </h3>
+            <button type="button" id="modal-close" style="background:none;border:none;font-size:20px;color:#6b7280;cursor:pointer;line-height:1">&times;</button>
+          </div>
+
+          <form method="POST" enctype="multipart/form-data" id="colour-edit-form">
+            <input type="hidden" name="action" value="update_color_stock">
+            <input type="hidden" name="colorID" id="modal-input-id">
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
+              <div>
+                <label style="display:block;font-size:13px;font-weight:600;margin-bottom:5px">Stock (units)</label>
+                <input type="number" name="globalInventoryAvailable" id="modal-input-stock"
+                  min="0" class="form-input" style="width:100%">
+              </div>
+              <div>
+                <label style="display:block;font-size:13px;font-weight:600;margin-bottom:5px">Status</label>
+                <select name="isActive" id="modal-input-active" class="form-input" style="width:100%">
+                  <option value="1">Available</option>
+                  <option value="0">Unavailable</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="margin-bottom:16px">
+              <label style="display:block;font-size:13px;font-weight:600;margin-bottom:5px">Colour Swatch</label>
+              <input type="color" name="hexCode" id="modal-input-hex"
+                style="width:60px;height:38px;padding:2px;border:1px solid #d1d5db;border-radius:8px;cursor:pointer">
+            </div>
+
+            <div style="margin-bottom:20px">
+              <label style="display:block;font-size:13px;font-weight:600;margin-bottom:8px">Category (yarn type)</label>
+              <div id="modal-type-checkboxes" style="display:flex;flex-wrap:wrap;gap:8px">
+                <?php foreach ($yarnTypes as $yt): ?>
+                <label style="display:flex;align-items:center;gap:6px;padding:7px 12px;border:1.5px solid #e5e7eb;border-radius:8px;cursor:pointer;font-size:13px;user-select:none" class="modal-type-label">
+                  <input type="checkbox" name="typeIDs[]" value="<?= (int)$yt['typeID'] ?>" class="modal-type-cb" style="width:15px;height:15px;cursor:pointer">
+                  <?= htmlspecialchars($yt['typeName']) ?>
+                </label>
+                <?php endforeach; ?>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:10px;justify-content:flex-end">
+              <button type="button" id="modal-cancel" class="btn-secondary">Cancel</button>
+              <button type="submit" class="btn-primary"><i class="fas fa-save"></i> Save Changes</button>
+            </div>
+          </form>
+        </div>
       </div>
 
     </div>
@@ -785,6 +859,76 @@ document.addEventListener('DOMContentLoaded', function () {
     dirtyForms.clear();
     isSubmitting = true;
   });
+
+  var inventorySearch = document.getElementById('colour-inventory-search');
+  if (inventorySearch) {
+    var inventoryRows = document.querySelectorAll('.data-table tbody tr');
+    inventorySearch.addEventListener('input', function () {
+      var q = this.value.trim().toLowerCase();
+      var count = 0;
+      inventoryRows.forEach(function (row) {
+        var id   = (row.cells[1] ? row.cells[1].textContent.trim() : '');
+        var name = (row.cells[2] ? row.cells[2].textContent.trim().toLowerCase() : '');
+        var show = !q || id === q || name.indexOf(q) !== -1;
+        row.style.display = show ? '' : 'none';
+        if (show) count++;
+      });
+    });
+    inventorySearch.addEventListener('focus', function () {
+      this.style.borderColor = '#6a0dad';
+    });
+    inventorySearch.addEventListener('blur', function () {
+      this.style.borderColor = '#e5e7eb';
+    });
+  }
+
+  var modal       = document.getElementById('colour-edit-modal');
+  var modalForm   = document.getElementById('colour-edit-form');
+  var modalSwatch = document.getElementById('modal-swatch');
+  var modalHexInput = document.getElementById('modal-input-hex');
+
+  function openModal(btn) {
+    var colorId   = btn.dataset.colorId;
+    var colorName = btn.dataset.colorName;
+    var hex       = btn.dataset.hex || '#ece6f6';
+    var stock     = btn.dataset.stock;
+    var active    = btn.dataset.active;
+    var typeIds   = JSON.parse(btn.dataset.typeIds || '[]');
+
+    document.getElementById('modal-color-name').textContent = colorName;
+    document.getElementById('modal-color-id').textContent   = colorId;
+    document.getElementById('modal-input-id').value         = colorId;
+    document.getElementById('modal-input-stock').value      = stock;
+    document.getElementById('modal-input-active').value     = active;
+    modalHexInput.value = hex;
+    modalSwatch.style.background = hex;
+
+    modalForm.querySelectorAll('.modal-type-cb').forEach(function (cb) {
+      cb.checked = typeIds.indexOf(parseInt(cb.value)) !== -1;
+      cb.closest('.modal-type-label').style.borderColor = cb.checked ? '#111827' : '#e5e7eb';
+    });
+
+    modal.style.display = 'flex';
+  }
+
+  document.querySelectorAll('.colour-edit-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () { openModal(btn); });
+  });
+
+  modalHexInput && modalHexInput.addEventListener('input', function () {
+    modalSwatch.style.background = this.value;
+  });
+
+  modalForm && modalForm.querySelectorAll('.modal-type-cb').forEach(function (cb) {
+    cb.addEventListener('change', function () {
+      cb.closest('.modal-type-label').style.borderColor = cb.checked ? '#111827' : '#e5e7eb';
+    });
+  });
+
+  function closeModal() { modal.style.display = 'none'; }
+  document.getElementById('modal-close')  && document.getElementById('modal-close').addEventListener('click', closeModal);
+  document.getElementById('modal-cancel') && document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  modal && modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
 
 });
 </script>

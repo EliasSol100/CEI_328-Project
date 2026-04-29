@@ -3,16 +3,19 @@ require_once __DIR__ . '/includes/auth_check.php';
 require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/../../include/security.php';
 require_once __DIR__ . '/../../include/image_storage.php';
+require_once __DIR__ . '/../../include/product_option_helpers.php';
 require_once __DIR__ . '/../../include/made_to_order_access.php';
 
 $current_page = 'product_management';
 $flash = '';
+const PRODUCT_MGMT_MAX_PRODUCT_PHOTOS = 10;
 
 $sellingFastColumn = mysqli_query($conn, "SHOW COLUMNS FROM products LIKE 'isSellingFast'");
 if ($sellingFastColumn && mysqli_num_rows($sellingFastColumn) === 0) {
     mysqli_query($conn, "ALTER TABLE products ADD COLUMN isSellingFast TINYINT(1) NOT NULL DEFAULT 0");
 }
 ensureMadeToOrderProductSchema($conn);
+app_product_options_ensure_schema($conn);
 
 function productMgmtEnsurePhotoStorageSchema(mysqli $conn): void
 {
@@ -144,6 +147,31 @@ function productMgmtReadUploadedImageBlob(array $files, int $index): ?string
     return app_image_optimize_photo_blob_for_storage($photoData, 1400, 1400, 78);
 }
 
+function productMgmtNormalizeProductWarning(string $value): ?string
+{
+    $value = trim(str_replace(["\r\n", "\r"], "\n", $value));
+    if ($value === '') {
+        return null;
+    }
+
+    return mb_substr($value, 0, 2500);
+}
+
+function productMgmtSaveProductWarning(mysqli $conn, int $productID, ?string $warningEN, ?string $warningGR): void
+{
+    if ($productID <= 0) {
+        return;
+    }
+
+    $stmt = mysqli_prepare($conn, "UPDATE products SET productWarningEN = ?, productWarningGR = ? WHERE productID = ?");
+    if (!$stmt) {
+        return;
+    }
+    mysqli_stmt_bind_param($stmt, 'ssi', $warningEN, $warningGR, $productID);
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $action = $_POST['action'] ?? '';
@@ -166,6 +194,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
+    if ($action === 'update_warning_message') {
+        $productID = (int)($_POST['productID'] ?? 0);
+        $warningEN = productMgmtNormalizeProductWarning((string)($_POST['productWarningEN'] ?? ''));
+        $warningGR = productMgmtNormalizeProductWarning((string)($_POST['productWarningGR'] ?? ''));
+
+        if ($productID > 0) {
+            productMgmtSaveProductWarning($conn, $productID, $warningEN, $warningGR);
+            $flash = 'ok:Product warning message updated.';
+        } else {
+            $flash = 'error:Choose a product before saving a warning message.';
+        }
+
+        $q2 = trim((string)($_POST['q'] ?? ''));
+        $sf2 = trim((string)($_POST['status_filter'] ?? ''));
+        $qs = http_build_query(array_filter(['q' => $q2, 'status_filter' => $sf2, 'flash' => $flash]));
+        header("Location: product_management.php" . ($qs !== '' ? '?' . $qs : ''));
+        exit;
+    }
+
     if ($action === 'add' || $action === 'edit') {
         $nameEN   = trim($_POST['nameEN']   ?? '');
         $nameGR   = trim($_POST['nameGR']   ?? '');
@@ -179,6 +226,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $sku      = trim($_POST['sku']      ?? '');
         $isSellingFast = isset($_POST['isSellingFast']) ? 1 : 0;
         $privateCustomerEmail = normalizeCustomerEmail((string)($_POST['privateCustomerEmail'] ?? ''));
+        $hasWarningPost = array_key_exists('productWarningEN', $_POST) || array_key_exists('productWarningGR', $_POST);
+        $productWarningEN = productMgmtNormalizeProductWarning((string)($_POST['productWarningEN'] ?? ''));
+        $productWarningGR = productMgmtNormalizeProductWarning((string)($_POST['productWarningGR'] ?? ''));
 
         if ($status === 'made_to_order' && ($privateCustomerEmail === '' || !filter_var($privateCustomerEmail, FILTER_VALIDATE_EMAIL))) {
             $flash = 'error:Made to Order products require a valid customer email.';
@@ -198,16 +248,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $privateAccessToken = $status === 'made_to_order' ? generateMadeToOrderAccessToken() : '';
             $privateLinkSentAt = $status === 'made_to_order' ? date('Y-m-d H:i:s') : null;
 
+            $defaultSizes = 'Small,Medium,Large';
             $stmt = mysqli_prepare(
                 $conn,
                 "INSERT INTO products
-                 (sku, nameEN, nameGR, descriptionEN, descriptionGR, basePrice, costPrice, inventory, cartStatus, category, isSellingFast, privateCustomerEmail, privateAccessToken, privateLinkSentAt)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                 (sku, nameEN, nameGR, descriptionEN, descriptionGR, basePrice, costPrice, inventory, cartStatus, category, isSellingFast, privateCustomerEmail, privateAccessToken, privateLinkSentAt, availableSizes)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             );
 
             mysqli_stmt_bind_param(
                 $stmt,
-                'sssssddississs',
+                'sssssddississss',
                 $sku,
                 $nameEN,
                 $nameGR,
@@ -221,15 +272,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $isSellingFast,
                 $privateCustomerEmail,
                 $privateAccessToken,
-                $privateLinkSentAt
+                $privateLinkSentAt,
+                $defaultSizes
             );
             mysqli_stmt_execute($stmt);
             $newProductID = mysqli_insert_id($conn);
+            if ($hasWarningPost) {
+                productMgmtSaveProductWarning($conn, (int)$newProductID, $productWarningEN, $productWarningGR);
+            }
 
             if ($newProductID && isset($_FILES['photos']) && is_array($_FILES['photos']['tmp_name'])) {
                 $added = 0;
                 foreach ($_FILES['photos']['tmp_name'] as $idx => $tmpName) {
-                    if ($added >= 4) break;
+                    if ($added >= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS) break;
                     if ($_FILES['photos']['error'][$idx] !== UPLOAD_ERR_OK) continue;
                     $photoData = productMgmtReadUploadedImageBlob($_FILES['photos'], (int)$idx);
                     if ($photoData === null) continue;
@@ -322,6 +377,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $id
             );
             mysqli_stmt_execute($stmt);
+            if ($hasWarningPost) {
+                productMgmtSaveProductWarning($conn, $id, $productWarningEN, $productWarningGR);
+            }
+
+            $rawSizesPost = array_values(array_filter(
+                array_map('trim', explode(',', (string)($_POST['availableSizes'] ?? ''))),
+                'strlen'
+            ));
+            $availableSizesSave = !empty($rawSizesPost)
+                ? implode(',', array_unique($rawSizesPost))
+                : 'Small,Medium,Large';
+            $szSaveStmt = mysqli_prepare($conn, "UPDATE products SET availableSizes = ? WHERE productID = ?");
+            if ($szSaveStmt) {
+                mysqli_stmt_bind_param($szSaveStmt, 'si', $availableSizesSave, $id);
+                mysqli_stmt_execute($szSaveStmt);
+                mysqli_stmt_close($szSaveStmt);
+            }
 
             if (isset($_FILES['photos']) && is_array($_FILES['photos']['tmp_name'])) {
                 $existing = 0;
@@ -334,7 +406,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $existing = (int)($cntRow['cnt'] ?? 0);
                     mysqli_stmt_close($cntStmt);
                 }
-                $canAdd   = max(0, 4 - $existing);
+                $canAdd   = max(0, PRODUCT_MGMT_MAX_PRODUCT_PHOTOS - $existing);
                 $added    = 0;
                 foreach ($_FILES['photos']['tmp_name'] as $idx => $tmpName) {
                     if ($added >= $canAdd) break;
@@ -642,6 +714,14 @@ if ($r) {
     }
 }
 
+$productWarningsByProduct = [];
+foreach ($products as $productRow) {
+    $productWarningsByProduct[(int)$productRow['productID']] = [
+        'en' => (string)($productRow['productWarningEN'] ?? ''),
+        'gr' => (string)($productRow['productWarningGR'] ?? ''),
+    ];
+}
+
 $categories = ['Animals','Blankets','Bags','Decor','Dolls'];
 
 $statuses = [
@@ -837,6 +917,42 @@ $statusFilterOptions = [
       </div>
 
       <div class="card" style="margin-top:24px">
+        <div class="card-title">Edit Product Warning Box</div>
+        <p class="text-sm text-muted" style="margin-bottom:20px">
+          Edit the warning box shown on each product page. Leave both messages blank to use the default product warnings.
+        </p>
+        <form method="POST" data-ignore-unsaved-warning>
+          <input type="hidden" name="action" value="update_warning_message">
+          <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
+          <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
+          <div class="form-group" style="max-width:420px">
+            <label class="form-label">Product</label>
+            <select id="warning-product" name="productID" class="form-input" onchange="pmWarningLoad()" required>
+              <option value="">— Select product —</option>
+              <?php foreach ($products as $p): ?>
+                <option value="<?= (int)$p['productID'] ?>"><?= htmlspecialchars($p['nameEN']) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label class="form-label">Warning Message (EN)</label>
+              <textarea id="warning-en" name="productWarningEN" class="form-input" rows="5" maxlength="2500" placeholder="One warning per line"></textarea>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Warning Message (GR)</label>
+              <textarea id="warning-gr" name="productWarningGR" class="form-input" rows="5" maxlength="2500" placeholder="One warning per line"></textarea>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end">
+            <button type="submit" class="btn-save">
+              <i class="fas fa-save"></i> Save Warning Message
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card" style="margin-top:24px">
         <div class="card-title">Product Colour Photos</div>
         <p class="text-sm text-muted" style="margin-bottom:20px">Upload product photos per colour. These appear on the storefront when the customer selects a colour.</p>
 
@@ -947,8 +1063,8 @@ $statusFilterOptions = [
       <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
       <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
       <div class="form-group">
-        <label class="form-label">Product Photos <span class="text-muted">(up to 4)</span></label>
-        <input type="file" name="photos[]" class="form-input" accept="image/*" multiple>
+        <label class="form-label">Product Photos <span class="text-muted">(up to <?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS ?>)</span></label>
+        <input type="file" name="photos[]" class="form-input" accept="image/*" multiple data-product-photo-input data-photo-slots="<?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS ?>">
         <span class="form-hint">Hold Ctrl/Cmd to select multiple photos. Uploaded product photos are optimized and stored as JPG automatically.</span>
       </div>
       <div class="form-grid-2">
@@ -1046,7 +1162,7 @@ $statusFilterOptions = [
       <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
       <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
       <div class="form-group">
-        <label class="form-label">Product Photos <span class="text-muted">(up to 4)</span></label>
+        <label class="form-label">Product Photos <span class="text-muted">(up to <?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS ?>)</span></label>
         <?php $productPhotos = $images[$editProduct['productID']] ?? []; ?>
         <?php if (!empty($productPhotos)): ?>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
@@ -1065,11 +1181,11 @@ $statusFilterOptions = [
               </div>
             <?php endforeach; ?>
           </div>
-          <span class="form-hint"><?= count($productPhotos) ?>/4 photos — click &times; to remove</span>
+          <span class="form-hint"><?= count($productPhotos) ?>/<?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS ?> photos — click &times; to remove</span>
         <?php endif; ?>
-        <?php if (count($productPhotos) < 4): ?>
-          <input type="file" name="photos[]" class="form-input" accept="image/*" multiple style="margin-top:8px;">
-          <span class="form-hint">Add up to <?= 4 - count($productPhotos) ?> more photo(s) — hold Ctrl/Cmd to select multiple. Uploaded product photos are optimized and stored as JPG automatically.</span>
+        <?php if (count($productPhotos) < PRODUCT_MGMT_MAX_PRODUCT_PHOTOS): ?>
+          <input type="file" name="photos[]" class="form-input" accept="image/*" multiple style="margin-top:8px;" data-product-photo-input data-photo-slots="<?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS - count($productPhotos) ?>">
+          <span class="form-hint">Add up to <?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS - count($productPhotos) ?> more photo(s) — hold Ctrl/Cmd to select multiple. Uploaded product photos are optimized and stored as JPG automatically.</span>
         <?php endif; ?>
       </div>
       <div class="form-grid-2">
@@ -1147,6 +1263,16 @@ $statusFilterOptions = [
       <div class="form-group">
         <label class="form-label">Stock Quantity</label>
         <input name="inventory" type="number" min="0" class="form-input" value="<?= (int)$editProduct['inventory'] ?>">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Available Sizes</label>
+        <div id="pm-size-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:28px;"></div>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="pm-size-input" class="form-input" placeholder="e.g. Small, Medium, Large" style="flex:1;">
+          <button type="button" id="pm-size-add-btn" class="btn-save" style="padding:8px 14px;white-space:nowrap;">Add</button>
+        </div>
+        <input type="hidden" name="availableSizes" id="pm-sizes-hidden" value="<?= htmlspecialchars($editProduct['availableSizes'] ?? '') ?>">
+        <p class="text-sm text-muted" style="margin-top:6px;">Type a size and press Add or Enter. These appear as selectable chips on the product page.</p>
       </div>
       <div class="form-group">
         <label class="form-label">Homepage Promotion</label>
@@ -1279,7 +1405,15 @@ document.addEventListener('DOMContentLoaded', function () {
 <script>
 
 var pcpColorMap = <?= json_encode($pcpColorsByProduct, JSON_UNESCAPED_UNICODE) ?>;
+var pmWarningMap = <?= json_encode($productWarningsByProduct, JSON_UNESCAPED_UNICODE) ?>;
 var pcpAjax     = 'ajax/product_color_photo.php';
+
+function pmWarningLoad() {
+  var pid = parseInt(document.getElementById('warning-product').value || '0', 10) || 0;
+  var data = pmWarningMap[pid] || { en: '', gr: '' };
+  document.getElementById('warning-en').value = data.en || '';
+  document.getElementById('warning-gr').value = data.gr || '';
+}
 
 function pcpLoadColors() {
   var pid      = parseInt(document.getElementById('pcp-product').value) || 0;
@@ -1507,6 +1641,74 @@ function mcsDeletePhoto(id, btn) {
       }
     });
 }
+
+document.querySelectorAll('[data-product-photo-input]').forEach(function(input) {
+  input.addEventListener('change', function() {
+    var slots = parseInt(input.getAttribute('data-photo-slots') || '0', 10) || 0;
+    if (slots > 0 && input.files && input.files.length > slots) {
+      alert('You can add only ' + slots + ' more product photo(s). The limit is <?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS ?> photos per product.');
+      input.value = '';
+    }
+  });
+});
+
+(function () {
+    var chipsWrap  = document.getElementById('pm-size-chips');
+    var hiddenInput = document.getElementById('pm-sizes-hidden');
+    var textInput  = document.getElementById('pm-size-input');
+    var addBtn     = document.getElementById('pm-size-add-btn');
+    if (!chipsWrap || !hiddenInput || !textInput) return;
+
+    function getSizes() {
+        return hiddenInput.value.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+    }
+
+    function setSizes(arr) {
+        hiddenInput.value = arr.filter(Boolean).join(',');
+    }
+
+    function renderChips() {
+        chipsWrap.innerHTML = '';
+        getSizes().forEach(function(size) {
+            var chip = document.createElement('span');
+            chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#f3eeff;border:1px solid #ddd2f5;border-radius:20px;padding:3px 10px;font-size:13px;color:#6b5b8a;font-weight:500;';
+            chip.textContent = size;
+            var del = document.createElement('button');
+            del.type = 'button';
+            del.textContent = '×';
+            del.style.cssText = 'background:none;border:none;cursor:pointer;font-size:15px;color:#9b7fc7;padding:0 0 0 4px;line-height:1;';
+            del.addEventListener('click', function() {
+                var remaining = getSizes().filter(function(s){ return s !== size; });
+                if (remaining.length === 0) return;
+                setSizes(remaining);
+                renderChips();
+            });
+            chip.appendChild(del);
+            chipsWrap.appendChild(chip);
+        });
+    }
+
+    function addSize() {
+        var raw = textInput.value.trim();
+        if (!raw) return;
+        var parts = raw.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+        var current = getSizes();
+        parts.forEach(function(s) {
+            if (s && !current.includes(s)) current.push(s);
+        });
+        setSizes(current);
+        renderChips();
+        textInput.value = '';
+        textInput.focus();
+    }
+
+    addBtn.addEventListener('click', addSize);
+    textInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); addSize(); }
+    });
+
+    renderChips();
+})();
 </script>
 </body>
 </html>
