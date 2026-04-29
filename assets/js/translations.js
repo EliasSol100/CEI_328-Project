@@ -388,7 +388,7 @@ const translations = {
         exploreCollections: "Εξερεύνησε τις προσεκτικά επιλεγμένες συλλογές μας",
         sellingFast: "Πωλούνται Γρήγορα",
         sellingFastSubtitle: "Τα πιο δημοφιλή προϊόντα που αγαπούν οι πελάτες αυτή τη στιγμή",
-        bestSellers: "Best Sellers",
+        bestSellers: "Κορυφαίες Πωλήσεις",
         mostLoved: "Οι πιο αγαπημένες δημιουργίες μας",
         inStock: "Σε απόθεμα",
         outOfStock: "Εκτός αποθέματος",
