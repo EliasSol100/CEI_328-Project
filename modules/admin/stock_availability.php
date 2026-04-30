@@ -68,12 +68,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $colorID  = (int)$_POST['colorID'];
         $stock    = (int)$_POST['globalInventoryAvailable'];
         $isActive = (int)$_POST['isActive'];
-        $hexRaw   = trim($_POST['hexCode'] ?? '');
-        $hexCode  = preg_match('/^#[0-9a-fA-F]{6}$/', $hexRaw) ? $hexRaw : '#ece6f6';
 
-        $stmt = mysqli_prepare($conn, "UPDATE colors SET globalInventoryAvailable=?, isActive=?, hexCode=? WHERE colorID=?");
-        mysqli_stmt_bind_param($stmt, 'iisi', $stock, $isActive, $hexCode, $colorID);
+        $stmt = mysqli_prepare($conn, "UPDATE colors SET globalInventoryAvailable=?, isActive=? WHERE colorID=?");
+        mysqli_stmt_bind_param($stmt, 'iii', $stock, $isActive, $colorID);
         mysqli_stmt_execute($stmt);
+
+        if (!empty($_FILES['yarn_photo']) && $_FILES['yarn_photo']['error'] === UPLOAD_ERR_OK) {
+            $file     = $_FILES['yarn_photo'];
+            $binary   = file_get_contents((string)$file['tmp_name']);
+            if (is_string($binary) && $binary !== '') {
+                $webpBinary = app_image_binary_to_optimized_webp($binary, 1200, 1200, 82);
+                if (is_string($webpBinary) && $webpBinary !== '') {
+                    $destDir  = __DIR__ . '/../../assets/yarn_colors/';
+                    if (!is_dir($destDir)) mkdir($destDir, 0755, true);
+                    $filename = 'color_' . $colorID . '.webp';
+                    file_put_contents($destDir . $filename, $webpBinary);
+                    $photoPath = 'assets/yarn_colors/' . $filename;
+                    $pStmt = mysqli_prepare($conn, "UPDATE color_yarn_types SET photoPath=? WHERE colorID=?");
+                    if ($pStmt) {
+                        mysqli_stmt_bind_param($pStmt, 'si', $photoPath, $colorID);
+                        mysqli_stmt_execute($pStmt);
+                        mysqli_stmt_close($pStmt);
+                    }
+                }
+            }
+        }
 
         $submittedTypeIDs = array_filter(array_map('intval', $_POST['typeIDs'] ?? []));
         $delStmt = mysqli_prepare($conn, "DELETE FROM color_yarn_types WHERE colorID=?");
@@ -556,12 +575,6 @@ $statusBadge = [
                 class="form-input" style="width:100%">
             </div>
 
-            <div>
-              <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Colour</label>
-              <input type="color" name="hexCode" value="#ece6f6"
-                title="Colour swatch hex"
-                style="width:100%;height:38px;padding:2px;border:1px solid #d1d5db;border-radius:6px;cursor:pointer">
-            </div>
           </div>
 
           <div id="new-type-row" style="display:none;margin-top:12px;max-width:320px">
@@ -703,9 +716,8 @@ $statusBadge = [
             </div>
 
             <div style="margin-bottom:16px">
-              <label style="display:block;font-size:13px;font-weight:600;margin-bottom:5px">Colour Swatch</label>
-              <input type="color" name="hexCode" id="modal-input-hex"
-                style="width:60px;height:38px;padding:2px;border:1px solid #d1d5db;border-radius:8px;cursor:pointer">
+              <label style="display:block;font-size:13px;font-weight:600;margin-bottom:5px">Photo</label>
+              <input type="file" name="yarn_photo" accept="image/*" style="width:100%;font-size:13px">
             </div>
 
             <div style="margin-bottom:20px">
@@ -888,8 +900,6 @@ document.addEventListener('DOMContentLoaded', function () {
   var modal       = document.getElementById('colour-edit-modal');
   var modalForm   = document.getElementById('colour-edit-form');
   var modalSwatch = document.getElementById('modal-swatch');
-  var modalHexInput = document.getElementById('modal-input-hex');
-
   function openModal(btn) {
     var colorId   = btn.dataset.colorId;
     var colorName = btn.dataset.colorName;
@@ -903,7 +913,6 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('modal-input-id').value         = colorId;
     document.getElementById('modal-input-stock').value      = stock;
     document.getElementById('modal-input-active').value     = active;
-    modalHexInput.value = hex;
     modalSwatch.style.background = hex;
 
     modalForm.querySelectorAll('.modal-type-cb').forEach(function (cb) {
@@ -916,10 +925,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
   document.querySelectorAll('.colour-edit-btn').forEach(function (btn) {
     btn.addEventListener('click', function () { openModal(btn); });
-  });
-
-  modalHexInput && modalHexInput.addEventListener('input', function () {
-    modalSwatch.style.background = this.value;
   });
 
   modalForm && modalForm.querySelectorAll('.modal-type-cb').forEach(function (cb) {
