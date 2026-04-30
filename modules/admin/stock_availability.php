@@ -405,10 +405,7 @@ $statusBadge = [
                   $effectiveStatus = 'low_stock';
               }
               if ($hasManualSales) {
-                  $manualSales = (int)($manualSalesMap[$pid]['manual_total_sales'] ?? 0);
-                  $baselineRaw = $manualSalesMap[$pid]['auto_sales_baseline'] ?? null;
-                  $baselineSales = is_null($baselineRaw) ? $autoSales : (int)$baselineRaw;
-                  $currentSales = $manualSales + max(0, $autoSales - $baselineSales);
+                  $currentSales = (int)($manualSalesMap[$pid]['manual_total_sales'] ?? 0);
               }
             ?>
             <tr>
@@ -439,6 +436,8 @@ $statusBadge = [
                       value="<?= (int)$currentSales ?>"
                       min="0"
                       class="form-input has-icon-right"
+                      data-product-id="<?= $pid ?>"
+                      data-original-value="<?= (int)$currentSales ?>"
                     >
                     <button type="submit" class="icon-btn" aria-label="Save sales count">
                       <i class="fas fa-save"></i>
@@ -944,6 +943,44 @@ document.addEventListener('DOMContentLoaded', function () {
   modal && modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
 
 });
+</script>
+<script>
+(function () {
+    var POLL_INTERVAL = 30000;
+
+    function pollSales() {
+        fetch('ajax/get_sales_data.php')
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                document.querySelectorAll('input[data-product-id]').forEach(function (input) {
+                    if (input.dataset.dirty === 'true') return;
+                    var pid = input.dataset.productId;
+                    if (!(pid in data)) return;
+                    var newVal = String(data[pid]);
+                    if (input.value !== newVal) {
+                        input.value = newVal;
+                        input.dataset.originalValue = newVal;
+                    }
+                });
+            })
+            .catch(function () {});
+    }
+
+    document.querySelectorAll('input[data-product-id]').forEach(function (input) {
+        input.addEventListener('input', function () {
+            input.dataset.dirty = 'true';
+        });
+    });
+
+    document.querySelectorAll('form').forEach(function (form) {
+        form.addEventListener('submit', function () {
+            var input = form.querySelector('input[data-product-id]');
+            if (input) input.dataset.dirty = 'false';
+        });
+    });
+
+    setInterval(pollSales, POLL_INTERVAL);
+}());
 </script>
 </body>
 </html>

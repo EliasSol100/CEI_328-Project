@@ -390,6 +390,7 @@ function placeOrder(mysqli $conn, array $input): array {
     }
 
     $madeToOrderItems = [];
+    $salesIncrements  = [];
 
     foreach ($items as $item) {
         $productID = (int)($item['productID'] ?? $item['product_id'] ?? $item['product']['id'] ?? 0);
@@ -408,6 +409,7 @@ function placeOrder(mysqli $conn, array $input): array {
         }
 
         $quantity = max(1, (int)($item['quantity'] ?? 1));
+        $salesIncrements[$productID] = ($salesIncrements[$productID] ?? 0) + $quantity;
         $unitPrice = (float)($item['price'] ?? $item['pricing']['unitTotal'] ?? $item['product']['basePrice'] ?? 0);
         $giftWrapping = !empty($item['addons']['giftWrapping']) ? 1 : 0;
         $giftBagFlag = !empty($item['addons']['giftBagFlag']) ? 1 : 0;
@@ -450,6 +452,19 @@ function placeOrder(mysqli $conn, array $input): array {
         }
     }
     $lineStmt->close();
+
+    if (!empty($salesIncrements)) {
+        $incrStmt = $conn->prepare(
+            "UPDATE product_sales_overrides SET manual_total_sales = manual_total_sales + ? WHERE productID = ?"
+        );
+        if ($incrStmt) {
+            foreach ($salesIncrements as $incrPid => $incrQty) {
+                $incrStmt->bind_param('ii', $incrQty, $incrPid);
+                $incrStmt->execute();
+            }
+            $incrStmt->close();
+        }
+    }
 
     $createdCustomOrders = createCustomOrdersForMadeToOrderCheckout(
         $conn,
