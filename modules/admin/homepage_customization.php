@@ -246,7 +246,7 @@ function homepageCustomizationValue(string $value): string
         <div class="card mb-6">
           <div class="homepage-size-header">
             <div class="card-title" style="margin-bottom:6px;">Required Image Sizes</div>
-            <p class="text-sm text-muted">Uploads still follow the same exact sizes, and every homepage image is auto-converted to JPG in the background.</p>
+            <p class="text-sm text-muted">Uploads still follow the same exact sizes, and every homepage image is auto-converted to WebP in the background.</p>
           </div>
           <div class="homepage-size-grid">
             <div class="homepage-size-card">
@@ -307,7 +307,7 @@ function homepageCustomizationValue(string $value): string
                 <div class="form-group">
                   <label class="form-label" for="homepage_hero_image">Upload hero image</label>
                   <input id="homepage_hero_image" name="homepage_hero_image" type="file" class="form-input" accept="image/*">
-                  <div class="form-hint">Best fit: 1920x600 px. Keep important text/logo inside the centered 1172x600 safe area. Legacy 1172x600 banners are expanded automatically, and uploads are saved as JPG.</div>
+                  <div class="form-hint">Best fit: 1920x600 px. Keep important text/logo inside the centered 1172x600 safe area. Legacy 1172x600 banners are expanded automatically, and uploads are saved as WebP.</div>
                 </div>
               </div>
             </div>
@@ -360,7 +360,7 @@ function homepageCustomizationValue(string $value): string
                            type="file"
                            class="form-input"
                            accept="image/*">
-                    <div class="form-hint">Exact size required: 261x260 px. Uploaded files are saved as JPG.</div>
+                    <div class="form-hint">Exact size required: 261x260 px. Uploaded files are saved as WebP.</div>
                   </div>
                 </section>
               <?php endforeach; ?>
@@ -397,7 +397,7 @@ function homepageCustomizationValue(string $value): string
                            type="file"
                            class="form-input"
                            accept="image/*">
-                    <div class="form-hint">Exact size required: 361x260 px. Uploaded files are saved as JPG.</div>
+                    <div class="form-hint">Exact size required: 361x260 px. Uploaded files are saved as WebP.</div>
                   </div>
                 </section>
               <?php endforeach; ?>
@@ -434,7 +434,7 @@ function homepageCustomizationValue(string $value): string
                 <div class="form-group">
                   <label class="form-label" for="homepage_header_logo_path">Upload header logo</label>
                   <input id="homepage_header_logo_path" name="homepage_header_logo_path" type="file" class="form-input" accept="image/*">
-                  <div class="form-hint">Exact size required: 50x50 px. Uploaded files are saved as JPG.</div>
+                  <div class="form-hint">Exact size required: 50x50 px. Uploaded files are saved as WebP.</div>
                 </div>
               </div>
             </div>

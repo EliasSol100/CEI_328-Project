@@ -219,6 +219,61 @@ if (!function_exists('app_image_optimize_photo_blob_for_storage')) {
     }
 }
 
+if (!function_exists('app_image_binary_to_optimized_webp')) {
+    function app_image_binary_to_optimized_webp(string $binary, int $maxWidth = 1600, int $maxHeight = 1600, int $quality = 82): ?string
+    {
+        if (!(imagetypes() & IMG_WEBP)) {
+            return null;
+        }
+
+        $sourceImage = app_image_create_resource_from_binary($binary);
+        if (!$sourceImage) {
+            return null;
+        }
+
+        $sourceWidth = imagesx($sourceImage);
+        $sourceHeight = imagesy($sourceImage);
+        [$targetWidth, $targetHeight] = app_image_calculate_target_size($sourceWidth, $sourceHeight, $maxWidth, $maxHeight);
+        $canvas = app_image_render_resampled_canvas($sourceImage, $sourceWidth, $sourceHeight, $targetWidth, $targetHeight);
+        imagedestroy($sourceImage);
+
+        if (!$canvas) {
+            return null;
+        }
+
+        ob_start();
+        $ok = imagewebp($canvas, null, max(40, min(100, $quality)));
+        $webpBinary = $ok ? (string)ob_get_clean() : '';
+        if (!$ok) {
+            ob_end_clean();
+        }
+        imagedestroy($canvas);
+
+        return $webpBinary !== '' ? $webpBinary : null;
+    }
+}
+
+if (!function_exists('app_image_convert_file_to_webp')) {
+    function app_image_convert_file_to_webp(string $sourcePath, string $targetPath, int $maxWidth = 1600, int $maxHeight = 1600, int $quality = 82): bool
+    {
+        if (!is_file($sourcePath)) {
+            return false;
+        }
+
+        $binary = file_get_contents($sourcePath);
+        if (!is_string($binary) || $binary === '') {
+            return false;
+        }
+
+        $webpBinary = app_image_binary_to_optimized_webp($binary, $maxWidth, $maxHeight, $quality);
+        if (!is_string($webpBinary) || $webpBinary === '') {
+            return false;
+        }
+
+        return app_image_write_binary_file($targetPath, $webpBinary);
+    }
+}
+
 if (!function_exists('app_image_convert_local_content_asset_to_jpg')) {
     function app_image_convert_local_content_asset_to_jpg(string $path, int $maxWidth = 1600, int $maxHeight = 1600, int $quality = 82): string
     {
