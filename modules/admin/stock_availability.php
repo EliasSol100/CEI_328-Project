@@ -763,11 +763,12 @@ document.addEventListener('DOMContentLoaded', function () {
   var colourCards  = document.querySelectorAll('.colour-assign-card');
 
   function syncCheckboxes(productID) {
-    var assigned = productColorMap[productID] || {};
+    var assigned = productColorMap[productID];
+    var neverAssigned = assigned === undefined;
     colourCards.forEach(function (card) {
       var colorID  = String(card.dataset.colorId);
       var checkbox = card.querySelector('.colour-checkbox');
-      var isChecked = !!assigned[colorID];
+      var isChecked = neverAssigned ? true : !!assigned[colorID];
       checkbox.checked = isChecked;
       card.style.borderColor = isChecked ? '#111827' : '#e5e7eb';
     });
