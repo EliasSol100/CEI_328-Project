@@ -105,6 +105,26 @@
     filter: brightness(1.03);
 }
 
+.contact-feedback {
+    padding: 14px 18px;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 500;
+    margin-bottom: 16px;
+}
+
+.contact-feedback--success {
+    background: #e8f5e9;
+    color: #2e7d32;
+    border: 1px solid #a5d6a7;
+}
+
+.contact-feedback--error {
+    background: #fdecea;
+    color: #c62828;
+    border: 1px solid #ef9a9a;
+}
+
 .info-card h3 {
     font-size: 22px;
     margin: 0 0 10px;

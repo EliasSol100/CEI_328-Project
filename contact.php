@@ -3,6 +3,7 @@ session_start();
 require_once "authentication/database.php";
 require_once "authentication/get_config.php";
 require_once "include/translation_helpers.php";
+require_once "authentication/auth_mailer.php";
 
 $system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
 $logo_path = getSystemConfig("logo_path") ?: "assets/images/athina-eshop-logo.png";
@@ -60,6 +61,41 @@ if (isset($_SESSION["user"])) {
 
 $GLOBALS['header_user_full_name'] = $fullName;
 $GLOBALS['header_user_role']      = $role;
+
+$contactSuccess  = null;
+$contactError    = '';
+$senderName      = '';
+$senderEmail     = '';
+$senderMessage   = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $senderName    = trim($_POST['contact_name']    ?? '');
+    $senderEmail   = trim($_POST['contact_email']   ?? '');
+    $senderMessage = trim($_POST['contact_message'] ?? '');
+
+    if ($senderName === '' || $senderEmail === '' || $senderMessage === '') {
+        $contactSuccess = false;
+        $contactError   = 'Please fill in all fields.';
+    } elseif (!filter_var($senderEmail, FILTER_VALIDATE_EMAIL)) {
+        $contactSuccess = false;
+        $contactError   = 'Please enter a valid email address.';
+    } else {
+        $subject = "Contact Form: Message from {$senderName}";
+        $body    = "Name: {$senderName}\nEmail: {$senderEmail}\n\nMessage:\n{$senderMessage}";
+
+        $result = app_auth_send_plaintext_email(
+            'creationsbyathina@gmail.com',
+            'Creations By Athina',
+            $subject,
+            $body
+        );
+
+        $contactSuccess = $result['success'];
+        if (!$contactSuccess) {
+            $contactError = 'Failed to send message. Please try again later.';
+        }
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -94,24 +130,37 @@ $GLOBALS['header_user_role']      = $role;
 
                     <div class="contact-card">
                         <h2 data-translate="sendMessage">Send a Message</h2>
+                        <?php if ($contactSuccess === true): ?>
+                            <div class="contact-feedback contact-feedback--success">
+                                Your message has been sent successfully!
+                            </div>
+                        <?php else: ?>
+                        <?php if ($contactSuccess === false): ?>
+                            <div class="contact-feedback contact-feedback--error">
+                                <?= htmlspecialchars($contactError) ?>
+                            </div>
+                        <?php endif; ?>
                         <form class="contact-form" method="post" action="contact.php">
                             <div class="contact-field">
                                 <label for="contact_name" data-translate="yourName">Your Name</label>
                                 <input type="text" id="contact_name" name="contact_name"
-                                       data-translate-placeholder="yourName" placeholder="Your Name" required>
+                                       data-translate-placeholder="yourName" placeholder="Your Name"
+                                       value="<?= htmlspecialchars($senderName) ?>" required>
                             </div>
                             <div class="contact-field">
                                 <label for="contact_email" data-translate="yourEmail">Your Email</label>
                                 <input type="email" id="contact_email" name="contact_email"
-                                       data-translate-placeholder="yourEmail" placeholder="Your Email" required>
+                                       data-translate-placeholder="yourEmail" placeholder="Your Email"
+                                       value="<?= htmlspecialchars($senderEmail) ?>" required>
                             </div>
                             <div class="contact-field">
                                 <label for="contact_message" data-translate="messageLabel">Message</label>
                                 <textarea id="contact_message" name="contact_message"
-                                          data-translate-placeholder="yourMessage" placeholder="Your message..." required></textarea>
+                                          data-translate-placeholder="yourMessage" placeholder="Your message..." required><?= htmlspecialchars($senderMessage) ?></textarea>
                             </div>
                             <button type="submit" class="contact-btn" data-translate="sendBtn">Send</button>
                         </form>
+                        <?php endif; ?>
                     </div>
 
                     <div class="contact-card">
