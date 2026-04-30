@@ -339,7 +339,8 @@ $colours = [];
 $r = mysqli_query($conn, "
     SELECT c.*,
            GROUP_CONCAT(DISTINCT yt.typeName ORDER BY yt.typeName SEPARATOR ', ') AS typeNames,
-           GROUP_CONCAT(DISTINCT cyt.typeID ORDER BY cyt.typeID SEPARATOR ',') AS typeIDs
+           GROUP_CONCAT(DISTINCT cyt.typeID ORDER BY cyt.typeID SEPARATOR ',') AS typeIDs,
+           MIN(cyt.photoPath) AS photoPath
     FROM colors c
     LEFT JOIN color_yarn_types cyt ON cyt.colorID = c.colorID
     LEFT JOIN yarn_types yt ON yt.typeID = cyt.typeID
@@ -523,9 +524,14 @@ $statusBadge = [
           <div id="colour-assign-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px">
             <?php foreach ($colours as $c): ?>
             <?php $swatchHex = preg_match('/^#[0-9a-fA-F]{6}$/', (string)($c['hexCode'] ?? '')) ? $c['hexCode'] : '#ece6f6'; ?>
+            <?php $photoPath = !empty($c['photoPath']) ? htmlspecialchars($c['photoPath']) : null; ?>
             <label class="colour-assign-card" data-color-id="<?= $c['colorID'] ?>"
                    style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 8px;border:2px solid #e5e7eb;border-radius:10px;cursor:pointer;user-select:none;transition:border-color .15s">
-              <span class="colour-swatch-preview is-large" style="background:<?= htmlspecialchars($swatchHex) ?>"></span>
+              <?php if ($photoPath): ?>
+                <img src="/athina-eshop/<?= $photoPath ?>" alt="" style="width:48px;height:48px;object-fit:cover;border-radius:50%">
+              <?php else: ?>
+                <span class="colour-swatch-preview is-large" style="background:<?= htmlspecialchars($swatchHex) ?>"></span>
+              <?php endif; ?>
               <span style="font-size:11px;font-weight:600;color:#374151;text-align:center"><?= htmlspecialchars($c['colorName']) ?></span>
               <span style="font-size:11px;color:#9ca3af">#<?= (int)$c['colorID'] ?></span>
               <input type="checkbox" name="colorIDs[]" value="<?= $c['colorID'] ?>"
@@ -632,9 +638,14 @@ $statusBadge = [
           <tbody>
             <?php foreach ($colours as $c): ?>
             <?php $swatchHex = preg_match('/^#[0-9a-fA-F]{6}$/', (string)($c['hexCode'] ?? '')) ? $c['hexCode'] : '#ece6f6'; ?>
+            <?php $photoPath = !empty($c['photoPath']) ? htmlspecialchars($c['photoPath']) : null; ?>
             <tr>
               <td style="text-align:center;vertical-align:middle">
-                <span class="colour-swatch-preview" style="background:<?= htmlspecialchars($swatchHex) ?>"></span>
+                <?php if ($photoPath): ?>
+                  <img src="/athina-eshop/<?= $photoPath ?>" alt="" style="width:36px;height:36px;object-fit:cover;border-radius:50%">
+                <?php else: ?>
+                  <span class="colour-swatch-preview" style="background:<?= htmlspecialchars($swatchHex) ?>"></span>
+                <?php endif; ?>
               </td>
               <td class="text-muted" style="font-size:13px"><?= (int)$c['colorID'] ?></td>
               <td class="font-600"><?= htmlspecialchars($c['colorName']) ?></td>
