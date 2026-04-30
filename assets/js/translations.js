@@ -268,7 +268,6 @@ const translations = {
         productSizeLabel: "Size",
         productColorLabel: "Colour",
         productSelectColor: "Select colour",
-        productCustomisationTitle: "Custom Colour Request",
         productGiftOptions: "Gift Options",
         productGiftWrapping: "Gift Wrapping (+€2)",
         productGiftBag: "Gift Bag (+€1.5)",
@@ -303,8 +302,6 @@ const translations = {
         productSelectValidSizeColor: "Please select a valid size and color.",
         productSelectedVariationOutOfStock: "Selected variation is out of stock.",
         productSelectAvailableOption: "Please select an available option.",
-        productEnterCustomColour: "Please enter your preferred colour request.",
-        productCompleteCustomColours: "Please complete all custom colour fields.",
         productSelectColorFirst: "Please choose a colour to continue.",
         productSelectedColour: "Selected colour: {name}",
         productCustomisationTitle: "Share Your Colour Preference",
@@ -632,7 +629,7 @@ const translations = {
         productSizeLabel: "Μέγεθος",
         productColorLabel: "Χρώμα",
         productSelectColor: "Επιλέξτε χρώμα",
-        productCustomisationTitle: "Αίτημα Προσαρμοσμένου Χρώματος",
+        productCustomisationTitle: "Πείτε μας την προτίμηση χρώματος",
         productGiftOptions: "Επιλογές Δώρου",
         productGiftWrapping: "Συσκευασία Δώρου (+€2)",
         productGiftBag: "Τσάντα Δώρου (+€1.5)",
@@ -667,8 +664,10 @@ const translations = {
         productSelectValidSizeColor: "Παρακαλώ επιλέξτε έγκυρο μέγεθος και χρώμα.",
         productSelectedVariationOutOfStock: "Η επιλεγμένη παραλλαγή δεν είναι διαθέσιμη.",
         productSelectAvailableOption: "Παρακαλώ επιλέξτε διαθέσιμη επιλογή.",
-        productEnterCustomColour: "Παρακαλώ γράψτε το χρώμα που προτιμάτε.",
-        productCompleteCustomColours: "Παρακαλώ συμπληρώστε όλα τα πεδία προσαρμοσμένου χρώματος.",
+        productSelectColorFirst: "Παρακαλώ επιλέξτε χρώμα για να συνεχίσετε.",
+        productSelectedColour: "Επιλεγμένο χρώμα: {name}",
+        productEnterCustomColour: "Παρακαλώ γράψτε το χρώμα που θα θέλατε πριν προσθέσετε το προϊόν στο καλάθι.",
+        productCompleteCustomColours: "Παρακαλώ συμπληρώστε κάθε προτίμηση χρώματος πριν συνεχίσετε.",
         productEnterCouponFirst: "Εισαγάγετε πρώτα έναν κωδικό κουπονιού.",
         productInvalidCoupon: "Μη έγκυρος ή ληγμένος κωδικός κουπονιού.",
         productCouponSaveFailed: "Το κουπόνι είναι έγκυρο, αλλά δεν ήταν δυνατή η αποθήκευσή του. Παρακαλώ δοκιμάστε ξανά.",
@@ -723,22 +722,6 @@ const translations = {
         authRequestNewResetLink: "Ζητήστε νέο σύνδεσμο επαναφοράς"
     }
 };
-
-Object.assign(translations.en, {
-    productSelectColorFirst: "Please choose a colour to continue.",
-    productSelectedColour: "Selected colour: {name}",
-    productCustomisationTitle: "Share Your Colour Preference",
-    productEnterCustomColour: "Please share your preferred colour before adding this item to cart.",
-    productCompleteCustomColours: "Please complete each colour preference before continuing."
-});
-
-Object.assign(translations.el, {
-    productSelectColorFirst: "Παρακαλώ επιλέξτε χρώμα για να συνεχίσετε.",
-    productSelectedColour: "Επιλεγμένο χρώμα: {name}",
-    productCustomisationTitle: "Πείτε μας την προτίμηση χρώματος",
-    productEnterCustomColour: "Παρακαλώ γράψτε το χρώμα που θα θέλατε πριν προσθέσετε το προϊόν στο καλάθι.",
-    productCompleteCustomColours: "Παρακαλώ συμπληρώστε κάθε προτίμηση χρώματος πριν συνεχίσετε."
-});
 
 const APP_COOKIE_CONSENT_NAME = "athina_cookie_consent";
 
