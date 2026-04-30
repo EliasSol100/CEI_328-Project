@@ -118,7 +118,7 @@ $GLOBALS['header_user_role']      = $role;
                         <h2 data-translate="getInTouch">Get in Touch</h2>
                         <div class="info-card">
                             <h3><i class="fas fa-envelope" style="margin-right:8px;color:#a066f0;"></i><span data-translate="emailLabel">Email</span></h3>
-                            <p><a href="mailto:info@creationsbyathina.com">info@creationsbyathina.com</a></p>
+                            <p><a href="mailto:creationsbyathina@gmail.com">creationsbyathina@gmail.com</a></p>
                         </div>
                         <div class="info-card">
                             <h3><i class="fab fa-instagram" style="margin-right:8px;color:#f05ab8;"></i>Instagram</h3>
