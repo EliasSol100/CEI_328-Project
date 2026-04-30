@@ -94,31 +94,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $productID = (int)$_POST['productID'];
         $manualSales = max(0, (int)($_POST['manual_total_sales'] ?? 0));
 
-        $currentAutoSales = 0;
-        $autoStmt = mysqli_prepare($conn, "SELECT COALESCE(SUM(quantity), 0) AS total_qty FROM order_items WHERE productID = ?");
-        if ($autoStmt) {
-            mysqli_stmt_bind_param($autoStmt, 'i', $productID);
-            mysqli_stmt_execute($autoStmt);
-            $autoRes = mysqli_stmt_get_result($autoStmt);
-            if ($autoRes && ($autoRow = mysqli_fetch_assoc($autoRes))) {
-                $currentAutoSales = (int)($autoRow['total_qty'] ?? 0);
+        if (!$productID) {
+            $flash = 'err:Invalid product ID.';
+        } else {
+            $currentAutoSales = 0;
+            $autoStmt = mysqli_prepare($conn, "SELECT COALESCE(SUM(quantity), 0) AS total_qty FROM order_items WHERE productID = ?");
+            if ($autoStmt) {
+                mysqli_stmt_bind_param($autoStmt, 'i', $productID);
+                mysqli_stmt_execute($autoStmt);
+                $autoRes = mysqli_stmt_get_result($autoStmt);
+                if ($autoRes && ($autoRow = mysqli_fetch_assoc($autoRes))) {
+                    $currentAutoSales = (int)($autoRow['total_qty'] ?? 0);
+                }
+                mysqli_stmt_close($autoStmt);
             }
-            mysqli_stmt_close($autoStmt);
-        }
 
-        $stmt = mysqli_prepare(
-            $conn,
-            "INSERT INTO product_sales_overrides (productID, manual_total_sales, auto_sales_baseline)
-             VALUES (?, ?, ?)
-             ON DUPLICATE KEY UPDATE
-                manual_total_sales = VALUES(manual_total_sales),
-                auto_sales_baseline = VALUES(auto_sales_baseline)"
-        );
-        if ($stmt) {
-            mysqli_stmt_bind_param($stmt, 'iii', $productID, $manualSales, $currentAutoSales);
-            mysqli_stmt_execute($stmt);
-            mysqli_stmt_close($stmt);
-            $flash = 'ok:Manual sales updated.';
+            $stmt = mysqli_prepare(
+                $conn,
+                "INSERT INTO product_sales_overrides (productID, manual_total_sales, auto_sales_baseline)
+                 VALUES (?, ?, ?)
+                 ON DUPLICATE KEY UPDATE
+                    manual_total_sales = VALUES(manual_total_sales),
+                    auto_sales_baseline = VALUES(auto_sales_baseline)"
+            );
+
+            if (!$stmt) {
+                $flash = 'err:Could not prepare save query: ' . mysqli_error($conn);
+            } else {
+                mysqli_stmt_bind_param($stmt, 'iii', $productID, $manualSales, $currentAutoSales);
+                $executed = mysqli_stmt_execute($stmt);
+                $execError = $executed ? '' : mysqli_stmt_error($stmt);
+                mysqli_stmt_close($stmt);
+
+                if (!$executed) {
+                    $flash = 'err:Could not save sales override: ' . $execError;
+                } else {
+                    $flash = 'ok:Manual sales updated.';
+                }
+            }
         }
     }
 
