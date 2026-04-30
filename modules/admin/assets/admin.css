@@ -206,6 +206,7 @@ body {
 
 .stock-table .col-update form {
   flex-wrap: nowrap;
+  justify-content: flex-start;
   gap: 8px;
 }
 .stock-table .col-update .form-input {
