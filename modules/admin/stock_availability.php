@@ -444,15 +444,6 @@ $statusBadge = [
                     </button>
                   </div>
                 </form>
-                <?php if ($hasManualSales): ?>
-                <form method="POST" style="margin-top:6px" data-ignore-unsaved-warning data-stock-warning>
-                  <input type="hidden" name="action" value="remove_sales_override">
-                  <input type="hidden" name="productID" value="<?= $pid ?>">
-                  <button type="submit" class="btn-secondary" style="padding:5px 10px;font-size:12px">
-                    Use Auto
-                  </button>
-                </form>
-                <?php endif; ?>
               </td>
               <td class="col-update">
                 <form method="POST" style="display:flex;gap:8px;align-items:center" data-ignore-unsaved-warning data-stock-warning>
