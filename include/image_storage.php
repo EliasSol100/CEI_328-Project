@@ -37,7 +37,7 @@ if (!function_exists('app_image_is_convertible_content_asset')) {
             return false;
         }
 
-        if (!preg_match('/\.(png|gif|webp|jpeg)$/i', $relativePath)) {
+        if (!preg_match('/\.(png|gif|webp|jpe?g)$/i', $relativePath)) {
             return false;
         }
 
