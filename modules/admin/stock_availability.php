@@ -973,9 +973,26 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     document.querySelectorAll('form').forEach(function (form) {
-        form.addEventListener('submit', function () {
-            var input = form.querySelector('input[data-product-id]');
-            if (input) input.dataset.dirty = 'false';
+        var input = form.querySelector('input[data-product-id]');
+        if (!input) return;
+
+        form.addEventListener('submit', function (e) {
+            var newVal      = parseInt(input.value, 10);
+            var originalVal = parseInt(input.dataset.originalValue, 10);
+
+            if (!isNaN(newVal) && !isNaN(originalVal) && newVal < originalVal) {
+                var ok = window.confirm(
+                    'You are about to decrease the Current Sales count.\n' +
+                    'This action cannot be undone automatically.\n\n' +
+                    'Are you sure you want to continue?'
+                );
+                if (!ok) {
+                    e.preventDefault();
+                    return;
+                }
+            }
+
+            input.dataset.dirty = 'false';
         });
     });
 
