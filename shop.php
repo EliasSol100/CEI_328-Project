@@ -970,23 +970,6 @@ foreach ($products as $p) {
                     </div>
                     <?php endif; ?>
 
-                    <?php if (!empty($colorFilterOptions)): ?>
-                    <div class="filter-group">
-                        <h4 data-translate="yarnColour">Yarn Colour</h4>
-                        <?php foreach ($colorFilterOptions as $colorOption): ?>
-                        <?php $colorAvailable = (int)$colorOption['available'] > 0; ?>
-                        <label class="filter-option <?= $colorAvailable ? '' : 'is-unavailable' ?>">
-                            <input type="checkbox"
-                                   name="colors[]"
-                                   value="<?= (int)$colorOption['id'] ?>"
-                                   <?= in_array((int)$colorOption['id'], $selectedColors, true) ? 'checked' : '' ?>
-                                   <?= $colorAvailable ? '' : 'disabled' ?>>
-                            <span class="filter-color-dot" style="background:<?= htmlspecialchars(shopColorSwatchHex((string)$colorOption['name'])) ?>;"></span>
-                            <span><?= htmlspecialchars((string)$colorOption['name']) ?></span>
-                        </label>
-                        <?php endforeach; ?>
-                    </div>
-                    <?php endif; ?>
 
                     <div class="filter-group">
                         <h4 data-translate="tags">Tags</h4>
