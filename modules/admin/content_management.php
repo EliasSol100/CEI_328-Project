@@ -4,13 +4,14 @@ require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/../../include/security.php';
 require_once __DIR__ . '/../../include/website_content_settings.php';
 require_once __DIR__ . '/../../include/custom_order_settings.php';
+require_once __DIR__ . '/../../include/shop_filter_settings.php';
 
 $current_page = 'content_management';
 $flash = '';
 
 function cm_normalize_tab(string $value): string
 {
-    return in_array($value, ['home', 'custom_orders', 'about', 'contact'], true) ? $value : 'home';
+    return in_array($value, ['home', 'shop', 'custom_orders', 'about', 'contact'], true) ? $value : 'home';
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -21,9 +22,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'save_content_management') {
         $contentInput = is_array($_POST['content'] ?? null) ? $_POST['content'] : [];
         $stepsInput = is_array($_POST['steps'] ?? null) ? $_POST['steps'] : [];
+        $shopFiltersInput = is_array($_POST['shop_filters'] ?? null) ? $_POST['shop_filters'] : [];
         $contentSaved = app_website_content_save($conn, $contentInput);
         $stepsSaved = app_custom_order_save_steps($conn, $stepsInput);
-        $flash = ($contentSaved && $stepsSaved)
+        $shopFiltersSaved = app_shop_filter_save($conn, $shopFiltersInput);
+        $flash = ($contentSaved && $stepsSaved && $shopFiltersSaved)
             ? 'ok:Website content updated.'
             : 'err:Could not update all website content. Please try again.';
     }
@@ -44,6 +47,8 @@ $aboutStory = $websiteContent['about']['story'] ?? $contentDefaults['about']['st
 $aboutValues = $websiteContent['about']['values'] ?? $contentDefaults['about']['values'];
 $contactContent = $websiteContent['contact'] ?? $contentDefaults['contact'];
 $customOrderSteps = app_custom_order_steps($conn);
+$shopFilterSettings = app_shop_filter_settings($conn);
+$shopFilterProducts = app_shop_filter_admin_products($conn);
 
 function cm_field(string $name, string $value = '', string $type = 'text', bool $required = true): void
 {
@@ -55,6 +60,82 @@ function cm_textarea(string $name, string $value = '', int $rows = 3, bool $requ
 {
     $requiredAttr = $required ? ' required' : '';
     echo '<textarea name="' . app_h($name) . '" class="form-input" rows="' . (int)$rows . '"' . $requiredAttr . '>' . app_h($value) . '</textarea>';
+}
+
+function cm_shop_filter_product_checks(string $type, int $index, array $selectedIds, array $products): void
+{
+    $selectedLookup = array_fill_keys(array_map('intval', $selectedIds), true);
+    echo '<div class="cms-product-checks">';
+    foreach ($products as $product) {
+        $productId = (int)$product['productID'];
+        $checked = isset($selectedLookup[$productId]) ? ' checked' : '';
+        echo '<label class="cms-product-check">';
+        echo '<input type="checkbox" name="shop_filters[' . app_h($type) . '][' . (int)$index . '][product_ids][]" value="' . $productId . '"' . $checked . '>';
+        echo '<span>' . app_h((string)$product['nameEN']) . '</span>';
+        echo '</label>';
+    }
+    echo '</div>';
+}
+
+function cm_shop_filter_row(string $type, int $index, array $row, array $products): void
+{
+    $active = !empty($row['active']);
+    ?>
+    <div class="cms-shop-filter-row" data-shop-filter-row data-shop-filter-type="<?= app_h($type) ?>">
+      <div class="cms-step-header">
+        <div class="cms-step-title" data-shop-filter-title><?= app_h((string)($row['label_en'] ?? ('Option ' . ($index + 1)))) ?></div>
+        <button type="button" class="cms-step-remove" data-remove-shop-filter><i class="fas fa-trash"></i> Remove</button>
+      </div>
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label class="form-label">Slug</label>
+          <input type="text" name="shop_filters[<?= app_h($type) ?>][<?= (int)$index ?>][id]" class="form-input" value="<?= app_h((string)($row['id'] ?? '')) ?>">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Status</label>
+          <label class="cms-inline-toggle">
+            <input type="hidden" name="shop_filters[<?= app_h($type) ?>][<?= (int)$index ?>][active]" value="0">
+            <input type="checkbox" name="shop_filters[<?= app_h($type) ?>][<?= (int)$index ?>][active]" value="1"<?= $active ? ' checked' : '' ?>>
+            <span>Visible in Shop</span>
+          </label>
+        </div>
+      </div>
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label class="form-label">Label (EN)</label>
+          <input type="text" name="shop_filters[<?= app_h($type) ?>][<?= (int)$index ?>][label_en]" class="form-input" value="<?= app_h((string)($row['label_en'] ?? '')) ?>" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Label (GR)</label>
+          <input type="text" name="shop_filters[<?= app_h($type) ?>][<?= (int)$index ?>][label_gr]" class="form-input" value="<?= app_h((string)($row['label_gr'] ?? '')) ?>">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Assigned Products</label>
+        <?php cm_shop_filter_product_checks($type, $index, (array)($row['product_ids'] ?? []), $products); ?>
+      </div>
+    </div>
+    <?php
+}
+
+function cm_shop_filter_section(string $type, string $title, string $icon, array $rows, array $products): void
+{
+    ?>
+    <div class="cms-panel" data-shop-filter-section="<?= app_h($type) ?>">
+      <div class="cms-panel-title"><i class="<?= app_h($icon) ?>"></i><?= app_h($title) ?></div>
+      <input type="hidden" name="shop_filters[<?= app_h($type) ?>]" value="">
+      <div data-shop-filter-list="<?= app_h($type) ?>">
+        <?php foreach ($rows as $index => $row): ?>
+          <?php cm_shop_filter_row($type, (int)$index, $row, $products); ?>
+        <?php endforeach; ?>
+      </div>
+      <div class="cms-add-step-row">
+        <button type="button" class="btn-secondary" data-add-shop-filter="<?= app_h($type) ?>">
+          <i class="fas fa-plus"></i> Add <?= app_h(rtrim($title, 's')) ?>
+        </button>
+      </div>
+    </div>
+    <?php
 }
 ?>
 <!DOCTYPE html>
@@ -84,6 +165,13 @@ function cm_textarea(string $name, string $value = '', int $rows = 3, bool $requ
     .cms-step-remove { border:0; background:transparent; color:#dc2626; font-size:12px; font-weight:700; cursor:pointer; padding:4px 0; }
     .cms-add-step-row { display:flex; justify-content:flex-end; margin-top:14px; }
     .cms-add-step-row .btn-secondary { min-height:34px; padding:7px 12px; font-size:13px; }
+    .cms-shop-filter-row { border-top:1px solid #e5e7eb; padding-top:14px; margin-top:14px; }
+    .cms-shop-filter-row:first-child { border-top:0; padding-top:0; margin-top:0; }
+    .cms-product-checks { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:8px; max-height:210px; overflow:auto; padding:10px; border:1px solid #e5e7eb; border-radius:8px; background:#fff; }
+    .cms-product-check { display:flex; align-items:center; gap:8px; font-size:13px; color:#374151; }
+    .cms-product-check input { width:15px; height:15px; }
+    .cms-inline-toggle { display:flex; align-items:center; gap:8px; min-height:38px; font-size:13px; color:#374151; }
+    .cms-inline-toggle input[type="checkbox"] { width:16px; height:16px; }
     .cms-save-row { display:flex; justify-content:flex-end; position:sticky; bottom:0; padding:16px 0 0; background:linear-gradient(to bottom, rgba(249,250,251,0), #f9fafb 35%); z-index:2; }
     .cms-save-row .btn-save { min-width:180px; justify-content:center; }
     @media (max-width: 760px) {
@@ -100,7 +188,7 @@ function cm_textarea(string $name, string $value = '', int $rows = 3, bool $requ
     <div class="content-header">
       <div class="content-header-left">
         <h1>Content Management</h1>
-        <p>Edit the live website content for Home, Custom Orders, About, and Contact.</p>
+        <p>Edit the live website content for Home, Shop, Custom Orders, About, and Contact.</p>
       </div>
     </div>
 
@@ -119,6 +207,9 @@ function cm_textarea(string $name, string $value = '', int $rows = 3, bool $requ
         <div class="tab-nav cms-category-nav" data-tab-group="content-management">
           <button type="button" class="tab-btn<?= $activeTab === 'home' ? ' active' : '' ?>" data-tab="cms-panel-home" data-tab-key="home" onclick="switchTab(this,'content-management')">
             <i class="fas fa-house"></i> Home
+          </button>
+          <button type="button" class="tab-btn<?= $activeTab === 'shop' ? ' active' : '' ?>" data-tab="cms-panel-shop" data-tab-key="shop" onclick="switchTab(this,'content-management')">
+            <i class="fas fa-store"></i> Shop
           </button>
           <button type="button" class="tab-btn<?= $activeTab === 'custom_orders' ? ' active' : '' ?>" data-tab="cms-panel-custom-orders" data-tab-key="custom_orders" onclick="switchTab(this,'content-management')">
             <i class="fas fa-star"></i> Custom Orders
@@ -183,6 +274,35 @@ function cm_textarea(string $name, string $value = '', int $rows = 3, bool $requ
             <?php cm_field('content[home][hero][button_url]', (string)($homeHero['button_url'] ?? 'shop.php')); ?>
           </div>
           </div>
+          </div>
+        </section>
+
+        <section id="cms-panel-shop" class="tab-content<?= $activeTab === 'shop' ? ' active' : '' ?>" data-tab-target="content-management">
+          <div class="card" id="shop-content">
+            <div class="card-title">Shop Page</div>
+            <p class="cms-card-copy">Edit the filters, material chips, tags, price range, and product assignments used by the public Shop page.</p>
+
+            <div class="cms-panel">
+              <div class="cms-panel-title"><i class="fas fa-euro-sign"></i>Price Range</div>
+              <div class="form-grid-2">
+                <div class="form-group">
+                  <label class="form-label">Minimum Price (€)</label>
+                  <input type="number" name="shop_filters[price][min]" class="form-input" min="0" step="0.01" value="<?= app_h((string)($shopFilterSettings['price']['min'] ?? 0)) ?>">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Maximum Price (€)</label>
+                  <input type="number" name="shop_filters[price][max]" class="form-input" min="0" step="0.01" value="<?= app_h((string)($shopFilterSettings['price']['max'] ?? 100)) ?>">
+                </div>
+              </div>
+              <div class="form-group" style="max-width:240px">
+                <label class="form-label">Slider Step (€)</label>
+                <input type="number" name="shop_filters[price][step]" class="form-input" min="0.01" step="0.01" value="<?= app_h((string)($shopFilterSettings['price']['step'] ?? 1)) ?>">
+              </div>
+            </div>
+
+            <?php cm_shop_filter_section('categories', 'Filters', 'fas fa-filter', (array)($shopFilterSettings['categories'] ?? []), $shopFilterProducts); ?>
+            <?php cm_shop_filter_section('materials', 'Materials', 'fas fa-layer-group', (array)($shopFilterSettings['materials'] ?? []), $shopFilterProducts); ?>
+            <?php cm_shop_filter_section('tags', 'Tags', 'fas fa-tags', (array)($shopFilterSettings['tags'] ?? []), $shopFilterProducts); ?>
           </div>
         </section>
 
@@ -473,6 +593,109 @@ document.addEventListener('DOMContentLoaded', function () {
     var path = step.getAttribute('data-step-path') || '';
     step.remove();
     reindexSteps(path);
+  });
+
+  var cmsShopProducts = <?= json_encode(array_values($shopFilterProducts), JSON_UNESCAPED_UNICODE | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+
+  function escapeHtml(value) {
+    return String(value || '').replace(/[&<>"']/g, function (ch) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'}[ch];
+    });
+  }
+
+  function shopProductChecksTemplate(type, index) {
+    return cmsShopProducts.map(function (product) {
+      var id = parseInt(product.productID, 10) || 0;
+      return [
+        '<label class="cms-product-check">',
+        '<input type="checkbox" name="shop_filters[' + type + '][' + index + '][product_ids][]" value="' + id + '">',
+        '<span>' + escapeHtml(product.nameEN || ('Product #' + id)) + '</span>',
+        '</label>'
+      ].join('');
+    }).join('');
+  }
+
+  function shopFilterTemplate(type, index) {
+    var label = type === 'categories' ? 'New Filter' : (type === 'materials' ? 'New Material' : 'New Tag');
+    return [
+      '<div class="cms-shop-filter-row" data-shop-filter-row data-shop-filter-type="' + type + '">',
+      '  <div class="cms-step-header">',
+      '    <div class="cms-step-title" data-shop-filter-title>' + label + '</div>',
+      '    <button type="button" class="cms-step-remove" data-remove-shop-filter><i class="fas fa-trash"></i> Remove</button>',
+      '  </div>',
+      '  <div class="form-grid-2">',
+      '    <div class="form-group">',
+      '      <label class="form-label">Slug</label>',
+      '      <input type="text" name="shop_filters[' + type + '][' + index + '][id]" class="form-input" placeholder="auto-from-label">',
+      '    </div>',
+      '    <div class="form-group">',
+      '      <label class="form-label">Status</label>',
+      '      <label class="cms-inline-toggle">',
+      '        <input type="hidden" name="shop_filters[' + type + '][' + index + '][active]" value="0">',
+      '        <input type="checkbox" name="shop_filters[' + type + '][' + index + '][active]" value="1" checked>',
+      '        <span>Visible in Shop</span>',
+      '      </label>',
+      '    </div>',
+      '  </div>',
+      '  <div class="form-grid-2">',
+      '    <div class="form-group">',
+      '      <label class="form-label">Label (EN)</label>',
+      '      <input type="text" name="shop_filters[' + type + '][' + index + '][label_en]" class="form-input" required>',
+      '    </div>',
+      '    <div class="form-group">',
+      '      <label class="form-label">Label (GR)</label>',
+      '      <input type="text" name="shop_filters[' + type + '][' + index + '][label_gr]" class="form-input">',
+      '    </div>',
+      '  </div>',
+      '  <div class="form-group">',
+      '    <label class="form-label">Assigned Products</label>',
+      '    <div class="cms-product-checks">' + shopProductChecksTemplate(type, index) + '</div>',
+      '  </div>',
+      '</div>'
+    ].join('');
+  }
+
+  function reindexShopFilters(type) {
+    document.querySelectorAll('[data-shop-filter-row][data-shop-filter-type="' + type + '"]').forEach(function (row, index) {
+      row.querySelectorAll('input').forEach(function (field) {
+        field.name = field.name.replace(/shop_filters\[[^\]]+\]\[\d+\]/, 'shop_filters[' + type + '][' + index + ']');
+      });
+      var title = row.querySelector('[data-shop-filter-title]');
+      var labelInput = row.querySelector('input[name$="[label_en]"]');
+      if (title) title.textContent = labelInput && labelInput.value ? labelInput.value : 'Option ' + (index + 1);
+    });
+  }
+
+  document.querySelectorAll('[data-add-shop-filter]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var type = button.getAttribute('data-add-shop-filter') || '';
+      var list = document.querySelector('[data-shop-filter-list="' + type + '"]');
+      if (!type || !list) return;
+      var index = document.querySelectorAll('[data-shop-filter-row][data-shop-filter-type="' + type + '"]').length;
+      list.insertAdjacentHTML('beforeend', shopFilterTemplate(type, index));
+      reindexShopFilters(type);
+      var added = list.lastElementChild;
+      var firstInput = added ? added.querySelector('input[name$="[label_en]"]') : null;
+      if (firstInput) firstInput.focus();
+    });
+  });
+
+  document.addEventListener('click', function (event) {
+    var removeButton = event.target.closest('[data-remove-shop-filter]');
+    if (!removeButton) return;
+    var row = removeButton.closest('[data-shop-filter-row]');
+    if (!row) return;
+    var type = row.getAttribute('data-shop-filter-type') || '';
+    row.remove();
+    reindexShopFilters(type);
+  });
+
+  document.addEventListener('input', function (event) {
+    var field = event.target.closest('[data-shop-filter-row] input[name$="[label_en]"]');
+    if (!field) return;
+    var row = field.closest('[data-shop-filter-row]');
+    var title = row ? row.querySelector('[data-shop-filter-title]') : null;
+    if (title) title.textContent = field.value || 'Option';
   });
 });
 </script>

@@ -10,10 +10,16 @@
 ## Content Management
 
 - Το `Content Management` οργανώθηκε σε page categories ώστε ο admin να μη χρειάζεται να κάνει μεγάλο scroll.
-- Προστέθηκαν categories για `Home`, `Custom Orders`, `About` και `Contact`.
+- Προστέθηκαν categories για `Home`, `Shop`, `Custom Orders`, `About` και `Contact`.
 - Το `Homepage Image Editor` μεταφέρθηκε μέσα στο `Content Management`, στο `Home` category.
 - Το παλιό sidebar item `Homepage Image Editor` αφαιρέθηκε, επειδή πλέον ανήκει στο `Content Management`.
 - Το `Home` category επιτρέπει edit στο hero box `Soft Handmade Crochet Treasures`, μαζί με title, subtitle, button text και button URL.
+- Το `Shop` category προστέθηκε αμέσως μετά το `Home` και επιτρέπει edit στα public shop filters.
+- Από το `Shop` category ο admin μπορεί να κάνει add, edit ή remove στα `Filters`, `Materials` και `Tags`.
+- Κάθε shop filter/material/tag έχει δικό του label EN/GR, visible status και assigned products, ώστε ο admin να ορίζει ποια products εμφανίζονται σε κάθε επιλογή.
+- Το price range του public shop slider ρυθμίζεται πλέον από `Content Management > Shop`.
+- Το `shop.php` διαβάζει τα filters/materials/tags/price range από το saved `shop_filter_config_json`, όχι από hard-coded tag/category logic.
+- Τα public filter options που δεν έχουν κανένα visible product δεν εμφανίζονται στο shop, ώστε να μην οδηγούν σε άδεια results χωρίς λόγο.
 - Το `Custom Orders` category επιτρέπει edit στα custom order steps για `website request` και `Instagram request`.
 - Τα custom order steps μπορούν πλέον να γίνουν add, edit ή remove από το dashboard.
 - Κάθε νέο step εμφανίζεται με το ίδιο style και text size στο public `custom_order.php`.
@@ -182,6 +188,7 @@
 - Το `git diff --check` δεν έδειξε whitespace errors, μόνο line-ending warnings τύπου `LF will be replaced by CRLF`.
 - Επιβεβαιώθηκε ότι το local PHP GD έχει WebP support (`webp-ok`).
 - Έγινε νέο isolated SQL import test σε temporary local database `athina_sql_import_check_20260501221816`.
+- Έγινε επιπλέον isolated SQL import test μετά το `Shop` Content Management update σε temporary local database `athina_sql_import_check_20260501223004`.
 - Το import του `sql/athina_eshop.sql` ολοκληρώθηκε χωρίς errors.
 - Επιβεβαιώθηκε ότι το `colors.colorName` δεν έχει πλέον unique index, ώστε να επιτρέπονται ίδια colour names σε διαφορετικά yarn types.
 - Ελέγχθηκαν sample colour labels: στο shop εμφανίζονται ως `Snow White` / `Baby Blue`, ενώ στο admin ως `Baby Anti Pilling - Snow White (Code 55)` ή `Velvet - Baby Blue (Code 218)`.
@@ -193,6 +200,7 @@
   - `system_config`: 38 rows
 - Επιβεβαιώθηκε ότι υπάρχει column `shipments.tracking_number`.
 - Επιβεβαιώθηκε ότι υπάρχει table `product_size_prices`.
+- Επιβεβαιώθηκε ότι το `system_config` περιέχει `shop_filter_config_json` με shop filters/materials/tags/price range.
 - Το temporary SQL validation database έγινε drop μετά τον έλεγχο, ώστε να μην επηρεαστεί το active local website database.
 
 ## Σημειώσεις
