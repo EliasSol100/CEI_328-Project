@@ -977,6 +977,9 @@ if ($csStmt) {
 if ($csRow) {
     $colorSchemeEnabled   = true;
     $colorSchemeNumColors = (int)($csRow['num_colors'] ?? 2);
+    if ($colorSchemeNumColors < 2 || $colorSchemeNumColors > 3) {
+        $colorSchemeNumColors = 2;
+    }
 
     $csPhotoStmt = $conn->prepare("SELECT id, photoPath FROM product_color_scheme_photos WHERE productID = ? ORDER BY sort_order ASC");
     if ($csPhotoStmt) {
@@ -1021,6 +1024,12 @@ if ($csRow) {
             $colorSchemeColors[] = $csColorRow;
         }
         $csColorsStmt->close();
+    }
+
+    if (count($colorSchemeColors) < $colorSchemeNumColors) {
+        $colorSchemeEnabled = false;
+        $colorSchemePhotos = [];
+        $colorSchemeColors = [];
     }
 }
 

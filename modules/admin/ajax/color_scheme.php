@@ -3,8 +3,11 @@ require_once __DIR__ . '/../includes/auth_check.php';
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../../../include/security.php';
 require_once __DIR__ . '/../../../include/image_storage.php';
+require_once __DIR__ . '/../../../include/product_option_helpers.php';
 
 header('Content-Type: application/json; charset=utf-8');
+
+app_product_options_ensure_schema($conn);
 
 $conn->query("
     CREATE TABLE IF NOT EXISTS product_color_scheme (
@@ -37,6 +40,45 @@ $action    = (string)($_POST['action']    ?? $_GET['action']    ?? '');
 $productID = (int)($_POST['productID']    ?? $_GET['productID'] ?? 0);
 $id        = (int)($_POST['id']           ?? $_GET['id']        ?? 0);
 
+function product_color_scheme_available_colour_count(mysqli $conn, int $productID): int
+{
+    if ($productID <= 0) {
+        return 0;
+    }
+
+    $stmt = $conn->prepare("
+        SELECT COUNT(DISTINCT product_colours.colorID) AS colourCount
+        FROM (
+            SELECT productID, colorID
+            FROM product_variations
+            WHERE colorID IS NOT NULL
+              AND (size IS NULL OR size = '')
+              AND (yarnType IS NULL OR yarnType = '')
+            UNION
+            SELECT productID, colorID
+            FROM product_color_photos
+            WHERE colorID IS NOT NULL
+        ) product_colours
+        JOIN colors c ON c.colorID = product_colours.colorID
+        LEFT JOIN product_color_availability pca ON pca.productID = product_colours.productID AND pca.colorID = product_colours.colorID
+        WHERE product_colours.productID = ?
+          AND c.isActive = 1
+          AND c.globalInventoryAvailable > 0
+          AND COALESCE(pca.isAvailable, 1) = 1
+    ");
+    if (!$stmt) {
+        return 0;
+    }
+
+    $stmt->bind_param('i', $productID);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $row = $res ? $res->fetch_assoc() : null;
+    $stmt->close();
+
+    return (int)($row['colourCount'] ?? 0);
+}
+
 if ($action === 'get_config' && $productID > 0) {
     $row = null;
     $stmt = $conn->prepare("SELECT num_colors, is_enabled FROM product_color_scheme WHERE productID = ?");
@@ -60,6 +102,23 @@ if ($action === 'save_config' && $productID > 0) {
     $isEnabled = (int)($_POST['is_enabled'] ?? 0);
     if ($numColors < 2 || $numColors > 3) $numColors = 2;
     $isEnabled = $isEnabled ? 1 : 0;
+    $availableColourCount = product_color_scheme_available_colour_count($conn, $productID);
+
+    if ($isEnabled && $availableColourCount < 2) {
+        echo json_encode([
+            'ok' => false,
+            'error' => 'Assign at least 2 available colours before enabling multi-colour selection.',
+        ]);
+        exit;
+    }
+
+    if ($isEnabled && $numColors > $availableColourCount) {
+        echo json_encode([
+            'ok' => false,
+            'error' => 'This product has only ' . $availableColourCount . ' available assigned colour(s).',
+        ]);
+        exit;
+    }
 
     $stmt = $conn->prepare("
         INSERT INTO product_color_scheme (productID, num_colors, is_enabled)

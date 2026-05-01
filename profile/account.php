@@ -730,6 +730,21 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             }
 
             if (!$errorMessage && ($emailChanged || $phoneChanged)) {
+                $stmt = $conn->prepare("
+                    UPDATE users
+                    SET first_name = ?, last_name = ?, full_name = ?, username = ?
+                    WHERE userID = ?
+                ");
+                $stmt->bind_param("ssssi", $firstName, $lastName, $fullNameNew, $username, $userId);
+                $stmt->execute();
+                $stmt->close();
+
+                $user["first_name"] = $firstName;
+                $user["last_name"]  = $lastName;
+                $user["full_name"]  = $fullNameNew;
+                $user["username"]   = $username;
+                $_SESSION["user"]["full_name"] = $fullNameNew;
+
                 $code    = random_int(100000, 999999);
                 $expires = date("Y-m-d H:i:s", time() + 10 * 60);
 
@@ -795,6 +810,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
     }
 }
+
+$fullName = $user["full_name"] ?? "User";
+$parts = preg_split('/\s+/', trim($fullName));
+$first = !empty($parts[0]) ? strtoupper(substr($parts[0], 0, 1)) : '';
+$last = (count($parts) > 1) ? strtoupper(substr((string)end($parts), 0, 1)) : "";
+$initials = $first . $last;
+$GLOBALS['header_user_full_name'] = $fullName;
+$GLOBALS['header_user_role'] = $role;
+$GLOBALS['header_user_initials'] = $initials;
 
 $addresses = [];
 $addrStmt = $conn->prepare("SELECT * FROM user_addresses WHERE user_id = ? ORDER BY is_default DESC, created_at ASC");
@@ -1123,6 +1147,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                                     <?php endif; ?>
 
                                                     <form method="post" class="d-inline">
+                                                        <?= app_csrf_input() ?>
                                                         <input type="hidden" name="action" value="reorder_order">
                                                         <input type="hidden" name="order_id" value="<?= $orderId ?>">
                                                         <input type="hidden" name="reorder_token" value="<?= htmlspecialchars($_SESSION["account_reorder_token"]) ?>">
@@ -1265,6 +1290,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                                     This is the address you provided during registration.
                                                 </p>
                                                 <form method="post" class="mt-auto">
+                                                    <?= app_csrf_input() ?>
                                                     <input type="hidden" name="action" value="delete_home_address">
                                                     <button type="submit"
                                                             class="btn btn-outline-danger btn-sm">
@@ -1316,6 +1342,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                                         </button>
 
                                                         <form method="post">
+                                                            <?= app_csrf_input() ?>
                                                             <input type="hidden" name="action" value="set_default_address">
                                                             <input type="hidden" name="address_id" value="<?= (int)$addr["id"] ?>">
                                                             <?php if (!$addr["is_default"]): ?>
@@ -1335,6 +1362,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                                         </form>
 
                                                         <form method="post">
+                                                            <?= app_csrf_input() ?>
                                                             <input type="hidden" name="action" value="delete_address">
                                                             <input type="hidden" name="address_id" value="<?= (int)$addr["id"] ?>">
                                                             <button type="submit"
@@ -1363,6 +1391,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                             <h4 class="mb-4" data-translate="settingsTitle">Account Settings</h4>
 
                             <form method="post" class="row g-3">
+                                <?= app_csrf_input() ?>
                                 <input type="hidden" name="action" value="update_settings">
 
                                 <div class="col-md-6">
@@ -1420,6 +1449,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
 <div class="modal fade" id="avatarModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <form class="modal-content" method="post" enctype="multipart/form-data">
+            <?= app_csrf_input() ?>
             <input type="hidden" name="action" value="update_avatar">
             <div class="modal-header">
                 <h5 class="modal-title" data-translate="avatarModalTitle">Change Profile Picture</h5>
@@ -1458,6 +1488,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
 <div class="modal fade" id="addressModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <form class="modal-content" method="post">
+            <?= app_csrf_input() ?>
             <input type="hidden" name="action" value="add_address">
             <div class="modal-header">
                 <h5 class="modal-title" data-translate="addressModalTitle">Add New Address</h5>
@@ -1529,6 +1560,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
 <div class="modal fade" id="editAddressModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <form class="modal-content" method="post">
+            <?= app_csrf_input() ?>
             <input type="hidden" name="action" value="edit_address">
             <input type="hidden" name="address_id" id="edit_address_id">
             <div class="modal-header">

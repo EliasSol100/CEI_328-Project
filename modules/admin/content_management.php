@@ -120,19 +120,20 @@ function cm_shop_filter_row(string $type, int $index, array $row, array $product
 
 function cm_shop_filter_section(string $type, string $title, string $icon, array $rows, array $products): void
 {
+    $addLabel = ['categories' => 'Filter', 'materials' => 'Material', 'tags' => 'Tag'][$type] ?? 'Option';
     ?>
     <div class="cms-panel" data-shop-filter-section="<?= app_h($type) ?>">
-      <div class="cms-panel-title"><i class="<?= app_h($icon) ?>"></i><?= app_h($title) ?></div>
+      <div class="cms-panel-title cms-panel-title-with-action">
+        <span class="cms-panel-title-label"><i class="<?= app_h($icon) ?>"></i><?= app_h($title) ?></span>
+        <button type="button" class="btn-secondary cms-panel-title-action" data-add-shop-filter="<?= app_h($type) ?>">
+          <i class="fas fa-plus"></i> Add <?= app_h($addLabel) ?>
+        </button>
+      </div>
       <input type="hidden" name="shop_filters[<?= app_h($type) ?>]" value="">
       <div data-shop-filter-list="<?= app_h($type) ?>">
         <?php foreach ($rows as $index => $row): ?>
           <?php cm_shop_filter_row($type, (int)$index, $row, $products); ?>
         <?php endforeach; ?>
-      </div>
-      <div class="cms-add-step-row">
-        <button type="button" class="btn-secondary" data-add-shop-filter="<?= app_h($type) ?>">
-          <i class="fas fa-plus"></i> Add <?= app_h(rtrim($title, 's')) ?>
-        </button>
       </div>
     </div>
     <?php
@@ -153,6 +154,9 @@ function cm_shop_filter_section(string $type, string $title, string $icon, array
     .cms-card-copy { color:#6b7280; font-size:13px; margin:-4px 0 18px; }
     .cms-panel { border:1px solid #e5e7eb; border-radius:8px; padding:16px; background:#f9fafb; margin-top:14px; }
     .cms-panel-title { font-size:14px; font-weight:700; color:#111827; margin:0 0 12px; display:flex; align-items:center; gap:8px; }
+    .cms-panel-title-with-action { justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    .cms-panel-title-label { display:inline-flex; align-items:center; gap:8px; }
+    .cms-panel-title-action { min-height:32px; padding:6px 12px; font-size:13px; }
     .cms-home-tools { display:grid; grid-template-columns:minmax(0,1fr); gap:14px; margin-bottom:18px; }
     .cms-tool-card { border:1px solid #e5e7eb; border-radius:8px; padding:16px; background:#fff; display:flex; align-items:center; justify-content:space-between; gap:16px; }
     .cms-tool-card-title { font-size:14px; font-weight:700; color:#111827; display:flex; align-items:center; gap:8px; margin-bottom:6px; }

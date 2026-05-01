@@ -473,6 +473,9 @@ $r = mysqli_query($conn,
             product_colours.colorID,
             {$colorDisplaySql} AS colorName,
             c.displayCode,
+            c.isActive,
+            c.globalInventoryAvailable,
+            COALESCE(pca.isAvailable, 1) AS productColorAvailable,
             GROUP_CONCAT(DISTINCT yt.typeName ORDER BY yt.typeName SEPARATOR ', ') AS typeNames
      FROM (
         SELECT productID, colorID
@@ -486,12 +489,16 @@ $r = mysqli_query($conn,
         WHERE colorID IS NOT NULL
      ) product_colours
      JOIN colors c ON c.colorID = product_colours.colorID
+     LEFT JOIN product_color_availability pca ON pca.productID = product_colours.productID AND pca.colorID = product_colours.colorID
      LEFT JOIN color_yarn_types cyt ON cyt.colorID = c.colorID
      LEFT JOIN yarn_types yt ON yt.typeID = cyt.typeID
-     GROUP BY product_colours.productID, product_colours.colorID, c.colorName, c.displayCode
+     GROUP BY product_colours.productID, product_colours.colorID, c.colorName, c.displayCode, c.isActive, c.globalInventoryAvailable, pca.isAvailable
      ORDER BY typeNames ASC, colorName ASC, c.displayCode ASC");
 if ($r) {
     while ($row = mysqli_fetch_assoc($r)) {
+        $isUsable = ((int)($row['isActive'] ?? 1) === 1)
+            && ((int)($row['globalInventoryAvailable'] ?? 0) > 0)
+            && ((int)($row['productColorAvailable'] ?? 1) === 1);
         $colorRow = [
             'colorID' => (int)$row['colorID'],
             'colorName' => (string)$row['colorName'],
@@ -503,6 +510,8 @@ if ($r) {
             'name' => (string)$row['colorName'],
             'code' => (string)($row['displayCode'] ?? ''),
             'typeNames' => (string)($row['typeNames'] ?? ''),
+            'available' => $isUsable ? 1 : 0,
+            'stock' => (int)($row['globalInventoryAvailable'] ?? 0),
             'label' => stock_colour_admin_label($colorRow),
         ];
     }
@@ -813,6 +822,7 @@ if ($r) {
           </select>
         </div>
         <div id="mcs-colour-summary" style="display:none;margin:-6px 0 18px;max-width:900px;font-size:12px;color:#4b5563"></div>
+        <div id="mcs-colour-count-warning" style="display:none;margin:-10px 0 16px;max-width:900px;font-size:13px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px"></div>
 
         <div id="mcs-config-area" style="display:none">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
@@ -829,7 +839,7 @@ if ($r) {
                   <option value="3">3 Colours (A + B + C)</option>
                 </select>
               </div>
-              <button type="button" class="btn-primary" onclick="mcsSaveConfig()" style="white-space:nowrap">
+              <button type="button" id="mcs-save-btn" class="btn-primary" onclick="mcsSaveConfig()" style="white-space:nowrap">
                 <i class="fas fa-save"></i> Save Config
               </button>
               <span id="mcs-save-msg" style="font-size:13px;color:#16a34a;display:none">Saved!</span>
@@ -1232,32 +1242,93 @@ function pcpDelete(id, btn) {
 
 function mcsRenderColourSummary(pid) {
   var summary = document.getElementById('mcs-colour-summary');
-  if (!summary) return;
+  if (!summary) return 0;
   summary.innerHTML = '';
   summary.style.display = 'none';
-  if (!pid) return;
+  if (!pid) return 0;
 
-  var colors = mcsColorMap[String(pid)] || mcsColorMap[pid] || [];
+  var colors = mcsAssignedColours(pid);
   summary.style.display = 'block';
   if (!colors.length) {
     summary.textContent = 'No assigned colours yet. Assign colours first in Assign Colours.';
-    return;
+    return 0;
   }
 
+  var usableCount = 0;
   var label = document.createElement('span');
   label.style.cssText = 'font-weight:600;margin-right:8px;color:#111827';
   label.textContent = 'Assigned colours:';
   summary.appendChild(label);
 
   colors.forEach(function (color) {
+    var usable = Number(color.available || 0) === 1;
+    if (usable) usableCount++;
     var chip = document.createElement('span');
-    chip.style.cssText = 'display:inline-flex;align-items:center;margin:3px 6px 3px 0;padding:4px 8px;border:1px solid #e5e7eb;border-radius:999px;background:#f9fafb;color:#374151';
-    chip.textContent = color.label || color.name || ('Colour #' + color.id);
+    chip.style.cssText = 'display:inline-flex;align-items:center;margin:3px 6px 3px 0;padding:4px 8px;border:1px solid ' + (usable ? '#e5e7eb' : '#fecaca') + ';border-radius:999px;background:' + (usable ? '#f9fafb' : '#fef2f2') + ';color:' + (usable ? '#374151' : '#991b1b');
+    chip.textContent = (color.label || color.name || ('Colour #' + color.id)) + (usable ? '' : ' (unavailable)');
     summary.appendChild(chip);
   });
+  return usableCount;
 }
 
 var mcsAjax = 'ajax/color_scheme.php';
+
+function mcsAssignedColours(pid) {
+  if (!pid) return [];
+  return mcsColorMap[String(pid)] || mcsColorMap[pid] || [];
+}
+
+function mcsUsableColourCount(pid) {
+  return mcsAssignedColours(pid).filter(function (color) {
+    return Number(color.available || 0) === 1;
+  }).length;
+}
+
+function mcsSetWarning(message) {
+  var warning = document.getElementById('mcs-colour-count-warning');
+  if (!warning) return;
+  warning.textContent = message || '';
+  warning.style.display = message ? 'block' : 'none';
+}
+
+function mcsSyncColourControls(pid) {
+  var usableCount = mcsUsableColourCount(pid);
+  var enabledEl = document.getElementById('mcs-enabled');
+  var colorsEl = document.getElementById('mcs-num-colors');
+  var saveBtn = document.getElementById('mcs-save-btn');
+  var canEnable = usableCount >= 2;
+
+  if (colorsEl) {
+    Array.from(colorsEl.options).forEach(function (option) {
+      var requiredCount = parseInt(option.value, 10) || 2;
+      option.disabled = requiredCount > usableCount;
+    });
+    var currentCount = parseInt(colorsEl.value, 10) || 2;
+    if (canEnable && currentCount > usableCount) {
+      colorsEl.value = String(Math.min(3, usableCount));
+    }
+  }
+
+  if (enabledEl) {
+    enabledEl.disabled = !canEnable;
+    if (!canEnable) {
+      enabledEl.checked = false;
+    }
+  }
+
+  if (saveBtn) {
+    var selectedCount = colorsEl ? (parseInt(colorsEl.value, 10) || 2) : 2;
+    saveBtn.disabled = !pid || (enabledEl && enabledEl.checked && (!canEnable || selectedCount > usableCount));
+  }
+
+  if (!pid) {
+    mcsSetWarning('');
+  } else if (!canEnable) {
+    mcsSetWarning('Assign at least 2 available colours before enabling multi-colour selection. Unavailable or out-of-stock colours cannot be used by customers.');
+  } else {
+    mcsSetWarning('');
+  }
+}
 
 function mcsLoadConfig() {
   var productEl = document.getElementById('mcs-product');
@@ -1272,6 +1343,7 @@ function mcsLoadConfig() {
   grid.innerHTML = '';
   empty.style.display = 'none';
   mcsRenderColourSummary(pid);
+  mcsSyncColourControls(pid);
   if (!pid) return;
   fetch(mcsAjax + '?action=get_config&productID=' + encodeURIComponent(pid))
     .then(function (res) { return res.json(); })
@@ -1280,7 +1352,8 @@ function mcsLoadConfig() {
       area.style.display = 'block';
       document.getElementById('mcs-enabled').checked = !!data.is_enabled;
       document.getElementById('mcs-num-colors').value = data.num_colors || 2;
-      if (data.is_enabled) {
+      mcsSyncColourControls(pid);
+      if (document.getElementById('mcs-enabled').checked) {
         opts.style.display = 'block';
         mcsLoadPhotos(pid);
       }
@@ -1291,9 +1364,16 @@ function mcsToggle() {
   var enabledEl = document.getElementById('mcs-enabled');
   var opts = document.getElementById('mcs-options');
   if (!enabledEl || !opts) return;
+  var pid = parseInt((document.getElementById('mcs-product') || {}).value || '0', 10) || 0;
+  var usableCount = mcsUsableColourCount(pid);
+  if (enabledEl.checked && usableCount < 2) {
+    enabledEl.checked = false;
+    mcsSyncColourControls(pid);
+    return;
+  }
   opts.style.display = enabledEl.checked ? 'block' : 'none';
+  mcsSyncColourControls(pid);
   if (enabledEl.checked) {
-    var pid = parseInt((document.getElementById('mcs-product') || {}).value || '0', 10) || 0;
     if (pid) mcsLoadPhotos(pid);
   }
 }
@@ -1305,16 +1385,27 @@ function mcsSaveConfig() {
   var msg = document.getElementById('mcs-save-msg');
   var pid = parseInt(productEl ? productEl.value : '0', 10) || 0;
   if (!pid || !enabledEl || !colorsEl) return;
+  var selectedCount = parseInt(colorsEl.value, 10) || 2;
+  var usableCount = mcsUsableColourCount(pid);
+  if (enabledEl.checked && selectedCount > usableCount) {
+    mcsSetWarning('This product only has ' + usableCount + ' available assigned colour(s). Assign more available colours or choose a lower number.');
+    return;
+  }
   var fd = new FormData();
   fd.append('action', 'save_config');
   fd.append('productID', pid);
   fd.append('is_enabled', enabledEl.checked ? 1 : 0);
-  fd.append('num_colors', parseInt(colorsEl.value, 10) || 2);
+  fd.append('num_colors', selectedCount);
   fd.append('csrf_token', window.APP_CSRF_TOKEN || '');
   fetch(mcsAjax, { method: 'POST', body: fd })
     .then(function (res) { return res.json(); })
     .then(function (data) {
-      if (!data.ok || !msg) return;
+      if (!data.ok) {
+        mcsSetWarning(data.error || 'Could not save multi-colour settings.');
+        return;
+      }
+      if (!msg) return;
+      mcsSetWarning('');
       msg.style.display = 'inline';
       setTimeout(function () { msg.style.display = 'none'; }, 2500);
     });
@@ -1398,6 +1489,14 @@ function mcsDeletePhoto(id, btn) {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
+  var mcsNumSelect = document.getElementById('mcs-num-colors');
+  if (mcsNumSelect) {
+    mcsNumSelect.addEventListener('change', function () {
+      var pid = parseInt((document.getElementById('mcs-product') || {}).value || '0', 10) || 0;
+      mcsSyncColourControls(pid);
+    });
+  }
+
   var activeStockTab = document.querySelector('[data-tab-group="stock-availability"] .tab-btn.active');
   if (activeStockTab) {
     var activeStockKey = activeStockTab.getAttribute('data-tab-key') || 'products';

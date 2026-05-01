@@ -16,6 +16,7 @@
 - Το `Home` category επιτρέπει edit στο hero box `Soft Handmade Crochet Treasures`, μαζί με title, subtitle, button text και button URL.
 - Το `Shop` category προστέθηκε αμέσως μετά το `Home` και επιτρέπει edit στα public shop filters.
 - Από το `Shop` category ο admin μπορεί να κάνει add, edit ή remove στα `Filters`, `Materials` και `Tags`.
+- Τα buttons `Add Filter`, `Add Material` και `Add Tag` μεταφέρθηκαν δίπλα στους τίτλους των αντίστοιχων sections, ώστε ο admin να μη χρειάζεται να ψάχνει στο κάτω μέρος κάθε box.
 - Κάθε shop filter/material/tag έχει δικό του label EN/GR, visible status και assigned products, ώστε ο admin να ορίζει ποια products εμφανίζονται σε κάθε επιλογή.
 - Το price range του public shop slider ρυθμίζεται πλέον από `Content Management > Shop`.
 - Το `shop.php` διαβάζει τα filters/materials/tags/price range από το saved `shop_filter_config_json`, όχι από hard-coded tag/category logic.
@@ -109,6 +110,10 @@
 - Το yarn type και το numeric display code κρατιούνται για admin reference σε `Assign Colours`, `Colour Inventory`, `Colour Photos` και `Multi-Colour`.
 - Τα admin dropdowns για `Colour Photos` δείχνουν label τύπου `Velvet - Baby Blue (Code 218)`, ώστε να ξεχωρίζουν ίδια colour names σε διαφορετικά yarn types.
 - Το `Multi-Colour` tab δείχνει summary με τα assigned colours του product με yarn type, colour name και code.
+- Το `Multi-Colour` πλέον επιτρέπει enable μόνο όταν το product έχει τουλάχιστον 2 available assigned colours.
+- Αν ο admin επιλέξει 3 colours αλλά υπάρχουν μόνο 2 available assigned colours, το option μπλοκάρεται και εμφανίζεται warning.
+- Το server-side save του `Multi-Colour` κάνει το ίδιο validation, ώστε να μη δημιουργηθεί broken customer flow αν γίνει bypass από frontend.
+- Το public `product.php` κρύβει το multi-colour selector αν αργότερα δεν υπάρχουν αρκετά available colours για τον αποθηκευμένο αριθμό επιλογών.
 - Το `colors.colorName` δεν είναι πλέον unique, επειδή φυσιολογικά το ίδιο colour name μπορεί να υπάρχει σε Baby Anti Pilling, Cotton, Puffy και Velvet.
 - Για νέα colours που προστίθενται από `Add Colour`, ο admin γράφει πραγματικό `Colour Name` όπως `Baby Blue`, επιλέγει ξεχωριστά `Yarn Type`, και το shop εμφανίζει το clean colour name.
 
@@ -131,6 +136,14 @@
   μετατρέπονται σε WebP όπου εφαρμόζεται image upload.
 - Το homepage image resize helper γράφει πλέον πραγματικό WebP όταν το target file είναι `.webp`.
 - Τα old DB photo blobs δεν αλλάζουν αυτόματα εκτός αν γίνει re-upload ή migration.
+
+## My Account
+
+- Ελέγχθηκε το `My Account` section για βασικές λειτουργίες: orders, reorder, loyalty, addresses, avatar upload και settings.
+- Προστέθηκαν missing CSRF inputs σε account forms που έκαναν POST, ώστε τα protected actions να μη αποτυγχάνουν σε reorder, address actions, settings και avatar upload.
+- Το profile avatar upload συνεχίζει να μετατρέπει uploaded image σε WebP.
+- Το settings flow κρατά πλέον σωστά αλλαγές σε first name, last name και username όταν ο customer αλλάζει ταυτόχρονα email ή phone και χρειάζεται verification code.
+- Τα header/account initials ανανεώνονται μετά από profile settings update.
 
 ## Order Management, receipt και tracking
 
@@ -189,6 +202,7 @@
 - Επιβεβαιώθηκε ότι το local PHP GD έχει WebP support (`webp-ok`).
 - Έγινε νέο isolated SQL import test σε temporary local database `athina_sql_import_check_20260501221816`.
 - Έγινε επιπλέον isolated SQL import test μετά το `Shop` Content Management update σε temporary local database `athina_sql_import_check_20260501223004`.
+- Έγινε νεότερο isolated SQL import test μετά τα `Multi-Colour`, `My Account` και `Content Management > Shop` button fixes σε temporary local database `athina_sql_import_check_20260501234500`.
 - Το import του `sql/athina_eshop.sql` ολοκληρώθηκε χωρίς errors.
 - Επιβεβαιώθηκε ότι το `colors.colorName` δεν έχει πλέον unique index, ώστε να επιτρέπονται ίδια colour names σε διαφορετικά yarn types.
 - Ελέγχθηκαν sample colour labels: στο shop εμφανίζονται ως `Snow White` / `Baby Blue`, ενώ στο admin ως `Baby Anti Pilling - Snow White (Code 55)` ή `Velvet - Baby Blue (Code 218)`.
@@ -197,7 +211,7 @@
   - `products`: 11 rows
   - `colors`: 40 rows
   - `custom_orders`: 1 row
-  - `system_config`: 38 rows
+  - `system_config`: 39 rows
 - Επιβεβαιώθηκε ότι υπάρχει column `shipments.tracking_number`.
 - Επιβεβαιώθηκε ότι υπάρχει table `product_size_prices`.
 - Επιβεβαιώθηκε ότι το `system_config` περιέχει `shop_filter_config_json` με shop filters/materials/tags/price range.
