@@ -120,6 +120,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $flash = 'ok:Colour updated.';
     }
 
+    if ($action === 'delete_color') {
+        $colorID = (int)$_POST['colorID'];
+        if ($colorID > 0) {
+            $photoRow = mysqli_query($conn, "SELECT MIN(photoPath) AS p FROM color_yarn_types WHERE colorID=$colorID");
+            $photoToDelete = $photoRow ? (mysqli_fetch_assoc($photoRow)['p'] ?? '') : '';
+
+            mysqli_query($conn, "DELETE FROM product_variations WHERE colorID=$colorID");
+            mysqli_query($conn, "DELETE FROM color_yarn_types WHERE colorID=$colorID");
+            mysqli_query($conn, "DELETE FROM colors WHERE colorID=$colorID");
+
+            if ($photoToDelete !== '' && file_exists(__DIR__ . '/../../' . $photoToDelete)) {
+                @unlink(__DIR__ . '/../../' . $photoToDelete);
+            }
+            $flash = 'ok:Colour deleted.';
+        }
+    }
+
     if ($action === 'update_sales_override') {
         $productID = (int)$_POST['productID'];
         $manualSales = max(0, (int)($_POST['manual_total_sales'] ?? 0));
@@ -709,17 +726,29 @@ $statusBadge = [
                 </form>
               </td>
               <td style="text-align:center">
-                <button type="button" class="btn-secondary colour-edit-btn"
-                  style="padding:5px 10px;font-size:12px"
-                  data-color-id="<?= (int)$c['colorID'] ?>"
-                  data-color-name="<?= htmlspecialchars($c['colorName'], ENT_QUOTES) ?>"
-                  data-hex="<?= htmlspecialchars($swatchHex, ENT_QUOTES) ?>"
-                  data-stock="<?= (int)$c['globalInventoryAvailable'] ?>"
-                  data-active="<?= (int)$c['isActive'] ?>"
-                  data-type-ids="<?= htmlspecialchars(json_encode($c['typeIDsArray']), ENT_QUOTES) ?>"
-                  title="Edit colour details">
-                  <i class="fas fa-pencil-alt"></i>
-                </button>
+                <div style="display:flex;gap:6px;justify-content:center;align-items:center">
+                  <button type="button" class="btn-secondary colour-edit-btn"
+                    style="padding:5px 10px;font-size:12px"
+                    data-color-id="<?= (int)$c['colorID'] ?>"
+                    data-color-name="<?= htmlspecialchars($c['colorName'], ENT_QUOTES) ?>"
+                    data-hex="<?= htmlspecialchars($swatchHex, ENT_QUOTES) ?>"
+                    data-stock="<?= (int)$c['globalInventoryAvailable'] ?>"
+                    data-active="<?= (int)$c['isActive'] ?>"
+                    data-type-ids="<?= htmlspecialchars(json_encode($c['typeIDsArray']), ENT_QUOTES) ?>"
+                    title="Edit colour details">
+                    <i class="fas fa-pencil-alt"></i>
+                  </button>
+                  <form method="POST" class="colour-delete-form" style="margin:0">
+                    <input type="hidden" name="action" value="delete_color">
+                    <input type="hidden" name="colorID" value="<?= (int)$c['colorID'] ?>">
+                    <button type="submit" class="btn-danger"
+                      style="padding:5px 10px;font-size:12px"
+                      title="Delete colour"
+                      data-color-name="<?= htmlspecialchars($c['colorName'], ENT_QUOTES) ?>">
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </form>
+                </div>
               </td>
             </tr>
             <?php endforeach; ?>
@@ -788,6 +817,15 @@ $statusBadge = [
 <script src="assets/admin.js?v=<?= (int)filemtime(__DIR__ . '/assets/admin.js') ?>"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+
+  document.querySelectorAll('.colour-delete-form').forEach(function(form) {
+    form.addEventListener('submit', function(e) {
+      var name = form.querySelector('[data-color-name]').getAttribute('data-color-name');
+      if (!confirm('Delete colour "' + name + '"? This will remove it from all products.')) {
+        e.preventDefault();
+      }
+    });
+  });
 
   var productColorMap = <?= json_encode($productColorMap, JSON_FORCE_OBJECT) ?>;
   var assignSelect = document.getElementById('assign-product-select');
