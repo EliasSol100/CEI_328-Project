@@ -98,10 +98,13 @@
 - Αν ένα colour έχει global stock 0, θεωρείται out of stock στο shop ακόμα και αν είναι assigned.
 - Τα product colour photos είναι synced με τα assigned colours.
 - Τα product colour photos και multi-colour diagrams μετατρέπονται σε WebP κατά το upload.
-- Στο shop/product page τα colour labels πλέον δείχνουν yarn colour name αντί για numeric code.
-- Παράδειγμα: `Velvet 13` με display code `13` εμφανίζεται ως `Velvet`.
-- Το numeric display code κρατιέται εσωτερικά για inventory/admin reference, αλλά δεν εμφανίζεται ως κύριο shop label.
-- Για νέα colours που προστίθενται από `Add Colour`, το shop θα εμφανίζει το clean colour/yarn name.
+- Στο shop/product page τα colour labels πλέον δείχνουν πραγματικό colour name αντί για yarn type ή numeric code.
+- Παράδειγμα: `Baby Blue 218` με display code `218` εμφανίζεται στον customer ως `Baby Blue`.
+- Το yarn type και το numeric display code κρατιούνται για admin reference σε `Assign Colours`, `Colour Inventory`, `Colour Photos` και `Multi-Colour`.
+- Τα admin dropdowns για `Colour Photos` δείχνουν label τύπου `Velvet - Baby Blue (Code 218)`, ώστε να ξεχωρίζουν ίδια colour names σε διαφορετικά yarn types.
+- Το `Multi-Colour` tab δείχνει summary με τα assigned colours του product με yarn type, colour name και code.
+- Το `colors.colorName` δεν είναι πλέον unique, επειδή φυσιολογικά το ίδιο colour name μπορεί να υπάρχει σε Baby Anti Pilling, Cotton, Puffy και Velvet.
+- Για νέα colours που προστίθενται από `Add Colour`, ο admin γράφει πραγματικό `Colour Name` όπως `Baby Blue`, επιλέγει ξεχωριστά `Yarn Type`, και το shop εμφανίζει το clean colour name.
 
 ## Images και WebP
 
@@ -178,8 +181,10 @@
 - Δεν βρέθηκαν PHP syntax errors.
 - Το `git diff --check` δεν έδειξε whitespace errors, μόνο line-ending warnings τύπου `LF will be replaced by CRLF`.
 - Επιβεβαιώθηκε ότι το local PHP GD έχει WebP support (`webp-ok`).
-- Έγινε isolated SQL import test σε temporary local database `athina_sql_import_check_20260501220155`.
+- Έγινε νέο isolated SQL import test σε temporary local database `athina_sql_import_check_20260501221816`.
 - Το import του `sql/athina_eshop.sql` ολοκληρώθηκε χωρίς errors.
+- Επιβεβαιώθηκε ότι το `colors.colorName` δεν έχει πλέον unique index, ώστε να επιτρέπονται ίδια colour names σε διαφορετικά yarn types.
+- Ελέγχθηκαν sample colour labels: στο shop εμφανίζονται ως `Snow White` / `Baby Blue`, ενώ στο admin ως `Baby Anti Pilling - Snow White (Code 55)` ή `Velvet - Baby Blue (Code 218)`.
 - Το temporary database είχε 40 tables μετά το import.
 - Ελέγχθηκαν βασικά tables μετά το import:
   - `products`: 11 rows

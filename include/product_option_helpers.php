@@ -136,6 +136,10 @@ if (!function_exists('app_product_options_ensure_schema')) {
                 mysqli_query($conn, "ALTER TABLE colors ADD COLUMN hexCode VARCHAR(7) NOT NULL DEFAULT '#ece6f6' AFTER colorName");
                 $addedColorHexColumn = true;
             }
+            $uniqueColorNameCheck = mysqli_query($conn, "SHOW INDEX FROM colors WHERE Key_name = 'uq_colors_colorName'");
+            if ($uniqueColorNameCheck && mysqli_num_rows($uniqueColorNameCheck) > 0) {
+                mysqli_query($conn, "ALTER TABLE colors DROP INDEX uq_colors_colorName");
+            }
 
             $seedColorHexSql = "UPDATE colors
                 SET hexCode = CASE LOWER(TRIM(colorName))

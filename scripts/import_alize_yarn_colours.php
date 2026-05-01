@@ -53,6 +53,59 @@ $selectedCodesBySlug = [
     'velluto' => ['13', '55', '199', '218', '310', '329', '340', '374', '416', '428'],
 ];
 
+$colourNamesBySlug = [
+    'baby-best' => [
+        '55' => 'Snow White',
+        '62' => 'Ivory Cream',
+        '185' => 'Baby Pink',
+        '237' => 'Cornflower Blue',
+        '250' => 'Lemon Yellow',
+        '287' => 'Aqua Teal',
+        '310' => 'Warm Beige',
+        '336' => 'Tangerine Orange',
+        '344' => 'Silver Grey',
+        '599' => 'Taupe Beige',
+    ],
+    'cotton-gold' => [
+        '1' => 'Ivory Cream',
+        '36' => 'Rust Brown',
+        '55' => 'Snow White',
+        '56' => 'Cherry Red',
+        '60' => 'Black',
+        '62' => 'Soft White',
+        '149' => 'Hot Pink',
+        '216' => 'Golden Yellow',
+        '279' => 'Navy Blue',
+        '287' => 'Turquoise Blue',
+    ],
+    'puffy' => [
+        '55' => 'Snow White',
+        '62' => 'Vanilla Cream',
+        '310' => 'Peach Cream',
+        '340' => 'Soft Pink',
+        '428' => 'Silver Grey',
+        '599' => 'Warm Oatmeal',
+    ],
+    'puffy-color' => [
+        '5865' => 'Sky Blue Mix',
+        '5923' => 'Lavender Pink Mix',
+        '6395' => 'Stone Beige Mix',
+        '6408' => 'Mint Grey Mix',
+    ],
+    'velluto' => [
+        '13' => 'Lemon Cream',
+        '55' => 'Snow White',
+        '199' => 'Camel Brown',
+        '218' => 'Baby Blue',
+        '310' => 'Peach Cream',
+        '329' => 'Mocha Brown',
+        '340' => 'Blush Pink',
+        '374' => 'Denim Blue',
+        '416' => 'Ice Grey',
+        '428' => 'Silver Grey',
+    ],
+];
+
 $legacyVelvetCodes = [13, 55, 62, 199, 218, 310, 329, 340, 374, 416, 428, 429, 530, 599, 866];
 $legacyVelvetStatus = alizeReadLegacyVelvetStatus($conn, $legacyVelvetCodes);
 
@@ -81,6 +134,7 @@ foreach ($catalogues as $catalogue) {
         $seenCodes[$code] = true;
 
         $colorId = alizeColorId($baseId, $code);
+        $colourName = $colourNamesBySlug[$slug][$code] ?? ($typeName . ' ' . $code);
         $selectedColorIds[] = $colorId;
         $stock = (int)$catalogue['defaultStock'];
         $isActive = 1;
@@ -93,7 +147,7 @@ foreach ($catalogues as $catalogue) {
         $downloadedFiles += $wasDownloaded ? 1 : 0;
         $reusedFiles += $wasDownloaded ? 0 : 1;
 
-        alizeUpsertColor($conn, $colorId, $typeName, $code, $stock, $isActive);
+        alizeUpsertColor($conn, $colorId, $colourName, $code, $stock, $isActive);
         alizeUpsertColorYarnType($conn, $colorId, $typeId, $photoPath);
         $catalogueCount++;
     }
@@ -243,9 +297,12 @@ function alizeDownloadSwatch(string $imageUrl, string $slug, string $code): arra
     return [$relativePath, true];
 }
 
-function alizeUpsertColor(mysqli $conn, int $colorId, string $typeName, string $displayCode, int $stock, int $isActive): void
+function alizeUpsertColor(mysqli $conn, int $colorId, string $colourName, string $displayCode, int $stock, int $isActive): void
 {
-    $colorName = $typeName . ' ' . $displayCode;
+    $colorName = trim($colourName);
+    if ($displayCode !== '' && !preg_match('/\s+' . preg_quote($displayCode, '/') . '$/u', $colorName)) {
+        $colorName = trim($colorName . ' ' . $displayCode);
+    }
     $hexCode = '#ece6f6';
 
     $stmt = $conn->prepare(

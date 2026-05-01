@@ -26,6 +26,33 @@ function stock_build_project_base_path(): string
     return $base;
 }
 
+function stock_colour_admin_label(array $row): string
+{
+    $typeNames = trim((string)($row['typeNames'] ?? $row['typeName'] ?? ''));
+    $displayName = trim((string)($row['displayName'] ?? $row['colorName'] ?? ''));
+    $displayCode = trim((string)($row['displayCode'] ?? ''));
+
+    $parts = [];
+    if ($typeNames !== '') {
+        $parts[] = $typeNames;
+    }
+    if ($displayName !== '') {
+        $parts[] = $displayName;
+    }
+
+    $label = implode(' - ', $parts);
+    if ($displayCode !== '') {
+        $label .= ($label !== '' ? ' ' : '') . '(Code ' . $displayCode . ')';
+    }
+
+    if ($label !== '') {
+        return $label;
+    }
+
+    $colorID = (int)($row['colorID'] ?? 0);
+    return $colorID > 0 ? 'Colour #' . $colorID : 'Colour';
+}
+
 function ensureProductSalesOverridesSchema(mysqli $conn): void {
     static $checked = false;
     if ($checked) {
@@ -290,7 +317,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $errors = [];
         if (!$colorID)   $errors[] = 'Color ID is required.';
-        if (!$colorName) $errors[] = 'Color Name is required.';
+        if (!$colorName) $errors[] = 'Colour Name is required.';
 
         $typeID = 0;
         if ($typeIDRaw === 'new') {
@@ -442,7 +469,11 @@ if ($r) {
 
 $pcpColorsByProduct = [];
 $r = mysqli_query($conn,
-    "SELECT DISTINCT product_colours.productID, product_colours.colorID, {$colorDisplaySql} AS colorName
+    "SELECT product_colours.productID,
+            product_colours.colorID,
+            {$colorDisplaySql} AS colorName,
+            c.displayCode,
+            GROUP_CONCAT(DISTINCT yt.typeName ORDER BY yt.typeName SEPARATOR ', ') AS typeNames
      FROM (
         SELECT productID, colorID
         FROM product_variations
@@ -455,12 +486,24 @@ $r = mysqli_query($conn,
         WHERE colorID IS NOT NULL
      ) product_colours
      JOIN colors c ON c.colorID = product_colours.colorID
-     ORDER BY c.colorName ASC");
+     LEFT JOIN color_yarn_types cyt ON cyt.colorID = c.colorID
+     LEFT JOIN yarn_types yt ON yt.typeID = cyt.typeID
+     GROUP BY product_colours.productID, product_colours.colorID, c.colorName, c.displayCode
+     ORDER BY typeNames ASC, colorName ASC, c.displayCode ASC");
 if ($r) {
     while ($row = mysqli_fetch_assoc($r)) {
+        $colorRow = [
+            'colorID' => (int)$row['colorID'],
+            'colorName' => (string)$row['colorName'],
+            'displayCode' => (string)($row['displayCode'] ?? ''),
+            'typeNames' => (string)($row['typeNames'] ?? ''),
+        ];
         $pcpColorsByProduct[(int)$row['productID']][] = [
             'id' => (int)$row['colorID'],
             'name' => (string)$row['colorName'],
+            'code' => (string)($row['displayCode'] ?? ''),
+            'typeNames' => (string)($row['typeNames'] ?? ''),
+            'label' => stock_colour_admin_label($colorRow),
         ];
     }
 }
@@ -497,6 +540,7 @@ $r = mysqli_query($conn, "
 if ($r) {
     while ($row = mysqli_fetch_assoc($r)) {
         $row['typeIDsArray'] = $row['typeIDs'] ? array_map('intval', explode(',', $row['typeIDs'])) : [];
+        $row['adminLabel'] = stock_colour_admin_label($row);
         $colours[] = $row;
     }
 }
@@ -768,6 +812,7 @@ if ($r) {
             <?php endforeach; ?>
           </select>
         </div>
+        <div id="mcs-colour-summary" style="display:none;margin:-6px 0 18px;max-width:900px;font-size:12px;color:#4b5563"></div>
 
         <div id="mcs-config-area" style="display:none">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
@@ -835,8 +880,8 @@ if ($r) {
             </div>
 
             <div>
-              <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Color Name *</label>
-              <input type="text" name="colorName" placeholder="e.g. Velvet"
+              <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Colour Name *</label>
+              <input type="text" name="colorName" placeholder="e.g. Baby Blue"
                 class="form-input" style="width:100%" required>
             </div>
 
@@ -1069,6 +1114,7 @@ function switchStockTab(btn) {
 }
 
 var pcpColorMap = <?= json_encode($pcpColorsByProduct, JSON_UNESCAPED_UNICODE) ?>;
+var mcsColorMap = pcpColorMap;
 var pcpAjax = 'ajax/product_color_photo.php';
 var stockBasePath = <?= json_encode(stock_build_project_base_path(), JSON_UNESCAPED_UNICODE) ?>;
 
@@ -1089,7 +1135,7 @@ function pcpLoadColors() {
   pcpColorMap[pid].forEach(function (color) {
     var opt = document.createElement('option');
     opt.value = color.id;
-    opt.textContent = color.id + ' — ' + color.name;
+    opt.textContent = color.label || (color.id + ' - ' + color.name);
     colorSel.appendChild(opt);
   });
   colorSel.disabled = false;
@@ -1184,6 +1230,33 @@ function pcpDelete(id, btn) {
     });
 }
 
+function mcsRenderColourSummary(pid) {
+  var summary = document.getElementById('mcs-colour-summary');
+  if (!summary) return;
+  summary.innerHTML = '';
+  summary.style.display = 'none';
+  if (!pid) return;
+
+  var colors = mcsColorMap[String(pid)] || mcsColorMap[pid] || [];
+  summary.style.display = 'block';
+  if (!colors.length) {
+    summary.textContent = 'No assigned colours yet. Assign colours first in Assign Colours.';
+    return;
+  }
+
+  var label = document.createElement('span');
+  label.style.cssText = 'font-weight:600;margin-right:8px;color:#111827';
+  label.textContent = 'Assigned colours:';
+  summary.appendChild(label);
+
+  colors.forEach(function (color) {
+    var chip = document.createElement('span');
+    chip.style.cssText = 'display:inline-flex;align-items:center;margin:3px 6px 3px 0;padding:4px 8px;border:1px solid #e5e7eb;border-radius:999px;background:#f9fafb;color:#374151';
+    chip.textContent = color.label || color.name || ('Colour #' + color.id);
+    summary.appendChild(chip);
+  });
+}
+
 var mcsAjax = 'ajax/color_scheme.php';
 
 function mcsLoadConfig() {
@@ -1198,6 +1271,7 @@ function mcsLoadConfig() {
   opts.style.display = 'none';
   grid.innerHTML = '';
   empty.style.display = 'none';
+  mcsRenderColourSummary(pid);
   if (!pid) return;
   fetch(mcsAjax + '?action=get_config&productID=' + encodeURIComponent(pid))
     .then(function (res) { return res.json(); })
