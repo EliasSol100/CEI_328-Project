@@ -275,6 +275,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
 
+            // Auto-assign new colour to all published products
+            $prodRes = mysqli_query($conn,
+                "SELECT productID FROM products
+                 WHERE cartStatus IN ('active','low_stock','out_of_stock','made_to_order')");
+            if ($prodRes) {
+                $autoAssignStmt = mysqli_prepare($conn,
+                    "INSERT IGNORE INTO product_variations (productID, colorID) VALUES (?, ?)");
+                if ($autoAssignStmt) {
+                    while ($prodRow = mysqli_fetch_assoc($prodRes)) {
+                        $pid = (int)$prodRow['productID'];
+                        mysqli_stmt_bind_param($autoAssignStmt, 'ii', $pid, $colorID);
+                        mysqli_stmt_execute($autoAssignStmt);
+                    }
+                    mysqli_stmt_close($autoAssignStmt);
+                }
+                mysqli_query($conn,
+                    "UPDATE products SET hasVariants = 1
+                     WHERE cartStatus IN ('active','low_stock','out_of_stock','made_to_order')");
+            }
+
             $flash = 'ok:Colour added successfully.';
         }
     }
