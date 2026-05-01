@@ -1134,9 +1134,6 @@ include __DIR__ . "/include/header.php";
                                 <span class="colour-chip-swatch" style="background:<?= htmlspecialchars((string)($color['hex'] ?? '#ece6f6')) ?>"></span>
                             <?php endif; ?>
                             <span class="colour-chip-label"><?= htmlspecialchars((string)($color['name'] ?? '')) ?></span>
-                            <?php if ($chipIsActive === 0): ?>
-                                <span class="colour-chip-oos-label" data-translate="outOfStock">Out of stock</span>
-                            <?php endif; ?>
                         </button>
                         <?php endforeach; ?>
                     <?php endforeach; ?>
