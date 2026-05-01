@@ -94,14 +94,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
+        $existingPhoto = '';
+        $fetchPhoto = mysqli_prepare($conn, "SELECT MIN(photoPath) AS p FROM color_yarn_types WHERE colorID=?");
+        if ($fetchPhoto) {
+            mysqli_stmt_bind_param($fetchPhoto, 'i', $colorID);
+            mysqli_stmt_execute($fetchPhoto);
+            mysqli_stmt_bind_result($fetchPhoto, $existingPhoto);
+            mysqli_stmt_fetch($fetchPhoto);
+            mysqli_stmt_close($fetchPhoto);
+        }
+        $finalPhoto = isset($photoPath) ? $photoPath : (string)($existingPhoto ?? '');
+
         $submittedTypeIDs = array_filter(array_map('intval', $_POST['typeIDs'] ?? []));
         $delStmt = mysqli_prepare($conn, "DELETE FROM color_yarn_types WHERE colorID=?");
         mysqli_stmt_bind_param($delStmt, 'i', $colorID);
         mysqli_stmt_execute($delStmt);
         mysqli_stmt_close($delStmt);
         foreach ($submittedTypeIDs as $typeID) {
-            $insStmt = mysqli_prepare($conn, "INSERT IGNORE INTO color_yarn_types (colorID, typeID) VALUES (?,?)");
-            mysqli_stmt_bind_param($insStmt, 'ii', $colorID, $typeID);
+            $insStmt = mysqli_prepare($conn, "INSERT IGNORE INTO color_yarn_types (colorID, typeID, photoPath) VALUES (?,?,?)");
+            mysqli_stmt_bind_param($insStmt, 'iis', $colorID, $typeID, $finalPhoto);
             mysqli_stmt_execute($insStmt);
             mysqli_stmt_close($insStmt);
         }
