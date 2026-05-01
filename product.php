@@ -738,11 +738,12 @@ if (!empty($uniqueColors)) {
 $colorsByYarnTypeJson = [];
 foreach ($colorsByYarnType as $typeName => $typeColors) {
     $colorsByYarnTypeJson[$typeName] = array_values(array_map(static fn($c) => [
-        'id'       => (int)($c['id'] ?? 0),
-        'name'     => (string)($c['name'] ?? ''),
-        'hex'      => (string)($c['hex'] ?? '#ece6f6'),
-        'typeId'   => (int)($c['typeId'] ?? 0),
-        'typeName' => (string)($c['typeName'] ?? ''),
+        'id'        => (int)($c['id'] ?? 0),
+        'name'      => (string)($c['name'] ?? ''),
+        'hex'       => (string)($c['hex'] ?? '#ece6f6'),
+        'photoPath' => (string)($c['photoPath'] ?? ''),
+        'typeId'    => (int)($c['typeId'] ?? 0),
+        'typeName'  => (string)($c['typeName'] ?? ''),
     ], $typeColors));
 }
 
@@ -1109,32 +1110,24 @@ include __DIR__ . "/include/header.php";
                 <?php endif; ?>
 
                 <div class="option-label" data-translate="productColorLabel">Colour</div>
-                <div class="colour-select-row">
-                    <select id="color-select" class="product-option-select" <?= $hasMultipleYarnTypes ? 'disabled' : '' ?>>
-                        <option value="">— Choose colour —</option>
-                        <?php if (!$hasMultipleYarnTypes): ?>
-                            <?php foreach (reset($colorsByYarnType) ?: [] as $color): ?>
-                                <option value="<?= (int)$color['id'] ?>"
-                                    data-hex="<?= htmlspecialchars((string)($color['hex'] ?? '#ece6f6')) ?>"
-                                    data-color-name="<?= htmlspecialchars((string)($color['name'] ?? ''), ENT_QUOTES) ?>"
-                                    data-yarn-type-name="<?= htmlspecialchars((string)($color['typeName'] ?? ''), ENT_QUOTES) ?>">
-                                    <?= htmlspecialchars((string)($color['name'] ?? '')) ?>
-                                </option>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </select>
-                    <span id="colour-swatch-preview" style="display:none"></span>
-                </div>
-
-                <div id="color-chips-hidden" style="display:none" aria-hidden="true">
+                <div class="colour-chip-row" id="colour-chip-row">
                     <?php foreach ($colorsByYarnType as $typeName => $typeColors): ?>
                         <?php foreach ($typeColors as $color): ?>
-                            <button type="button" class="color-chip-btn"
-                                data-color-id="<?= (int)$color['id'] ?>"
-                                data-color-name="<?= htmlspecialchars((string)($color['name'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
-                                data-yarn-type-id="<?= (int)($color['typeId'] ?? 0) ?>"
-                                data-yarn-type-name="<?= htmlspecialchars((string)($color['typeName'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
-                            </button>
+                        <?php $chipPhoto = app_image_prefer_optimized_asset_path((string)($color['photoPath'] ?? '')); ?>
+                        <button type="button" class="colour-chip color-chip-btn"
+                            data-color-id="<?= (int)$color['id'] ?>"
+                            data-color-name="<?= htmlspecialchars((string)($color['name'] ?? ''), ENT_QUOTES) ?>"
+                            data-yarn-type-id="<?= (int)($color['typeId'] ?? 0) ?>"
+                            data-yarn-type-name="<?= htmlspecialchars((string)($color['typeName'] ?? ''), ENT_QUOTES) ?>"
+                            data-hex="<?= htmlspecialchars((string)($color['hex'] ?? '#ece6f6')) ?>"
+                            <?= ($hasMultipleYarnTypes) ? 'style="display:none"' : '' ?>>
+                            <?php if ($chipPhoto !== ''): ?>
+                                <img src="/athina-eshop/<?= htmlspecialchars($chipPhoto) ?>" alt="<?= htmlspecialchars((string)($color['name'] ?? '')) ?>">
+                            <?php else: ?>
+                                <span class="colour-chip-swatch" style="background:<?= htmlspecialchars((string)($color['hex'] ?? '#ece6f6')) ?>"></span>
+                            <?php endif; ?>
+                            <span class="colour-chip-label"><?= htmlspecialchars((string)($color['name'] ?? '')) ?></span>
+                        </button>
                         <?php endforeach; ?>
                     <?php endforeach; ?>
                 </div>
@@ -1952,37 +1945,14 @@ include __DIR__ . "/include/header.php";
 
     var colorsByYarnTypeData = <?= json_encode($colorsByYarnTypeJson, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
     var yarnTypeSelectEl = document.getElementById("yarn-type-select");
-    var colorSelectEl    = document.getElementById("color-select");
-    var swatchPreview    = document.getElementById("colour-swatch-preview");
-
-    function updateSwatchPreview(hex) {
-        if (!swatchPreview) return;
-        if (hex) {
-            swatchPreview.style.background = hex;
-            swatchPreview.style.display = "inline-block";
-        } else {
-            swatchPreview.style.display = "none";
-        }
-    }
-
-    function populateColorDropdown(typeName) {
-        if (!colorSelectEl) return;
-        colorSelectEl.innerHTML = '<option value="">— Choose colour —</option>';
-        var colors = colorsByYarnTypeData[typeName] || [];
-        colors.forEach(function (color) {
-            var opt = document.createElement("option");
-            opt.value = color.id;
-            opt.textContent = color.name;
-            opt.dataset.hex = color.hex;
-            opt.dataset.colorName = color.name;
-            opt.dataset.yarnTypeName = color.typeName || typeName;
-            colorSelectEl.appendChild(opt);
+    function filterChipsByYarnType(typeName) {
+        colorChips.forEach(function (chip) {
+            var chipType = chip.getAttribute("data-yarn-type-name") || "";
+            chip.style.display = (!typeName || chipType === typeName) ? "" : "none";
+            chip.classList.remove("active");
         });
-        colorSelectEl.disabled = colors.length === 0;
-        colorSelectEl.value = "";
         selectedColorId = null;
         selectedColorName = "";
-        updateSwatchPreview(null);
     }
 
     function triggerColorChip(colorId) {
@@ -2006,28 +1976,10 @@ include __DIR__ . "/include/header.php";
     if (yarnTypeSelectEl) {
         yarnTypeSelectEl.addEventListener("change", function () {
             selectedYarnTypeName = this.value;
-            selectedColorId = null;
-            selectedColorName = "";
-            populateColorDropdown(this.value);
+            filterChipsByYarnType(this.value);
             updateColorChips();
             updateColorStockDisplay();
             updateAddToCartState(validationStarted);
-        });
-    }
-
-    if (colorSelectEl) {
-        colorSelectEl.addEventListener("change", function () {
-            var colorId = parseInt(this.value || "0", 10) || 0;
-            var opt = this.options[this.selectedIndex];
-            var hex = opt ? (opt.dataset.hex || "#ece6f6") : "#ece6f6";
-            if (opt && opt.dataset.yarnTypeName) {
-                selectedYarnTypeName = opt.dataset.yarnTypeName;
-            }
-            updateSwatchPreview(colorId ? hex : null);
-            triggerColorChip(colorId);
-            if (opt && opt.dataset.colorName) {
-                selectedColorName = opt.dataset.colorName;
-            }
         });
     }
 
