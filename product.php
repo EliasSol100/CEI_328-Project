@@ -561,7 +561,7 @@ if ($cpStmt) {
 $variations = [];
 $variationStmt = $conn->prepare(
     "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, pv.price,
-            c.colorName, c.hexCode,
+            c.colorName, c.hexCode, c.isActive,
             COALESCE(vs.quantityAvailable, p.inventory, 0) AS stock,
             cyt.photoPath
      FROM product_variations pv
@@ -574,7 +574,7 @@ $variationStmt = $conn->prepare(
          GROUP BY colorID
      ) cyt ON cyt.colorID = pv.colorID
      WHERE pv.productID = ?
-       AND (pv.colorID IS NULL OR c.isActive = 1)
+       AND (pv.colorID IS NULL OR c.colorID IS NOT NULL)
      ORDER BY pv.variationID ASC"
 );
 if ($variationStmt) {
@@ -593,6 +593,7 @@ if ($variationStmt) {
             "price" => isset($row["price"]) ? (float)$row["price"] : null,
             "stock" => (int)($row["stock"] ?? 0),
             "photoPath" => app_image_prefer_optimized_asset_path((string)($row["photoPath"] ?? '')),
+            "isActive" => (int)($row["isActive"] ?? 1),
         ];
     }
     $variationStmt->close();
@@ -641,10 +642,11 @@ foreach ($variations as $variation) {
     }
     $colorName = trim((string)($variation["colorName"] ?? ""));
     $uniqueColors[$colorId] = [
-        "id" => $colorId,
-        "name" => $colorName !== "" ? $colorName : ("Color " . $colorId),
-        "hex" => $variation["hexCode"] ?? "#ece6f6",
-        "photoPath" => $variation["photoPath"] ?? null,
+        "id"       => $colorId,
+        "name"     => $colorName !== "" ? $colorName : ("Color " . $colorId),
+        "hex"      => $variation["hexCode"] ?? "#ece6f6",
+        "photoPath"=> $variation["photoPath"] ?? null,
+        "isActive" => (int)($variation["isActive"] ?? 1),
     ];
 }
 
@@ -1112,14 +1114,19 @@ include __DIR__ . "/include/header.php";
                 <div class="option-label" data-translate="productColorLabel">Colour</div>
                 <div class="colour-chip-row" id="colour-chip-row">
                     <?php foreach ($colorsByYarnType as $typeName => $typeColors): ?>
-                        <?php foreach ($typeColors as $color): ?>
-                        <?php $chipPhoto = app_image_prefer_optimized_asset_path((string)($color['photoPath'] ?? '')); ?>
-                        <button type="button" class="colour-chip color-chip-btn"
+                        <?php foreach ($typeColors as $color):
+                            $chipPhoto    = app_image_prefer_optimized_asset_path((string)($color['photoPath'] ?? ''));
+                            $chipIsActive = (int)($color['isActive'] ?? 1);
+                        ?>
+                        <button type="button"
+                            class="colour-chip color-chip-btn<?= $chipIsActive === 0 ? ' colour-chip--oos' : '' ?>"
                             data-color-id="<?= (int)$color['id'] ?>"
                             data-color-name="<?= htmlspecialchars((string)($color['name'] ?? ''), ENT_QUOTES) ?>"
                             data-yarn-type-id="<?= (int)($color['typeId'] ?? 0) ?>"
                             data-yarn-type-name="<?= htmlspecialchars((string)($color['typeName'] ?? ''), ENT_QUOTES) ?>"
                             data-hex="<?= htmlspecialchars((string)($color['hex'] ?? '#ece6f6')) ?>"
+                            data-available="<?= $chipIsActive ?>"
+                            <?= $chipIsActive === 0 ? 'disabled' : '' ?>
                             <?= ($hasMultipleYarnTypes) ? 'style="display:none"' : '' ?>>
                             <?php if ($chipPhoto !== ''): ?>
                                 <img src="/athina-eshop/<?= htmlspecialchars($chipPhoto) ?>" alt="<?= htmlspecialchars((string)($color['name'] ?? '')) ?>">
@@ -1127,6 +1134,9 @@ include __DIR__ . "/include/header.php";
                                 <span class="colour-chip-swatch" style="background:<?= htmlspecialchars((string)($color['hex'] ?? '#ece6f6')) ?>"></span>
                             <?php endif; ?>
                             <span class="colour-chip-label"><?= htmlspecialchars((string)($color['name'] ?? '')) ?></span>
+                            <?php if ($chipIsActive === 0): ?>
+                                <span class="colour-chip-oos-label" data-translate="outOfStock">Out of stock</span>
+                            <?php endif; ?>
                         </button>
                         <?php endforeach; ?>
                     <?php endforeach; ?>

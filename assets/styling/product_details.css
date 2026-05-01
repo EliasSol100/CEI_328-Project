@@ -307,6 +307,21 @@
     filter: grayscale(0.3);
 }
 
+.colour-chip--oos {
+    opacity: 0.55;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.colour-chip-oos-label {
+    font-size: 9px;
+    color: #ef4444;
+    font-weight: 600;
+    text-align: center;
+    margin-top: 2px;
+    letter-spacing: 0.02em;
+}
+
 #colour-swatch-preview {
     width: 28px;
     height: 28px;
