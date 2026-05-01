@@ -714,6 +714,21 @@
     box-shadow: 0 0 0 4px rgba(183, 118, 242, 0.16);
 }
 
+.custom-order-access-form input[type="text"] {
+    width: 100%;
+    padding: 14px 16px;
+    border-radius: 18px;
+    border: 2px solid #ead8ff;
+    font-size: 16px;
+    color: #283548;
+}
+
+.custom-order-access-form input[type="text"]:focus {
+    outline: none;
+    border-color: #b776f2;
+    box-shadow: 0 0 0 4px rgba(183, 118, 242, 0.16);
+}
+
 .empty-state {
     padding: 22px;
     border-radius: 20px;

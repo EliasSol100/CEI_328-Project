@@ -100,11 +100,11 @@ if ($action === 'upload_photo' && $productID > 0) {
         exit;
     }
 
-    $filename = 'pcs_' . $productID . '_' . uniqid('', true) . '.jpg';
+    $filename = 'pcs_' . $productID . '_' . uniqid('', true) . '.webp';
     $dest     = $dir . $filename;
 
-    if (!app_image_convert_file_to_jpeg($tmpName, $dest, 1200, 1200, 86)) {
-        echo json_encode(['ok' => false, 'error' => 'Could not convert image to JPG']);
+    if (!app_image_convert_file_to_webp($tmpName, $dest, 1200, 1200, 86)) {
+        echo json_encode(['ok' => false, 'error' => 'Could not convert image to WebP']);
         exit;
     }
 

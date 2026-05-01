@@ -6,6 +6,7 @@ if (!defined('INCLUDE_CHECK') && !defined('PLACE_ORDER_DIRECT')) {
 
 require_once __DIR__ . '/stock_management.php';
 require_once __DIR__ . '/../include/product_option_helpers.php';
+require_once __DIR__ . '/../include/order_tracking_helpers.php';
 
 function notifyAdminNewOrder(mysqli $conn, string $message): void {
     static $tableChecked = false;
@@ -56,6 +57,8 @@ function ensureOrderShippingSchema(mysqli $conn): void {
             $conn->query($alterSql);
         }
     }
+
+    app_order_tracking_ensure_schema($conn);
 }
 
 function ensureCustomOrderBridgeSchema(mysqli $conn): void {
@@ -104,7 +107,7 @@ function createCustomOrdersForMadeToOrderCheckout(
 
     ensureCustomOrderBridgeSchema($conn);
     $created = 0;
-    $status = 'pending';
+    $status = 'completed';
     $deadline = null;
 
     foreach ($madeToOrderItems as $item) {
@@ -141,6 +144,7 @@ function createCustomOrdersForMadeToOrderCheckout(
                     $syncSql = "
                         UPDATE custom_orders
                         SET
+                            status = 'completed',
                             email = CASE WHEN TRIM(COALESCE(email, '')) = '' THEN ? ELSE email END,
                             customerName = CASE WHEN TRIM(COALESCE(customerName, '')) = '' THEN ? ELSE customerName END,
                             sourceOrderID = ?,
@@ -390,7 +394,6 @@ function placeOrder(mysqli $conn, array $input): array {
     }
 
     $madeToOrderItems = [];
-    $salesIncrements  = [];
 
     foreach ($items as $item) {
         $productID = (int)($item['productID'] ?? $item['product_id'] ?? $item['product']['id'] ?? 0);
@@ -409,7 +412,6 @@ function placeOrder(mysqli $conn, array $input): array {
         }
 
         $quantity = max(1, (int)($item['quantity'] ?? 1));
-        $salesIncrements[$productID] = ($salesIncrements[$productID] ?? 0) + $quantity;
         $unitPrice = (float)($item['price'] ?? $item['pricing']['unitTotal'] ?? $item['product']['basePrice'] ?? 0);
         $giftWrapping = !empty($item['addons']['giftWrapping']) ? 1 : 0;
         $giftBagFlag = !empty($item['addons']['giftBagFlag']) ? 1 : 0;
@@ -452,19 +454,6 @@ function placeOrder(mysqli $conn, array $input): array {
         }
     }
     $lineStmt->close();
-
-    if (!empty($salesIncrements)) {
-        $incrStmt = $conn->prepare(
-            "UPDATE product_sales_overrides SET manual_total_sales = manual_total_sales + ? WHERE productID = ?"
-        );
-        if ($incrStmt) {
-            foreach ($salesIncrements as $incrPid => $incrQty) {
-                $incrStmt->bind_param('ii', $incrQty, $incrPid);
-                $incrStmt->execute();
-            }
-            $incrStmt->close();
-        }
-    }
 
     $createdCustomOrders = createCustomOrdersForMadeToOrderCheckout(
         $conn,

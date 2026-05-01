@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/translation_helpers.php';
 require_once __DIR__ . '/security.php';
+require_once __DIR__ . '/platform_integrations.php';
 
 if (!function_exists('app_product_warning_lines')) {
     function app_product_warning_lines(string $text): array
@@ -20,27 +21,41 @@ if (!function_exists('app_product_warning_lines')) {
     }
 }
 
+if (!function_exists('app_product_warning_messages_from_texts')) {
+    function app_product_warning_messages_from_texts(string $warningEN, string $warningGR): array
+    {
+        $englishLines = app_product_warning_lines($warningEN !== '' ? $warningEN : $warningGR);
+        $greekLines = app_product_warning_lines($warningGR !== '' ? $warningGR : $warningEN);
+        $count = max(count($englishLines), count($greekLines));
+        $lastEnglishLine = $englishLines !== [] ? $englishLines[count($englishLines) - 1] : '';
+        $lastGreekLine = $greekLines !== [] ? $greekLines[count($greekLines) - 1] : '';
+        $messages = [];
+        for ($i = 0; $i < $count; $i++) {
+            $messages[] = [
+                'en' => $englishLines[$i] ?? $lastEnglishLine,
+                'el' => $greekLines[$i] ?? $lastGreekLine,
+            ];
+        }
+
+        return array_values(array_filter($messages, static function (array $warning): bool {
+            return trim((string)$warning['en']) !== '' || trim((string)$warning['el']) !== '';
+        }));
+    }
+}
+
 if (!function_exists('app_product_warning_messages')) {
     function app_product_warning_messages(?array $product = null): array
     {
         $customEn = trim((string)($product['productWarningEN'] ?? ''));
         $customEl = trim((string)($product['productWarningGR'] ?? ''));
         if ($customEn !== '' || $customEl !== '') {
-            $englishLines = app_product_warning_lines($customEn !== '' ? $customEn : $customEl);
-            $greekLines = app_product_warning_lines($customEl !== '' ? $customEl : $customEn);
-            $count = max(count($englishLines), count($greekLines));
-            $lastEnglishLine = $englishLines !== [] ? $englishLines[count($englishLines) - 1] : '';
-            $lastGreekLine = $greekLines !== [] ? $greekLines[count($greekLines) - 1] : '';
-            $messages = [];
-            for ($i = 0; $i < $count; $i++) {
-                $messages[] = [
-                    'en' => $englishLines[$i] ?? $lastEnglishLine,
-                    'el' => $greekLines[$i] ?? $lastGreekLine,
-                ];
-            }
-            return array_values(array_filter($messages, static function (array $warning): bool {
-                return trim((string)$warning['en']) !== '' || trim((string)$warning['el']) !== '';
-            }));
+            return app_product_warning_messages_from_texts($customEn, $customEl);
+        }
+
+        $globalEn = trim((string)($product['_globalProductWarningEN'] ?? ''));
+        $globalEl = trim((string)($product['_globalProductWarningGR'] ?? ''));
+        if ($globalEn !== '' || $globalEl !== '') {
+            return app_product_warning_messages_from_texts($globalEn, $globalEl);
         }
 
         return [
@@ -53,6 +68,49 @@ if (!function_exists('app_product_warning_messages')) {
                 'el' => 'Αποποίηση ευθύνης: Οι φωτογραφίες αποτελούν μια κατά προσέγγιση απεικόνιση του τελικού χρώματος. Λόγω διαφορών στα υλικά, στις ρυθμίσεις των ψηφιακών οθονών και στις παραλλαγές παραγωγής, δεν μπορούμε να εγγυηθούμε ότι το χρώμα που βλέπετε στην οθόνη σας είναι ακριβώς το πραγματικό χρώμα του προϊόντος.',
             ],
         ];
+    }
+}
+
+if (!function_exists('app_product_warning_builtin_texts')) {
+    function app_product_warning_builtin_texts(): array
+    {
+        $englishLines = [];
+        $greekLines = [];
+        foreach (app_product_warning_messages(null) as $warning) {
+            $englishLines[] = (string)($warning['en'] ?? '');
+            $greekLines[] = (string)($warning['el'] ?? '');
+        }
+
+        return [
+            'en' => trim(implode("\n", array_filter($englishLines, static fn(string $line): bool => trim($line) !== ''))),
+            'gr' => trim(implode("\n", array_filter($greekLines, static fn(string $line): bool => trim($line) !== ''))),
+        ];
+    }
+}
+
+if (!function_exists('app_product_global_warning_texts')) {
+    function app_product_global_warning_texts(mysqli $conn): array
+    {
+        $defaults = app_product_warning_builtin_texts();
+        app_system_config_seed_defaults($conn, [
+            'product_warning_default_en' => $defaults['en'],
+            'product_warning_default_gr' => $defaults['gr'],
+        ]);
+
+        return [
+            'en' => app_system_config_get($conn, 'product_warning_default_en', $defaults['en']),
+            'gr' => app_system_config_get($conn, 'product_warning_default_gr', $defaults['gr']),
+        ];
+    }
+}
+
+if (!function_exists('app_product_global_warning_save')) {
+    function app_product_global_warning_save(mysqli $conn, ?string $warningEN, ?string $warningGR): bool
+    {
+        return app_system_config_set_many($conn, [
+            'product_warning_default_en' => trim((string)$warningEN),
+            'product_warning_default_gr' => trim((string)$warningGR),
+        ]);
     }
 }
 

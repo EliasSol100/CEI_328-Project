@@ -5,6 +5,7 @@ require_once __DIR__ . "/authentication/database.php";
 require_once __DIR__ . "/authentication/get_config.php";
 require_once __DIR__ . "/include/security.php";
 require_once __DIR__ . "/include/translation_helpers.php";
+require_once __DIR__ . "/include/custom_order_settings.php";
 if (!defined('CUSTOM_ORDERS_DIRECT')) {
     define('CUSTOM_ORDERS_DIRECT', true);
 }
@@ -15,6 +16,7 @@ if (!defined('CREATE_CUSTOM_PRODUCT_DIRECT')) {
 require_once __DIR__ . "/modules/create_custom_product.php";
 
 ensureCustomOrdersTable($conn);
+$customOrderSteps = app_custom_order_steps($conn);
 
 $system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
 $role = "guest";
@@ -95,36 +97,27 @@ function coFormatDate(?string $value): string
 function coBuildRequestDescription(array $input): string
 {
     $lines = [];
-    $map = [
-        'project_title' => 'Project title',
-        'item_type' => 'Product type',
-        'size' => 'Preferred size',
-        'colours' => 'Preferred colours',
-        'budget' => 'Preferred budget',
-        'needed_by' => 'Needed by',
-    ];
-    foreach ($map as $key => $label) {
-        $value = trim((string)($input[$key] ?? ''));
-        if ($value !== '') {
-            $lines[] = $label . ': ' . $value;
-        }
+    $budget = trim((string)($input['budget'] ?? ''));
+    if ($budget !== '') {
+        $lines[] = 'Preferred budget: ' . $budget;
     }
+
     $details = trim((string)($input['details'] ?? ''));
     if ($details !== '') {
-        $lines[] = 'Customer details: ' . $details;
+        $lines[] = $details;
     }
     return trim(implode("\n", $lines));
 }
 
-function coLoadPrivateCheckoutLink(mysqli $conn, array $order): string
+function coLoadPrivateCheckoutMeta(mysqli $conn, array $order): array
 {
     $productId = (int)($order['sourceProductID'] ?? 0);
     if ($productId <= 0) {
-        return '';
+        return ['product_id' => 0, 'ready' => false, 'verified' => false, 'product_url' => ''];
     }
     $stmt = $conn->prepare("SELECT productID, cartStatus, privateAccessToken FROM products WHERE productID = ? LIMIT 1");
     if (!$stmt) {
-        return '';
+        return ['product_id' => 0, 'ready' => false, 'verified' => false, 'product_url' => ''];
     }
     $stmt->bind_param('i', $productId);
     $stmt->execute();
@@ -132,10 +125,31 @@ function coLoadPrivateCheckoutLink(mysqli $conn, array $order): string
     $row = $res ? $res->fetch_assoc() : null;
     $stmt->close();
     if (!$row || (string)($row['cartStatus'] ?? '') !== 'made_to_order') {
-        return '';
+        return ['product_id' => 0, 'ready' => false, 'verified' => false, 'product_url' => ''];
     }
-    $token = trim((string)($row['privateAccessToken'] ?? ''));
-    return $token !== '' ? generateAccessLink($productId, 'token', $token, null) : '';
+    $verified = isMadeToOrderProductAccessible($conn, $productId);
+    return [
+        'product_id' => $productId,
+        'ready' => true,
+        'verified' => $verified,
+        'product_url' => $verified ? ('product.php?id=' . $productId) : '',
+    ];
+}
+
+function coRenderStepList(array $steps): void
+{
+    echo '<ol class="custom-order-numbered-steps">';
+    foreach ($steps as $step) {
+        $titleEn = trim((string)($step['title_en'] ?? ''));
+        $textEn = trim((string)($step['text_en'] ?? ''));
+        $titleGr = trim((string)($step['title_gr'] ?? $titleEn));
+        $textGr = trim((string)($step['text_gr'] ?? $textEn));
+        echo '<li>';
+        echo '<strong' . app_translate_text_attrs($titleEn, $titleGr) . '>' . htmlspecialchars($titleEn, ENT_QUOTES, 'UTF-8') . '</strong>';
+        echo '<p' . app_translate_text_attrs($textEn, $textGr) . '>' . htmlspecialchars($textEn, ENT_QUOTES, 'UTF-8') . '</p>';
+        echo '</li>';
+    }
+    echo '</ol>';
 }
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
@@ -191,6 +205,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             try {
                 $created = createCustomOrderRequest($conn, $userId, $customerEmail, $description, [
                     'customer_name' => $customerName,
+                    'idea_title' => $input['project_title'],
+                    'product_type' => $input['item_type'],
+                    'preferred_size' => $input['size'],
+                    'preferred_colours' => $input['colours'],
+                    'deadline' => $input['needed_by'],
                     'photo_reference_path' => $photoPath,
                     'special_instructions' => 'Submitted through the website custom order form.',
                 ]);
@@ -206,6 +225,28 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             exit;
         }
 
+        if ($action === "verify_private_checkout_code") {
+            $orderId = (int)($_POST['customOrderID'] ?? 0);
+            $submittedCode = normalizeCustomOrderAccessCode((string)($_POST['accessCode'] ?? ''));
+            $order = getCustomOrderById($conn, $orderId, $userId);
+            $expectedCode = normalizeCustomOrderAccessCode((string)($order['accessCode'] ?? ''));
+            $productId = (int)($order['sourceProductID'] ?? 0);
+            if ($productId <= 0 || $expectedCode === '') {
+                throw new RuntimeException('This private checkout product is not ready yet.');
+            }
+            if ($submittedCode === '' || !hash_equals($expectedCode, $submittedCode)) {
+                throw new InvalidArgumentException('Invalid access code.');
+            }
+            $accessRow = loadMadeToOrderProductAccessRow($conn, $productId);
+            $token = trim((string)($accessRow['privateAccessToken'] ?? ''));
+            if (!$accessRow || (string)($accessRow['cartStatus'] ?? '') !== 'made_to_order' || $token === '') {
+                throw new RuntimeException('This private checkout product is not ready yet.');
+            }
+            setMadeToOrderSessionAccess($productId, $token);
+            header("Location: product.php?id={$productId}");
+            exit;
+        }
+
         if ($action === "customer_message") {
             $orderId = (int)($_POST['customOrderID'] ?? 0);
             $message = trim((string)($_POST['messageBody'] ?? ''));
@@ -218,15 +259,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             exit;
         }
 
-        if ($action === "offer_response") {
-            $orderId = (int)($_POST['customOrderID'] ?? 0);
-            $offerId = (int)($_POST['offerID'] ?? 0);
-            $decision = (string)($_POST['decision'] ?? '');
-            respondToCustomOrderOffer($conn, $orderId, $offerId, $userId, $decision);
-            $flag = strtolower($decision) === 'accept' ? 'offer_accepted=1' : 'offer_declined=1';
-            header("Location: custom_order.php?{$flag}&view={$orderId}#discussion");
-            exit;
-        }
     } catch (Throwable $e) {
         $errorMessage = $e->getMessage() !== '' ? $e->getMessage() : 'Something went wrong. Please try again.';
     }
@@ -238,12 +270,6 @@ if (isset($_GET['created'])) {
 } elseif (isset($_GET['message_sent'])) {
     $successMessage = 'Your reply was sent.';
     $successMessageKey = 'customOrderSuccessReplySent';
-} elseif (isset($_GET['offer_accepted'])) {
-    $successMessage = 'You accepted the offer. Athina has been notified.';
-    $successMessageKey = 'customOrderSuccessOfferAccepted';
-} elseif (isset($_GET['offer_declined'])) {
-    $successMessage = 'You declined the offer. You can reply with changes if needed.';
-    $successMessageKey = 'customOrderSuccessOfferDeclined';
 }
 
 $errorMessageKeys = [
@@ -273,14 +299,12 @@ foreach ($customerOrders as $orderRow) {
 }
 
 $selectedMessages = [];
-$activeOffer = null;
-$latestOffer = null;
 $privateCheckoutLink = '';
+$privateCheckoutMeta = ['product_id' => 0, 'ready' => false, 'verified' => false, 'product_url' => ''];
 if ($selectedOrder) {
     $selectedMessages = getCustomOrderMessages($conn, (int)$selectedOrder['customOrderID']);
-    $activeOffer = getActiveCustomOrderOffer($conn, (int)$selectedOrder['customOrderID']);
-    $latestOffer = getLatestCustomOrderOffer($conn, (int)$selectedOrder['customOrderID']);
-    $privateCheckoutLink = coLoadPrivateCheckoutLink($conn, $selectedOrder);
+    $privateCheckoutMeta = coLoadPrivateCheckoutMeta($conn, $selectedOrder);
+    $privateCheckoutLink = (string)($privateCheckoutMeta['product_url'] ?? '');
 }
 
 $statusLabels = getCustomOrderStatusLabels();
@@ -323,58 +347,14 @@ include __DIR__ . '/include/header.php';
                 <div class="custom-order-guide-paths">
                     <div class="custom-order-guide-section">
                     <h3 data-co-text="customOrderInstagramGuideTitle">Instagram steps</h3>
-                    <ol class="custom-order-numbered-steps">
-                        <li>
-                            <strong data-co-text="customOrderInstagramStep1Title">Open the Instagram chat</strong>
-                            <p data-co-text="customOrderInstagramStep1Text">Use the “Message on Instagram” button, or open the shop profile and start a direct message.</p>
-                        </li>
-                        <li>
-                            <strong data-co-text="customOrderInstagramStep2Title">Send your idea and references</strong>
-                            <p data-co-text="customOrderInstagramStep2Text">Tell Athina what you want, who it is for, and attach any inspiration photos, colors, or size examples.</p>
-                        </li>
-                        <li>
-                            <strong data-co-text="customOrderInstagramStep3Title">Discuss details in chat</strong>
-                            <p data-co-text="customOrderInstagramStep3Text">Agree on yarn, colors, size, deadline, small changes, and anything that affects the final price.</p>
-                        </li>
-                        <li>
-                            <strong data-co-text="customOrderInstagramStep4Title">Confirm the final offer</strong>
-                            <p data-co-text="customOrderInstagramStep4Text">When both sides agree, Athina prepares a private checkout product for your custom order.</p>
-                        </li>
-                        <li>
-                            <strong data-co-text="customOrderInstagramStep5Title">Pay through the private link</strong>
-                            <p data-co-text="customOrderInstagramStep5Text">Open the private shop link while signed in with your account, then complete checkout on the website.</p>
-                        </li>
-                    </ol>
+                    <?php coRenderStepList($customOrderSteps['instagram'] ?? []); ?>
+
                 </div>
 
                     <div class="custom-order-guide-section">
                     <h3 data-co-text="customOrderWebsiteGuideTitle">Website request steps</h3>
-                    <ol class="custom-order-numbered-steps">
-                        <li>
-                            <strong data-co-text="customOrderWebsiteStep1Title">Sign in or create an account</strong>
-                            <p data-co-text="customOrderWebsiteStep1Text">A registered account is required so replies, offers, and private checkout links stay connected to you.</p>
-                        </li>
-                        <li>
-                            <strong data-co-text="customOrderWebsiteStep2Title">Complete and verify your profile</strong>
-                            <p data-co-text="customOrderWebsiteStep2Text">Make sure your profile details and email verification are finished before sending the request.</p>
-                        </li>
-                        <li>
-                            <strong data-co-text="customOrderWebsiteStep3Title">Fill in the request form</strong>
-                            <p data-co-text="customOrderWebsiteStep3Text">Add the idea title, product type, preferred size, colors, budget, deadline, and a clear description.</p>
-                        </li>
-                        <li>
-                            <strong data-co-text="customOrderWebsiteStep4Title">Attach a reference photo if needed</strong>
-                            <p data-co-text="customOrderWebsiteStep4Text">Photos are optional, but they help explain shapes, colors, characters, or styles more clearly.</p>
-                        </li>
-                        <li>
-                            <strong data-co-text="customOrderWebsiteStep5Title">Wait for Athina’s reply</strong>
-                            <p data-co-text="customOrderWebsiteStep5Text">Athina can ask for more details, make an offer, accept the idea, or decline it if it cannot be made.</p>
-                        </li>
-                        <li>
-                            <strong data-co-text="customOrderWebsiteStep6Title">Accept the offer and checkout</strong>
-                            <p data-co-text="customOrderWebsiteStep6Text">If the offer works for you, accept it and use the private checkout link sent to your account.</p>
-                        </li>
-                    </ol>
+                    <?php coRenderStepList($customOrderSteps['website'] ?? []); ?>
+
                     </div>
                 </div>
             </div>
@@ -458,9 +438,9 @@ include __DIR__ . '/include/header.php';
                             <div class="upload-panel">
                                 <div class="form-field">
                                     <label for="referencePhoto" data-co-text="customOrderReferencePhotoLabel">Reference photo</label>
-                                    <input type="file" id="referencePhoto" name="referencePhoto" accept=".jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif">
+                                    <input type="file" id="referencePhoto" name="referencePhoto" accept="image/*">
                                 </div>
-                                <p data-co-text="customOrderReferencePhotoHelp">Optional. Uploaded PNG, WEBP, or GIF files are converted to JPG automatically.</p>
+                                <p data-co-text="customOrderReferencePhotoHelp">Optional. Uploaded PNG, JPG, or GIF files are converted to webp automatically.</p>
                                 <div class="upload-preview" id="referencePreview"><img src="" alt="Reference preview" data-co-alt="customOrderReferencePreviewAlt"></div>
                             </div>
                             <button type="submit" class="custom-order-btn">
@@ -497,9 +477,6 @@ include __DIR__ . '/include/header.php';
                             </div>
                             <div class="custom-order-list-bottom">
                                 <span><?= htmlspecialchars(coFormatDate((string)($orderRow['created_at'] ?? ''))) ?></span>
-                                <?php if ((int)($orderRow['pendingOfferCount'] ?? 0) > 0): ?>
-                                    <span class="custom-order-inline-badge" data-co-text="customOrderOfferReadyBadge">Offer ready</span>
-                                <?php endif; ?>
                             </div>
                         </a>
                     <?php endforeach; ?>
@@ -528,7 +505,7 @@ include __DIR__ . '/include/header.php';
                     <div class="custom-order-summary">
                         <div class="custom-order-summary-item">
                             <span data-co-text="customOrderAgreedPriceLabel">Agreed price</span>
-                            <strong><?= (float)($selectedOrder['agreedPrice'] ?? 0) > 0 ? 'EUR ' . number_format((float)$selectedOrder['agreedPrice'], 2) : '-' ?></strong>
+                            <strong><?= htmlspecialchars(customOrderPriceLabel($selectedOrder), ENT_QUOTES, 'UTF-8') ?></strong>
                         </div>
                         <div class="custom-order-summary-item">
                             <span data-co-text="customOrderTargetDateLabel">Target date</span>
@@ -536,77 +513,32 @@ include __DIR__ . '/include/header.php';
                         </div>
                         <div class="custom-order-summary-item">
                             <span data-co-text="customOrderPrivateCheckoutLabel">Private checkout</span>
-                            <strong<?= $privateCheckoutLink !== '' ? ' data-co-text="customOrderReadyLabel"' : '' ?>><?= $privateCheckoutLink !== '' ? 'Ready' : '-' ?></strong>
+                            <strong<?= !empty($privateCheckoutMeta['ready']) ? ' data-co-text="customOrderReadyLabel"' : '' ?>><?= !empty($privateCheckoutMeta['ready']) ? 'Ready' : '-' ?></strong>
                         </div>
                     </div>
 
-                    <?php if ($privateCheckoutLink !== ''): ?>
-                        <div class="custom-order-offer-card">
+                    <?php if (!empty($privateCheckoutMeta['ready'])): ?>
+                        <div class="custom-order-offer-card" id="private-checkout">
                             <span class="offer-kicker" data-co-text="customOrderPrivateCheckoutLinkTitle">Private checkout link</span>
-                            <p class="offer-note"><span data-co-text="customOrderPrivateCheckoutReadyText">Your private custom product is ready. Open it while signed in with your account email.</span> <strong><?= htmlspecialchars($customerEmail) ?></strong></p>
-                            <a href="<?= htmlspecialchars($privateCheckoutLink) ?>" class="custom-order-link" data-co-text="customOrderOpenPrivateProduct">Open Private Product</a>
-                        </div>
-                    <?php endif; ?>
-
-                    <?php if ($activeOffer): ?>
-                        <div class="custom-order-offer-card">
-                            <div class="offer-card-head">
-                                <div>
-                                    <span class="offer-kicker" data-co-text="customOrderOfferAwaitingTitle">Offer awaiting your reply</span>
-                                    <h3 data-co-text="customOrderReviewOfferTitle">Review Athina's offer</h3>
-                                </div>
-                            </div>
-                            <div class="custom-order-offer-grid">
-                                <div>
-                                    <span data-co-text="customOrderPriceLabel">Price</span>
-                                    <strong>EUR <?= number_format((float)$activeOffer['offeredPrice'], 2) ?></strong>
-                                </div>
-                                <div>
-                                    <span data-co-text="customOrderTargetDateLabel">Target date</span>
-                                    <strong><?= htmlspecialchars(coFormatDate((string)($activeOffer['proposedDeadline'] ?? ''))) ?></strong>
-                                </div>
-                            </div>
-                            <?php if (trim((string)($activeOffer['offerNote'] ?? '')) !== ''): ?>
-                                <p class="offer-note"><?= nl2br(htmlspecialchars((string)$activeOffer['offerNote'])) ?></p>
+                            <?php if ($privateCheckoutLink !== ''): ?>
+                                <p class="offer-note"><span data-co-text="customOrderPrivateCheckoutReadyText">Your private custom product is ready. Open it while signed in with your account email.</span> <strong><?= htmlspecialchars($customerEmail) ?></strong></p>
+                                <a href="<?= htmlspecialchars($privateCheckoutLink) ?>" class="custom-order-link" data-co-text="customOrderOpenPrivateProduct">Open Private Product</a>
+                            <?php else: ?>
+                                <p class="offer-note">Enter the access code from your email to unlock the private product.</p>
+                                <form method="POST" class="custom-order-reply-form custom-order-access-form">
+                                    <?= app_csrf_input() ?>
+                                    <input type="hidden" name="action" value="verify_private_checkout_code">
+                                    <input type="hidden" name="customOrderID" value="<?= $selectedId ?>">
+                                    <input type="text" name="accessCode" maxlength="32" required placeholder="Access code">
+                                    <button type="submit" class="custom-order-btn">Unlock Private Product</button>
+                                </form>
                             <?php endif; ?>
-                            <div class="offer-actions">
-                                <form method="POST">
-                                    <?= app_csrf_input() ?>
-                                    <input type="hidden" name="action" value="offer_response">
-                                    <input type="hidden" name="customOrderID" value="<?= $selectedId ?>">
-                                    <input type="hidden" name="offerID" value="<?= (int)$activeOffer['offerID'] ?>">
-                                    <input type="hidden" name="decision" value="accept">
-                                    <button type="submit" class="custom-order-btn offer-accept-btn" data-co-text="customOrderAcceptOfferAction">Accept Offer</button>
-                                </form>
-                                <form method="POST">
-                                    <?= app_csrf_input() ?>
-                                    <input type="hidden" name="action" value="offer_response">
-                                    <input type="hidden" name="customOrderID" value="<?= $selectedId ?>">
-                                    <input type="hidden" name="offerID" value="<?= (int)$activeOffer['offerID'] ?>">
-                                    <input type="hidden" name="decision" value="decline">
-                                    <button type="submit" class="custom-order-secondary-btn" data-co-text="customOrderDeclineOfferAction">Decline Offer</button>
-                                </form>
-                            </div>
-                        </div>
-                    <?php elseif ($latestOffer): ?>
-                        <div class="custom-order-offer-card is-history">
-                            <span class="offer-kicker" data-co-text="customOrderLatestOfferTitle">Latest offer</span>
-                            <div class="custom-order-offer-grid">
-                                <div>
-                                    <span data-co-text="customOrderPriceLabel">Price</span>
-                                    <strong>EUR <?= number_format((float)$latestOffer['offeredPrice'], 2) ?></strong>
-                                </div>
-                                <div>
-                                    <span data-co-text="customOrderStatusLabel">Status</span>
-                                    <strong data-co-offer-status="<?= htmlspecialchars((string)$latestOffer['offerStatus'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars(ucwords(str_replace('_', ' ', (string)$latestOffer['offerStatus']))) ?></strong>
-                                </div>
-                            </div>
                         </div>
                     <?php endif; ?>
 
                     <div class="custom-order-request-text">
                         <h3 data-co-text="customOrderYourRequestTitle">Your request</h3>
-                        <div><?= nl2br(htmlspecialchars((string)($selectedOrder['requestDescription'] ?? ''))) ?></div>
+                        <div><?= nl2br(htmlspecialchars(customOrderBuildProductDescription($selectedOrder))) ?></div>
                     </div>
 
                     <?php if ($photoUrl !== ''): ?>

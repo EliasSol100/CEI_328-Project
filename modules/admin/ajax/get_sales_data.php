@@ -15,10 +15,13 @@ if ($salesRes) {
 }
 
 $manualSalesMap = [];
-$msRes = mysqli_query($conn, "SELECT productID, manual_total_sales FROM product_sales_overrides");
+$msRes = mysqli_query($conn, "SELECT productID, manual_total_sales, auto_sales_baseline FROM product_sales_overrides");
 if ($msRes) {
     while ($row = mysqli_fetch_assoc($msRes)) {
-        $manualSalesMap[(int)$row['productID']] = (int)$row['manual_total_sales'];
+        $manualSalesMap[(int)$row['productID']] = [
+            'manual_total_sales' => (int)$row['manual_total_sales'],
+            'auto_sales_baseline' => isset($row['auto_sales_baseline']) ? (int)$row['auto_sales_baseline'] : null,
+        ];
     }
 }
 
@@ -27,9 +30,16 @@ $productsRes = mysqli_query($conn, "SELECT productID FROM products");
 if ($productsRes) {
     while ($row = mysqli_fetch_assoc($productsRes)) {
         $pid = (int)$row['productID'];
-        $result[$pid] = array_key_exists($pid, $manualSalesMap)
-            ? $manualSalesMap[$pid]
-            : ($autoSalesMap[$pid] ?? 0);
+        $autoSales = (int)($autoSalesMap[$pid] ?? 0);
+        if (array_key_exists($pid, $manualSalesMap)) {
+            $baseline = $manualSalesMap[$pid]['auto_sales_baseline'] ?? null;
+            if ($baseline === null) {
+                $baseline = $autoSales;
+            }
+            $result[$pid] = (int)$manualSalesMap[$pid]['manual_total_sales'] + max(0, $autoSales - (int)$baseline);
+        } else {
+            $result[$pid] = $autoSales;
+        }
     }
 }
 

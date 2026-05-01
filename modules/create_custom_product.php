@@ -5,6 +5,7 @@ if (!defined('INCLUDE_CHECK') && !defined('CREATE_CUSTOM_PRODUCT_DIRECT')) {
 }
 
 require_once __DIR__ . '/../include/made_to_order_access.php';
+require_once __DIR__ . '/../include/product_option_helpers.php';
 
 if (!function_exists('ensureCustomOrdersTable')) {
     require_once __DIR__ . '/custom_orders.php';
@@ -30,9 +31,17 @@ function createCustomProductFromRequest($conn, $customOrderId, $price = null, $d
             userID,
             email,
             customerName,
+            ideaTitle,
+            productType,
+            preferredSize,
+            preferredColours,
             requestDescription,
             status,
             agreedPrice,
+            agreedPriceMax,
+            deadline,
+            accessCode,
+            sizePriceOptions,
             photoReferencePath,
             sourceProductID
         FROM custom_orders
@@ -68,15 +77,20 @@ function createCustomProductFromRequest($conn, $customOrderId, $price = null, $d
     }
     $price = round($price, 2);
 
-    $productDescription = trim((string)($description ?? $customOrder['requestDescription'] ?? ''));
+    $productDescription = trim((string)($description ?? customOrderBuildProductDescription($customOrder)));
     if ($productDescription === '') {
         throw new InvalidArgumentException('Add a description to the custom order before creating the checkout link.');
     }
 
     $customerName = trim((string)($customOrder['customerName'] ?? ''));
-    $productName = $customerName !== ''
-        ? "Custom Order for {$customerName}"
-        : "Custom Order #{$customOrderId}";
+    $ideaTitle = trim((string)($customOrder['ideaTitle'] ?? ''));
+    $productName = $ideaTitle !== '' ? $ideaTitle : "Custom Order #{$customOrderId}";
+    $sizePriceOptions = trim((string)($customOrder['sizePriceOptions'] ?? ''));
+    $sizePriceMap = customOrderParseSizePriceOptions($sizePriceOptions);
+    $availableSizes = !empty($sizePriceMap['sizes'])
+        ? $sizePriceMap['sizes']
+        : customOrderSplitPreferredSizes((string)($customOrder['preferredSize'] ?? ''));
+    $availableSizesString = !empty($availableSizes) ? implode(',', $availableSizes) : null;
 
     $existingProductId = (int)($customOrder['sourceProductID'] ?? 0);
     $existingProduct = loadExistingCustomProductRow($conn, $existingProductId);
@@ -115,14 +129,15 @@ function createCustomProductFromRequest($conn, $customOrderId, $price = null, $d
                     hasVariants = 0,
                     privateCustomerEmail = ?,
                     privateAccessToken = ?,
-                    privateLinkSentAt = NOW()
+                    privateLinkSentAt = NOW(),
+                    availableSizes = ?
                 WHERE productID = ?
             ");
             if (!$updateStmt) {
                 throw new Exception('Failed to prepare custom product update: ' . $conn->error);
             }
             $updateStmt->bind_param(
-                'ssssddssi',
+                'ssssddsssi',
                 $productName,
                 $productName,
                 $productDescription,
@@ -131,6 +146,7 @@ function createCustomProductFromRequest($conn, $customOrderId, $price = null, $d
                 $price,
                 $customerEmail,
                 $privateAccessToken,
+                $availableSizesString,
                 $productId
             );
             if (!$updateStmt->execute()) {
@@ -154,14 +170,15 @@ function createCustomProductFromRequest($conn, $customOrderId, $price = null, $d
                     hasVariants,
                     privateCustomerEmail,
                     privateAccessToken,
-                    privateLinkSentAt
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'made_to_order', 'Custom Orders', 0, ?, ?, NOW())
+                    privateLinkSentAt,
+                    availableSizes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'made_to_order', 'Custom Orders', 0, ?, ?, NOW(), ?)
             ");
             if (!$insertStmt) {
                 throw new Exception('Failed to prepare custom product insert: ' . $conn->error);
             }
             $insertStmt->bind_param(
-                'sssssddss',
+                'sssssddsss',
                 $sku,
                 $productName,
                 $productName,
@@ -170,7 +187,8 @@ function createCustomProductFromRequest($conn, $customOrderId, $price = null, $d
                 $price,
                 $price,
                 $customerEmail,
-                $privateAccessToken
+                $privateAccessToken,
+                $availableSizesString
             );
             if (!$insertStmt->execute()) {
                 throw new Exception('Failed to create custom product: ' . $insertStmt->error);
@@ -185,12 +203,17 @@ function createCustomProductFromRequest($conn, $customOrderId, $price = null, $d
             (string)($customOrder['photoReferencePath'] ?? ''),
             $imageFiles
         );
+        if (!empty($sizePriceMap['sizes']) && function_exists('app_product_size_prices_save')) {
+            app_product_size_prices_save($conn, $productId, $sizePriceMap['sizes'], $sizePriceMap['prices']);
+        } elseif (function_exists('app_product_size_prices_save')) {
+            app_product_size_prices_save($conn, $productId, [], []);
+        }
 
         $orderUpdate = $conn->prepare("
             UPDATE custom_orders
             SET
                 agreedPrice = ?,
-                status = 'ready_for_checkout',
+                status = 'pending',
                 sourceProductID = ?,
                 linkedProductName = ?
             WHERE customOrderID = ?
@@ -210,11 +233,17 @@ function createCustomProductFromRequest($conn, $customOrderId, $price = null, $d
 
         $conn->commit();
 
+        $customerProductUrl = function_exists('customOrderFrontendUrl')
+            ? customOrderFrontendUrl('product.php?id=' . $productId)
+            : ('product.php?id=' . $productId);
+
         return [
             'product_id' => $productId,
             'access_token' => $privateAccessToken,
             'customer_email' => $customerEmail,
             'private_link' => generateAccessLink($productId, 'token', $privateAccessToken, null),
+            'customer_link' => $customerProductUrl,
+            'access_code' => normalizeCustomOrderAccessCode((string)($customOrder['accessCode'] ?? '')),
             'product_name' => $productName,
             'was_updated' => $existingProduct ? 1 : 0,
         ];
@@ -332,7 +361,7 @@ function attachCustomOrderReferencePhotoToProduct(mysqli $conn, int $productId, 
     }
 }
 
-function sendCustomProductAccessEmail($toEmail, $productId, $accessLink, $method)
+function sendCustomProductAccessEmail($toEmail, $productId, $accessLink, $method, string $accessCode = '')
 {
     $toEmail = normalizeCustomerEmail((string)$toEmail);
     if ($toEmail === '' || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
@@ -341,17 +370,18 @@ function sendCustomProductAccessEmail($toEmail, $productId, $accessLink, $method
 
     $body =
         "Hello,\n\n" .
-        "Your private made-to-order product is ready to purchase.\n\n" .
-        "Private checkout link:\n" . $accessLink . "\n\n" .
-        "For security, this link only works when you are signed in with {$toEmail}.\n\n" .
+        "Your custom order request was accepted and is ready for the next step.\n\n" .
+        "Open your private product here:\n" . $accessLink . "\n\n" .
+        ($accessCode !== '' ? "Access code: " . normalizeCustomOrderAccessCode($accessCode) . "\n\n" : '') .
+        "From that page, enter the access code, review the private product while signed in with {$toEmail}, and complete checkout.\n\n" .
         "Thank you,\nAthina E-Shop";
 
     if (function_exists('sendCustomOrderPlainEmail')) {
-        return sendCustomOrderPlainEmail($toEmail, $toEmail, 'Your private custom order checkout link', $body);
+        return sendCustomOrderPlainEmail($toEmail, $toEmail, 'Your custom order checkout is ready', $body);
     }
 
     require_once __DIR__ . '/../authentication/auth_mailer.php';
-    $result = app_auth_send_plaintext_email($toEmail, $toEmail, 'Your private custom order checkout link', $body);
+    $result = app_auth_send_plaintext_email($toEmail, $toEmail, 'Your custom order checkout is ready', $body);
     return !empty($result['success']);
 }
 

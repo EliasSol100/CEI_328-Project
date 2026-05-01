@@ -1,16 +1,17 @@
 <?php
 
 require_once __DIR__ . '/product_option_helpers.php';
+require_once __DIR__ . '/platform_integrations.php';
 
-if (!function_exists('app_shipping_free_threshold')) {
-    function app_shipping_free_threshold(): float
+if (!function_exists('app_shipping_default_free_threshold')) {
+    function app_shipping_default_free_threshold(): float
     {
         return 100.0;
     }
 }
 
-if (!function_exists('app_shipping_country_couriers')) {
-    function app_shipping_country_couriers(): array
+if (!function_exists('app_shipping_default_country_couriers')) {
+    function app_shipping_default_country_couriers(): array
     {
         return [
             'Cyprus' => [
@@ -27,8 +28,8 @@ if (!function_exists('app_shipping_country_couriers')) {
     }
 }
 
-if (!function_exists('app_shipping_rate_table')) {
-    function app_shipping_rate_table(): array
+if (!function_exists('app_shipping_default_rate_table')) {
+    function app_shipping_default_rate_table(): array
     {
         return [
             'Cyprus' => [
@@ -63,16 +64,85 @@ if (!function_exists('app_shipping_rate_table')) {
     }
 }
 
-if (!function_exists('app_shipping_size_surcharge')) {
-    function app_shipping_size_surcharge(string $sizeCode): float
+if (!function_exists('app_shipping_default_size_surcharges')) {
+    function app_shipping_default_size_surcharges(): array
     {
-        $sizeCode = strtolower(trim($sizeCode));
         return [
             'small' => 0.0,
             'medium' => 0.75,
             'large' => 1.50,
             'oversized' => 3.00,
-        ][$sizeCode] ?? 0.0;
+        ];
+    }
+}
+
+if (!function_exists('app_shipping_config_conn')) {
+    function app_shipping_config_conn(): ?mysqli
+    {
+        global $conn;
+        return (isset($conn) && $conn instanceof mysqli) ? $conn : null;
+    }
+}
+
+if (!function_exists('app_shipping_config_json')) {
+    function app_shipping_config_json(string $key, array $default): array
+    {
+        $conn = app_shipping_config_conn();
+        if (!$conn) {
+            return $default;
+        }
+
+        app_system_config_seed_defaults($conn, [
+            'shipping_free_threshold' => (string)app_shipping_default_free_threshold(),
+            'shipping_rate_table_json' => json_encode(app_shipping_default_rate_table(), JSON_UNESCAPED_UNICODE),
+            'shipping_size_surcharges_json' => json_encode(app_shipping_default_size_surcharges(), JSON_UNESCAPED_UNICODE),
+        ]);
+
+        $raw = app_system_config_get($conn, $key, '');
+        $decoded = $raw !== '' ? json_decode($raw, true) : null;
+        return is_array($decoded) ? $decoded : $default;
+    }
+}
+
+if (!function_exists('app_shipping_free_threshold')) {
+    function app_shipping_free_threshold(): float
+    {
+        $conn = app_shipping_config_conn();
+        if (!$conn) {
+            return app_shipping_default_free_threshold();
+        }
+        app_system_config_seed_defaults($conn, [
+            'shipping_free_threshold' => (string)app_shipping_default_free_threshold(),
+            'shipping_rate_table_json' => json_encode(app_shipping_default_rate_table(), JSON_UNESCAPED_UNICODE),
+            'shipping_size_surcharges_json' => json_encode(app_shipping_default_size_surcharges(), JSON_UNESCAPED_UNICODE),
+        ]);
+        $value = (float)app_system_config_get($conn, 'shipping_free_threshold', (string)app_shipping_default_free_threshold());
+        return max(0.0, $value);
+    }
+}
+
+if (!function_exists('app_shipping_country_couriers')) {
+    function app_shipping_country_couriers(): array
+    {
+        return app_shipping_default_country_couriers();
+    }
+}
+
+if (!function_exists('app_shipping_rate_table')) {
+    function app_shipping_rate_table(): array
+    {
+        $default = app_shipping_default_rate_table();
+        $stored = app_shipping_config_json('shipping_rate_table_json', $default);
+        return is_array($stored) && !empty($stored) ? $stored : $default;
+    }
+}
+
+if (!function_exists('app_shipping_size_surcharge')) {
+    function app_shipping_size_surcharge(string $sizeCode): float
+    {
+        $sizeCode = strtolower(trim($sizeCode));
+        $surcharges = app_shipping_config_json('shipping_size_surcharges_json', app_shipping_default_size_surcharges());
+        return (float)($surcharges[$sizeCode] ?? 0.0);
     }
 }
 

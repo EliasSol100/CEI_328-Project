@@ -3,6 +3,7 @@ session_start();
 require_once "authentication/database.php";
 require_once "authentication/get_config.php";
 require_once "include/translation_helpers.php";
+require_once "include/website_content_settings.php";
 require_once "authentication/auth_mailer.php";
 
 $system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
@@ -13,6 +14,14 @@ if (!file_exists($logo_path) && file_exists("assets/images/athina-eshop-logo.png
 }
 if (!file_exists($logo_path)) {
     $logo_path = "assets/images/athina-eshop-logo.png";
+}
+
+$websiteContent = app_website_content_settings($conn);
+$contactContent = $websiteContent['contact'] ?? app_website_content_defaults()['contact'];
+$contactEmailBox = $contactContent['email'] ?? app_website_content_defaults()['contact']['email'];
+$contactRecipient = trim((string)($contactEmailBox['value'] ?? ''));
+if (!filter_var($contactRecipient, FILTER_VALIDATE_EMAIL)) {
+    $contactRecipient = 'creationsbyathina@gmail.com';
 }
 
 $role     = "guest";
@@ -84,7 +93,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $body    = "Name: {$senderName}\nEmail: {$senderEmail}\n\nMessage:\n{$senderMessage}";
 
         $result = app_auth_send_plaintext_email(
-            'creationsbyathina@gmail.com',
+            $contactRecipient,
             'Creations By Athina',
             $subject,
             $body
@@ -96,6 +105,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 }
+
+$instagramBox = $contactContent['instagram'] ?? app_website_content_defaults()['contact']['instagram'];
+$facebookBox = $contactContent['facebook'] ?? app_website_content_defaults()['contact']['facebook'];
+$responseBox = $contactContent['response_time'] ?? app_website_content_defaults()['contact']['response_time'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -137,7 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php else: ?>
                         <?php if ($contactSuccess === false): ?>
                             <div class="contact-feedback contact-feedback--error">
-                                <?= htmlspecialchars($contactError) ?>
+                                <?= app_h($contactError) ?>
                             </div>
                         <?php endif; ?>
                         <form class="contact-form" method="post" action="contact.php">
@@ -145,18 +158,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <label for="contact_name" data-translate="yourName">Your Name</label>
                                 <input type="text" id="contact_name" name="contact_name"
                                        data-translate-placeholder="yourName" placeholder="Your Name"
-                                       value="<?= htmlspecialchars($senderName) ?>" required>
+                                       value="<?= app_h($senderName) ?>" required>
                             </div>
                             <div class="contact-field">
                                 <label for="contact_email" data-translate="yourEmail">Your Email</label>
                                 <input type="email" id="contact_email" name="contact_email"
                                        data-translate-placeholder="yourEmail" placeholder="Your Email"
-                                       value="<?= htmlspecialchars($senderEmail) ?>" required>
+                                       value="<?= app_h($senderEmail) ?>" required>
                             </div>
                             <div class="contact-field">
                                 <label for="contact_message" data-translate="messageLabel">Message</label>
                                 <textarea id="contact_message" name="contact_message"
-                                          data-translate-placeholder="yourMessage" placeholder="Your message..." required><?= htmlspecialchars($senderMessage) ?></textarea>
+                                          data-translate-placeholder="yourMessage" placeholder="Your message..." required><?= app_h($senderMessage) ?></textarea>
                             </div>
                             <button type="submit" class="contact-btn" data-translate="sendBtn">Send</button>
                         </form>
@@ -166,20 +179,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="contact-card">
                         <h2 data-translate="getInTouch">Get in Touch</h2>
                         <div class="info-card">
-                            <h3><i class="fas fa-envelope" style="margin-right:8px;color:#a066f0;"></i><span data-translate="emailLabel">Email</span></h3>
-                            <p><a href="mailto:creationsbyathina@gmail.com">creationsbyathina@gmail.com</a></p>
+                            <h3>
+                                <i class="fas fa-envelope" style="margin-right:8px;color:#a066f0;"></i>
+                                <span<?= app_translate_text_attrs((string)($contactEmailBox['label_en'] ?? 'Email'), (string)($contactEmailBox['label_gr'] ?? 'Email')) ?>><?= app_h((string)($contactEmailBox['label_en'] ?? 'Email')) ?></span>
+                            </h3>
+                            <p><a href="mailto:<?= app_h($contactRecipient) ?>"><?= app_h((string)($contactEmailBox['value'] ?? $contactRecipient)) ?></a></p>
                         </div>
                         <div class="info-card">
-                            <h3><i class="fab fa-instagram" style="margin-right:8px;color:#f05ab8;"></i>Instagram</h3>
-                            <p><a href="https://www.instagram.com/creations.by.athina/" target="_blank" rel="noopener noreferrer">@creations.by.athina</a></p>
+                            <h3>
+                                <i class="fab fa-instagram" style="margin-right:8px;color:#f05ab8;"></i>
+                                <span<?= app_translate_text_attrs((string)($instagramBox['label_en'] ?? 'Instagram'), (string)($instagramBox['label_gr'] ?? 'Instagram')) ?>><?= app_h((string)($instagramBox['label_en'] ?? 'Instagram')) ?></span>
+                            </h3>
+                            <?php $instagramUrl = app_website_content_safe_href((string)($instagramBox['url'] ?? ''), ''); ?>
+                            <p>
+                                <?php if ($instagramUrl !== ''): ?>
+                                    <a href="<?= app_h($instagramUrl) ?>" target="_blank" rel="noopener noreferrer"><?= app_h((string)($instagramBox['value'] ?? '')) ?></a>
+                                <?php else: ?>
+                                    <?= app_h((string)($instagramBox['value'] ?? '')) ?>
+                                <?php endif; ?>
+                            </p>
                         </div>
                         <div class="info-card">
-                            <h3><i class="fab fa-facebook-f" style="margin-right:8px;color:#4267B2;"></i>Facebook</h3>
-                            <p><a href="https://www.facebook.com/p/Creations-by-Athina-61555871434054/" target="_blank" rel="noopener noreferrer">Creations by Athina</a></p>
+                            <h3>
+                                <i class="fab fa-facebook-f" style="margin-right:8px;color:#4267B2;"></i>
+                                <span<?= app_translate_text_attrs((string)($facebookBox['label_en'] ?? 'Facebook'), (string)($facebookBox['label_gr'] ?? 'Facebook')) ?>><?= app_h((string)($facebookBox['label_en'] ?? 'Facebook')) ?></span>
+                            </h3>
+                            <?php $facebookUrl = app_website_content_safe_href((string)($facebookBox['url'] ?? ''), ''); ?>
+                            <p>
+                                <?php if ($facebookUrl !== ''): ?>
+                                    <a href="<?= app_h($facebookUrl) ?>" target="_blank" rel="noopener noreferrer"><?= app_h((string)($facebookBox['value'] ?? '')) ?></a>
+                                <?php else: ?>
+                                    <?= app_h((string)($facebookBox['value'] ?? '')) ?>
+                                <?php endif; ?>
+                            </p>
                         </div>
                         <div class="info-card">
-                            <h3><i class="fas fa-clock" style="margin-right:8px;color:#a066f0;"></i><span data-translate="responseTime">Response Time</span></h3>
-                            <p data-translate="responseTimeDesc">We typically reply within 24–48 hours.</p>
+                            <h3>
+                                <i class="fas fa-clock" style="margin-right:8px;color:#a066f0;"></i>
+                                <span<?= app_translate_text_attrs((string)($responseBox['label_en'] ?? 'Response Time'), (string)($responseBox['label_gr'] ?? 'Χρόνος Απόκρισης')) ?>><?= app_h((string)($responseBox['label_en'] ?? 'Response Time')) ?></span>
+                            </h3>
+                            <p<?= app_translate_text_attrs((string)($responseBox['text_en'] ?? ''), (string)($responseBox['text_gr'] ?? '')) ?>><?= app_h((string)($responseBox['text_en'] ?? '')) ?></p>
                         </div>
                     </div>
 

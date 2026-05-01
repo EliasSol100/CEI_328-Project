@@ -22,6 +22,43 @@ if (!function_exists('app_product_options_column_exists')) {
     }
 }
 
+if (!function_exists('app_product_status_from_stock')) {
+    function app_product_status_from_stock(int $inventory, string $currentStatus = ''): string
+    {
+        $currentStatus = strtolower(trim($currentStatus));
+        if (in_array($currentStatus, ['discontinued', 'made_to_order'], true)) {
+            return $currentStatus;
+        }
+        if ($inventory <= 0) {
+            return 'out_of_stock';
+        }
+        if ($inventory <= 3) {
+            return 'low_stock';
+        }
+        return 'active';
+    }
+}
+
+if (!function_exists('app_product_sync_stock_statuses')) {
+    function app_product_sync_stock_statuses(mysqli $conn): void
+    {
+        if (!app_product_options_table_exists($conn, 'products')) {
+            return;
+        }
+
+        mysqli_query(
+            $conn,
+            "UPDATE products
+             SET cartStatus = CASE
+                 WHEN inventory <= 0 THEN 'out_of_stock'
+                 WHEN inventory <= 3 THEN 'low_stock'
+                 ELSE 'active'
+             END
+             WHERE cartStatus NOT IN ('made_to_order', 'discontinued')"
+        );
+    }
+}
+
 if (!function_exists('app_product_options_ensure_schema')) {
     function app_product_options_ensure_schema(mysqli $conn): void
     {
@@ -92,6 +129,9 @@ if (!function_exists('app_product_options_ensure_schema')) {
 
         if (app_product_options_table_exists($conn, 'colors')) {
             $addedColorHexColumn = false;
+            if (!app_product_options_column_exists($conn, 'colors', 'displayCode')) {
+                mysqli_query($conn, "ALTER TABLE colors ADD COLUMN displayCode VARCHAR(32) NULL AFTER colorName");
+            }
             if (!app_product_options_column_exists($conn, 'colors', 'hexCode')) {
                 mysqli_query($conn, "ALTER TABLE colors ADD COLUMN hexCode VARCHAR(7) NOT NULL DEFAULT '#ece6f6' AFTER colorName");
                 $addedColorHexColumn = true;
@@ -143,6 +183,117 @@ if (!function_exists('app_product_options_ensure_schema')) {
         }
 
         if (app_product_options_table_exists($conn, 'yarn_types')) {
+            $duplicateTypes = mysqli_query(
+                $conn,
+                "SELECT typeName, MIN(typeID) AS keepID
+                 FROM yarn_types
+                 GROUP BY typeName
+                 HAVING COUNT(*) > 1"
+            );
+            if ($duplicateTypes) {
+                while ($typeRow = mysqli_fetch_assoc($duplicateTypes)) {
+                    $typeName = (string)($typeRow['typeName'] ?? '');
+                    $keepID = (int)($typeRow['keepID'] ?? 0);
+                    if ($typeName === '' || $keepID <= 0) {
+                        continue;
+                    }
+                    $safeType = mysqli_real_escape_string($conn, $typeName);
+                    $dupRes = mysqli_query(
+                        $conn,
+                        "SELECT typeID FROM yarn_types
+                         WHERE typeName = '{$safeType}' AND typeID <> {$keepID}"
+                    );
+                    while ($dupRes && ($dupRow = mysqli_fetch_assoc($dupRes))) {
+                        $duplicateID = (int)($dupRow['typeID'] ?? 0);
+                        if ($duplicateID <= 0) {
+                            continue;
+                        }
+
+                        $linkRes = mysqli_query(
+                            $conn,
+                            "SELECT colorID, photoPath FROM color_yarn_types WHERE typeID = {$duplicateID}"
+                        );
+                        while ($linkRes && ($linkRow = mysqli_fetch_assoc($linkRes))) {
+                            $colorID = (int)($linkRow['colorID'] ?? 0);
+                            $photoPath = (string)($linkRow['photoPath'] ?? '');
+                            if ($colorID <= 0) {
+                                continue;
+                            }
+                            $safePhoto = mysqli_real_escape_string($conn, $photoPath);
+                            mysqli_query(
+                                $conn,
+                                "INSERT INTO color_yarn_types (colorID, typeID, photoPath)
+                                 VALUES ({$colorID}, {$keepID}, " . ($photoPath !== '' ? "'{$safePhoto}'" : "NULL") . ")
+                                 ON DUPLICATE KEY UPDATE
+                                    photoPath = CASE
+                                        WHEN (photoPath IS NULL OR TRIM(photoPath) = '') AND VALUES(photoPath) IS NOT NULL
+                                        THEN VALUES(photoPath)
+                                        ELSE photoPath
+                                    END"
+                            );
+                        }
+                        mysqli_query($conn, "DELETE FROM color_yarn_types WHERE typeID = {$duplicateID}");
+                        mysqli_query($conn, "DELETE FROM yarn_types WHERE typeID = {$duplicateID}");
+                    }
+                }
+            }
+
+            mysqli_query(
+                $conn,
+                "INSERT INTO yarn_types (typeName)
+                 SELECT 'Puffy'
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM yarn_types WHERE typeName = 'Puffy' LIMIT 1
+                 )"
+            );
+            $puffyTypeRes = mysqli_query(
+                $conn,
+                "SELECT
+                    MAX(CASE WHEN typeName = 'Puffy' THEN typeID END) AS puffyID,
+                    MAX(CASE WHEN typeName = 'Puffy Color' THEN typeID END) AS puffyColorID
+                 FROM yarn_types
+                 WHERE typeName IN ('Puffy', 'Puffy Color')"
+            );
+            $puffyTypeRow = $puffyTypeRes ? mysqli_fetch_assoc($puffyTypeRes) : null;
+            $puffyTypeID = (int)($puffyTypeRow['puffyID'] ?? 0);
+            $puffyColorTypeID = (int)($puffyTypeRow['puffyColorID'] ?? 0);
+            if ($puffyTypeID > 0 && $puffyColorTypeID > 0 && $puffyTypeID !== $puffyColorTypeID) {
+                $puffyLinks = mysqli_query(
+                    $conn,
+                    "SELECT colorID, photoPath FROM color_yarn_types WHERE typeID = {$puffyColorTypeID}"
+                );
+                while ($puffyLinks && ($linkRow = mysqli_fetch_assoc($puffyLinks))) {
+                    $colorID = (int)($linkRow['colorID'] ?? 0);
+                    $photoPath = (string)($linkRow['photoPath'] ?? '');
+                    if ($colorID <= 0) {
+                        continue;
+                    }
+                    $safePhoto = mysqli_real_escape_string($conn, $photoPath);
+                    mysqli_query(
+                        $conn,
+                        "INSERT INTO color_yarn_types (colorID, typeID, photoPath)
+                         VALUES ({$colorID}, {$puffyTypeID}, " . ($photoPath !== '' ? "'{$safePhoto}'" : "NULL") . ")
+                         ON DUPLICATE KEY UPDATE
+                            photoPath = CASE
+                                WHEN (photoPath IS NULL OR TRIM(photoPath) = '') AND VALUES(photoPath) IS NOT NULL
+                                THEN VALUES(photoPath)
+                                ELSE photoPath
+                            END"
+                    );
+                }
+                mysqli_query($conn, "DELETE FROM color_yarn_types WHERE typeID = {$puffyColorTypeID}");
+                mysqli_query($conn, "DELETE FROM yarn_types WHERE typeID = {$puffyColorTypeID}");
+                mysqli_query($conn, "UPDATE colors SET colorName = REPLACE(colorName, 'Puffy Color ', 'Puffy ') WHERE colorName LIKE 'Puffy Color %'");
+            }
+
+            $uniqueTypeCheck = mysqli_query(
+                $conn,
+                "SHOW INDEX FROM yarn_types WHERE Key_name = 'uq_yarn_types_typeName'"
+            );
+            if (!$uniqueTypeCheck || mysqli_num_rows($uniqueTypeCheck) === 0) {
+                mysqli_query($conn, "ALTER TABLE yarn_types ADD UNIQUE KEY uq_yarn_types_typeName (typeName)");
+            }
+
             foreach (['Baby Anti Pilling', 'Cotton', 'Puffy', 'Velvet'] as $typeName) {
                 $safeType = mysqli_real_escape_string($conn, $typeName);
                 mysqli_query(
@@ -170,11 +321,215 @@ if (!function_exists('app_product_options_ensure_schema')) {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
         );
 
+        mysqli_query(
+            $conn,
+            "CREATE TABLE IF NOT EXISTS product_size_prices (
+                productID INT NOT NULL,
+                sizeLabel VARCHAR(120) NOT NULL,
+                price DOUBLE NULL DEFAULT NULL,
+                updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (productID, sizeLabel),
+                KEY idx_product_size_prices_product (productID)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+        );
+
+        mysqli_query(
+            $conn,
+            "CREATE TABLE IF NOT EXISTS product_color_availability (
+                productID INT NOT NULL,
+                colorID INT NOT NULL,
+                isAvailable TINYINT(1) NOT NULL DEFAULT 1,
+                updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (productID, colorID),
+                KEY idx_pca_color (colorID),
+                CONSTRAINT fk_pca_product
+                    FOREIGN KEY (productID) REFERENCES products(productID)
+                    ON DELETE CASCADE ON UPDATE CASCADE,
+                CONSTRAINT fk_pca_color
+                    FOREIGN KEY (colorID) REFERENCES colors(colorID)
+                    ON DELETE CASCADE ON UPDATE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+        );
+
         if (app_product_options_table_exists($conn, 'order_items')
             && !app_product_options_column_exists($conn, 'order_items', 'customizationNote')
         ) {
             mysqli_query($conn, "ALTER TABLE order_items ADD COLUMN customizationNote VARCHAR(255) NULL AFTER giftMessage");
         }
+    }
+}
+
+if (!function_exists('app_product_size_label_normalize')) {
+    function app_product_size_label_normalize(string $sizeLabel): string
+    {
+        $sizeLabel = trim(preg_replace('/\s+/', ' ', $sizeLabel));
+        return function_exists('mb_substr') ? mb_substr($sizeLabel, 0, 120, 'UTF-8') : substr($sizeLabel, 0, 120);
+    }
+}
+
+if (!function_exists('app_product_size_prices_for_product')) {
+    function app_product_size_prices_for_product(mysqli $conn, int $productId): array
+    {
+        app_product_options_ensure_schema($conn);
+        if ($productId <= 0 || !app_product_options_table_exists($conn, 'product_size_prices')) {
+            return [];
+        }
+
+        $stmt = mysqli_prepare($conn, "SELECT sizeLabel, price FROM product_size_prices WHERE productID = ? ORDER BY sizeLabel ASC");
+        if (!$stmt) {
+            return [];
+        }
+
+        mysqli_stmt_bind_param($stmt, 'i', $productId);
+        mysqli_stmt_execute($stmt);
+        $res = mysqli_stmt_get_result($stmt);
+        $prices = [];
+        while ($res && ($row = mysqli_fetch_assoc($res))) {
+            $label = app_product_size_label_normalize((string)($row['sizeLabel'] ?? ''));
+            if ($label === '') {
+                continue;
+            }
+            $prices[$label] = (float)($row['price'] ?? 0);
+        }
+        mysqli_stmt_close($stmt);
+
+        return $prices;
+    }
+}
+
+if (!function_exists('app_product_size_price_for_product_size')) {
+    function app_product_size_price_for_product_size(mysqli $conn, int $productId, string $sizeLabel): ?float
+    {
+        $sizeLabel = app_product_size_label_normalize($sizeLabel);
+        if ($productId <= 0 || $sizeLabel === '') {
+            return null;
+        }
+
+        foreach (app_product_size_prices_for_product($conn, $productId) as $storedLabel => $price) {
+            if (function_exists('mb_strtolower')) {
+                $left = mb_strtolower($storedLabel, 'UTF-8');
+                $right = mb_strtolower($sizeLabel, 'UTF-8');
+            } else {
+                $left = strtolower($storedLabel);
+                $right = strtolower($sizeLabel);
+            }
+            if ($left === $right) {
+                return (float)$price;
+            }
+        }
+
+        return null;
+    }
+}
+
+if (!function_exists('app_color_display_sql')) {
+    function app_color_display_sql(string $alias = 'c'): string
+    {
+        $alias = trim($alias);
+        if ($alias === '') {
+            $alias = 'colors';
+        }
+        $safeAlias = preg_replace('/[^A-Za-z0-9_]/', '', $alias);
+        if ($safeAlias === '') {
+            $safeAlias = 'c';
+        }
+        $colorName = "TRIM(COALESCE({$safeAlias}.colorName, ''))";
+        $displayCode = "TRIM(COALESCE({$safeAlias}.displayCode, ''))";
+        $humanName = "TRIM(CASE
+            WHEN {$displayCode} <> ''
+             AND RIGHT({$colorName}, CHAR_LENGTH({$displayCode}) + 1) = CONCAT(' ', {$displayCode})
+            THEN LEFT({$colorName}, CHAR_LENGTH({$colorName}) - CHAR_LENGTH({$displayCode}) - 1)
+            ELSE {$colorName}
+        END)";
+
+        return "COALESCE(NULLIF({$humanName}, ''), NULLIF({$displayCode}, ''), CONCAT('Colour ', {$safeAlias}.colorID))";
+    }
+}
+
+if (!function_exists('app_color_display_name')) {
+    function app_color_display_name(array $row): string
+    {
+        $colorName = trim((string)($row['colorName'] ?? ''));
+        $displayCode = trim((string)($row['displayCode'] ?? ''));
+        if ($colorName !== '') {
+            if ($displayCode !== '') {
+                $withoutCode = trim((string)preg_replace('/\s+' . preg_quote($displayCode, '/') . '$/u', '', $colorName));
+                if ($withoutCode !== '') {
+                    return $withoutCode;
+                }
+            }
+            return $colorName;
+        }
+        return $displayCode;
+    }
+}
+
+if (!function_exists('app_product_available_sizes_from_string')) {
+    function app_product_available_sizes_from_string(string $value): array
+    {
+        $parts = array_map('app_product_size_label_normalize', explode(',', $value));
+        $sizes = [];
+        foreach ($parts as $size) {
+            if ($size === '') {
+                continue;
+            }
+            $key = function_exists('mb_strtolower') ? mb_strtolower($size, 'UTF-8') : strtolower($size);
+            if (!isset($sizes[$key])) {
+                $sizes[$key] = $size;
+            }
+        }
+        return array_values($sizes);
+    }
+}
+
+if (!function_exists('app_product_size_prices_save')) {
+    function app_product_size_prices_save(mysqli $conn, int $productId, array $sizes, array $postedPrices): void
+    {
+        app_product_options_ensure_schema($conn);
+        if ($productId <= 0) {
+            return;
+        }
+
+        $delete = mysqli_prepare($conn, "DELETE FROM product_size_prices WHERE productID = ?");
+        if ($delete) {
+            mysqli_stmt_bind_param($delete, 'i', $productId);
+            mysqli_stmt_execute($delete);
+            mysqli_stmt_close($delete);
+        }
+
+        $stmt = mysqli_prepare(
+            $conn,
+            "INSERT INTO product_size_prices (productID, sizeLabel, price) VALUES (?, ?, ?)"
+        );
+        if (!$stmt) {
+            return;
+        }
+
+        foreach ($sizes as $size) {
+            $size = app_product_size_label_normalize((string)$size);
+            if ($size === '') {
+                continue;
+            }
+            $raw = $postedPrices[$size] ?? null;
+            if ($raw === null) {
+                foreach ($postedPrices as $postedLabel => $postedValue) {
+                    $left = function_exists('mb_strtolower') ? mb_strtolower((string)$postedLabel, 'UTF-8') : strtolower((string)$postedLabel);
+                    $right = function_exists('mb_strtolower') ? mb_strtolower($size, 'UTF-8') : strtolower($size);
+                    if ($left === $right) {
+                        $raw = $postedValue;
+                        break;
+                    }
+                }
+            }
+            if ($raw === null || trim((string)$raw) === '') {
+                continue;
+            }
+            $price = round(max(0.0, (float)$raw), 2);
+            mysqli_stmt_bind_param($stmt, 'isd', $productId, $size, $price);
+            mysqli_stmt_execute($stmt);
+        }
+
+        mysqli_stmt_close($stmt);
     }
 }
 

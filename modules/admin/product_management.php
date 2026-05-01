@@ -4,6 +4,7 @@ require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/../../include/security.php';
 require_once __DIR__ . '/../../include/image_storage.php';
 require_once __DIR__ . '/../../include/product_option_helpers.php';
+require_once __DIR__ . '/../../include/product_warnings.php';
 require_once __DIR__ . '/../../include/made_to_order_access.php';
 
 $current_page = 'product_management';
@@ -16,6 +17,7 @@ if ($sellingFastColumn && mysqli_num_rows($sellingFastColumn) === 0) {
 }
 ensureMadeToOrderProductSchema($conn);
 app_product_options_ensure_schema($conn);
+app_product_sync_stock_statuses($conn);
 
 function productMgmtEnsurePhotoStorageSchema(mysqli $conn): void
 {
@@ -172,6 +174,27 @@ function productMgmtSaveProductWarning(mysqli $conn, int $productID, ?string $wa
     mysqli_stmt_close($stmt);
 }
 
+function productMgmtPostedSizePriceAmounts(array $postedPrices): array
+{
+    $amounts = [];
+    foreach ($postedPrices as $rawPrice) {
+        $rawPrice = trim((string)$rawPrice);
+        if ($rawPrice === '') {
+            continue;
+        }
+        $amounts[] = round(max(0.0, (float)$rawPrice), 2);
+    }
+    return $amounts;
+}
+
+function productMgmtFormatPriceRange(float $minPrice, float $maxPrice): string
+{
+    if (abs($maxPrice - $minPrice) > 0.009) {
+        return '€' . number_format($minPrice, 2) . ' - €' . number_format($maxPrice, 2);
+    }
+    return '€' . number_format($minPrice, 2);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $action = $_POST['action'] ?? '';
@@ -195,15 +218,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'update_warning_message') {
-        $productID = (int)($_POST['productID'] ?? 0);
+        $warningTarget = trim((string)($_POST['warningTarget'] ?? ''));
+        $productID = $warningTarget === 'global'
+            ? 0
+            : (int)($warningTarget !== '' ? $warningTarget : ($_POST['productID'] ?? 0));
         $warningEN = productMgmtNormalizeProductWarning((string)($_POST['productWarningEN'] ?? ''));
         $warningGR = productMgmtNormalizeProductWarning((string)($_POST['productWarningGR'] ?? ''));
 
-        if ($productID > 0) {
+        if ($warningTarget === 'global') {
+            $saved = app_product_global_warning_save($conn, $warningEN, $warningGR);
+            $flash = $saved
+                ? 'ok:Global product warning message updated.'
+                : 'error:Global product warning message could not be saved.';
+        } elseif ($productID > 0) {
             productMgmtSaveProductWarning($conn, $productID, $warningEN, $warningGR);
             $flash = 'ok:Product warning message updated.';
         } else {
-            $flash = 'error:Choose a product before saving a warning message.';
+            $flash = 'error:Choose all products or one product before saving a warning message.';
         }
 
         $q2 = trim((string)($_POST['q'] ?? ''));
@@ -214,14 +245,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'add' || $action === 'edit') {
+        $id       = $action === 'edit' ? (int)($_POST['productID'] ?? 0) : 0;
         $nameEN   = trim($_POST['nameEN']   ?? '');
         $nameGR   = trim($_POST['nameGR']   ?? '');
         $descEN   = trim($_POST['descriptionEN'] ?? '');
         $descGR   = trim($_POST['descriptionGR'] ?? '');
-        $price    = (float)($_POST['basePrice']  ?? 0);
+        $priceRaw = trim((string)($_POST['basePrice'] ?? ''));
+        $price    = $priceRaw === '' ? null : round(max(0.0, (float)$priceRaw), 2);
         $cost     = (float)($_POST['costPrice']  ?? 0);
         $inv      = (int)($_POST['inventory']    ?? 0);
-        $status   = $_POST['cartStatus']  ?? 'active';
         $category = trim($_POST['category'] ?? '');
         $sku      = trim($_POST['sku']      ?? '');
         $isSellingFast = isset($_POST['isSellingFast']) ? 1 : 0;
@@ -229,6 +261,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $hasWarningPost = array_key_exists('productWarningEN', $_POST) || array_key_exists('productWarningGR', $_POST);
         $productWarningEN = productMgmtNormalizeProductWarning((string)($_POST['productWarningEN'] ?? ''));
         $productWarningGR = productMgmtNormalizeProductWarning((string)($_POST['productWarningGR'] ?? ''));
+        $rawSizesPost = app_product_available_sizes_from_string((string)($_POST['availableSizes'] ?? ''));
+        $availableSizesSave = !empty($rawSizesPost)
+            ? implode(',', $rawSizesPost)
+            : 'Small,Medium,Large';
+        $sizePricesPost = is_array($_POST['sizePrices'] ?? null) ? $_POST['sizePrices'] : [];
+        $sizePriceAmounts = productMgmtPostedSizePriceAmounts($sizePricesPost);
+        $existingPrivateToken = '';
+        $existingPrivateEmail = '';
+        $existingStatus = '';
+
+        if ($action === 'edit' && $id > 0) {
+            $existingRowStmt = mysqli_prepare(
+                $conn,
+                "SELECT cartStatus, privateAccessToken, privateCustomerEmail
+                 FROM products
+                 WHERE productID = ?
+                 LIMIT 1"
+            );
+            if ($existingRowStmt) {
+                mysqli_stmt_bind_param($existingRowStmt, 'i', $id);
+                mysqli_stmt_execute($existingRowStmt);
+                $existingRes = mysqli_stmt_get_result($existingRowStmt);
+                if ($existingRes && ($existingRow = mysqli_fetch_assoc($existingRes))) {
+                    $existingStatus = (string)($existingRow['cartStatus'] ?? '');
+                    $existingPrivateToken = trim((string)($existingRow['privateAccessToken'] ?? ''));
+                    $existingPrivateEmail = normalizeCustomerEmail((string)($existingRow['privateCustomerEmail'] ?? ''));
+                }
+                mysqli_stmt_close($existingRowStmt);
+            }
+        }
+
+        $status = app_product_status_from_stock($inv, $existingStatus);
+
+        if ($price === null) {
+            if (!empty($sizePriceAmounts)) {
+                $price = min($sizePriceAmounts);
+            } else {
+                $flash = 'error:Add a fallback selling price or at least one size price.';
+                header('Location: product_management.php?flash=' . urlencode($flash));
+                exit;
+            }
+        }
 
         if ($status === 'made_to_order' && ($privateCustomerEmail === '' || !filter_var($privateCustomerEmail, FILTER_VALIDATE_EMAIL))) {
             $flash = 'error:Made to Order products require a valid customer email.';
@@ -248,7 +322,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $privateAccessToken = $status === 'made_to_order' ? generateMadeToOrderAccessToken() : '';
             $privateLinkSentAt = $status === 'made_to_order' ? date('Y-m-d H:i:s') : null;
 
-            $defaultSizes = 'Small,Medium,Large';
             $stmt = mysqli_prepare(
                 $conn,
                 "INSERT INTO products
@@ -273,10 +346,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $privateCustomerEmail,
                 $privateAccessToken,
                 $privateLinkSentAt,
-                $defaultSizes
+                $availableSizesSave
             );
             mysqli_stmt_execute($stmt);
             $newProductID = mysqli_insert_id($conn);
+            app_product_size_prices_save($conn, (int)$newProductID, $rawSizesPost, $sizePricesPost);
             if ($hasWarningPost) {
                 productMgmtSaveProductWarning($conn, (int)$newProductID, $productWarningEN, $productWarningGR);
             }
@@ -305,28 +379,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $flash = 'ok:Product added successfully.';
             }
         } else {
-            $id = (int)($_POST['productID'] ?? 0);
-
-            $existingPrivateToken = '';
-            $existingPrivateEmail = '';
-            $existingRowStmt = mysqli_prepare(
-                $conn,
-                "SELECT privateAccessToken, privateCustomerEmail
-                 FROM products
-                 WHERE productID = ?
-                 LIMIT 1"
-            );
-            if ($existingRowStmt) {
-                mysqli_stmt_bind_param($existingRowStmt, 'i', $id);
-                mysqli_stmt_execute($existingRowStmt);
-                $existingRes = mysqli_stmt_get_result($existingRowStmt);
-                if ($existingRes && ($existingRow = mysqli_fetch_assoc($existingRes))) {
-                    $existingPrivateToken = trim((string)($existingRow['privateAccessToken'] ?? ''));
-                    $existingPrivateEmail = normalizeCustomerEmail((string)($existingRow['privateCustomerEmail'] ?? ''));
-                }
-                mysqli_stmt_close($existingRowStmt);
-            }
-
             $privateAccessToken = '';
             $privateLinkSentAt = null;
             $privateLinkNeedsEmail = false;
@@ -381,19 +433,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 productMgmtSaveProductWarning($conn, $id, $productWarningEN, $productWarningGR);
             }
 
-            $rawSizesPost = array_values(array_filter(
-                array_map('trim', explode(',', (string)($_POST['availableSizes'] ?? ''))),
-                'strlen'
-            ));
-            $availableSizesSave = !empty($rawSizesPost)
-                ? implode(',', array_unique($rawSizesPost))
-                : 'Small,Medium,Large';
             $szSaveStmt = mysqli_prepare($conn, "UPDATE products SET availableSizes = ? WHERE productID = ?");
             if ($szSaveStmt) {
                 mysqli_stmt_bind_param($szSaveStmt, 'si', $availableSizesSave, $id);
                 mysqli_stmt_execute($szSaveStmt);
                 mysqli_stmt_close($szSaveStmt);
             }
+            app_product_size_prices_save($conn, $id, $rawSizesPost, $sizePricesPost);
 
             if (isset($_FILES['photos']) && is_array($_FILES['photos']['tmp_name'])) {
                 $existing = 0;
@@ -598,32 +644,62 @@ if (!in_array($statusFilter, $allowedStatusFilters, true)) {
     $statusFilter = '';
 }
 $products = [];
-$productsSql = "SELECT * FROM products";
+$productsSql = "
+    SELECT
+        p.*,
+        CASE
+            WHEN vstats.min_price IS NOT NULL AND sizestats.min_price IS NOT NULL THEN LEAST(vstats.min_price, sizestats.min_price)
+            ELSE COALESCE(vstats.min_price, sizestats.min_price, p.basePrice)
+        END AS displayMinPrice,
+        CASE
+            WHEN vstats.max_price IS NOT NULL AND sizestats.max_price IS NOT NULL THEN GREATEST(vstats.max_price, sizestats.max_price)
+            ELSE COALESCE(vstats.max_price, sizestats.max_price, p.basePrice)
+        END AS displayMaxPrice,
+        COALESCE(sizestats.price_count, 0) AS sizePriceCount
+    FROM products p
+    LEFT JOIN (
+        SELECT
+            productID,
+            MIN(CASE WHEN price IS NOT NULL AND price >= 0 THEN price END) AS min_price,
+            MAX(CASE WHEN price IS NOT NULL AND price >= 0 THEN price END) AS max_price
+        FROM product_variations
+        GROUP BY productID
+    ) vstats ON vstats.productID = p.productID
+    LEFT JOIN (
+        SELECT
+            productID,
+            MIN(CASE WHEN price IS NOT NULL AND price >= 0 THEN price END) AS min_price,
+            MAX(CASE WHEN price IS NOT NULL AND price >= 0 THEN price END) AS max_price,
+            COUNT(CASE WHEN price IS NOT NULL AND price >= 0 THEN 1 END) AS price_count
+        FROM product_size_prices
+        GROUP BY productID
+    ) sizestats ON sizestats.productID = p.productID
+";
 if ($searchTerm !== '' && $statusFilter !== '') {
     $productsSql .= " WHERE (
-        nameEN LIKE ? OR
-        nameGR LIKE ? OR
-        sku LIKE ? OR
-        category LIKE ? OR
-        cartStatus LIKE ? OR
-        CAST(productID AS CHAR) LIKE ? OR
-        descriptionEN LIKE ? OR
-        descriptionGR LIKE ?
-    ) AND cartStatus = ?";
+        p.nameEN LIKE ? OR
+        p.nameGR LIKE ? OR
+        p.sku LIKE ? OR
+        p.category LIKE ? OR
+        p.cartStatus LIKE ? OR
+        CAST(p.productID AS CHAR) LIKE ? OR
+        p.descriptionEN LIKE ? OR
+        p.descriptionGR LIKE ?
+    ) AND p.cartStatus = ?";
 } elseif ($searchTerm !== '') {
     $productsSql .= " WHERE
-        nameEN LIKE ? OR
-        nameGR LIKE ? OR
-        sku LIKE ? OR
-        category LIKE ? OR
-        cartStatus LIKE ? OR
-        CAST(productID AS CHAR) LIKE ? OR
-        descriptionEN LIKE ? OR
-        descriptionGR LIKE ?";
+        p.nameEN LIKE ? OR
+        p.nameGR LIKE ? OR
+        p.sku LIKE ? OR
+        p.category LIKE ? OR
+        p.cartStatus LIKE ? OR
+        CAST(p.productID AS CHAR) LIKE ? OR
+        p.descriptionEN LIKE ? OR
+        p.descriptionGR LIKE ?";
 } elseif ($statusFilter !== '') {
-    $productsSql .= " WHERE cartStatus = ?";
+    $productsSql .= " WHERE p.cartStatus = ?";
 }
-$productsSql .= " ORDER BY nameEN ASC";
+$productsSql .= " ORDER BY p.nameEN ASC";
 
 $productsStmt = mysqli_prepare($conn, $productsSql);
 if ($productsStmt) {
@@ -669,23 +745,8 @@ if ($productsStmt) {
     mysqli_stmt_close($productsStmt);
 }
 
-$pcpColorsByProduct = [];
-$r = mysqli_query($conn,
-    "SELECT DISTINCT pv.productID, pv.colorID, c.colorName
-     FROM product_variations pv
-     JOIN colors c ON c.colorID = pv.colorID
-     WHERE pv.colorID IS NOT NULL
-     ORDER BY c.colorName ASC");
-if ($r) {
-    while ($row = mysqli_fetch_assoc($r)) {
-        $pcpColorsByProduct[(int)$row['productID']][] = [
-            'id'   => (int)$row['colorID'],
-            'name' => $row['colorName'],
-        ];
-    }
-}
-
 $editProduct = null;
+$editSizePrices = [];
 if (isset($_GET['edit'])) {
     $eid = (int)$_GET['edit'];
     $stmt = mysqli_prepare($conn, "SELECT * FROM products WHERE productID = ?");
@@ -695,6 +756,9 @@ if (isset($_GET['edit'])) {
         $r = mysqli_stmt_get_result($stmt);
         $editProduct = $r ? mysqli_fetch_assoc($r) : null;
         mysqli_stmt_close($stmt);
+    }
+    if ($editProduct) {
+        $editSizePrices = app_product_size_prices_for_product($conn, (int)$editProduct['productID']);
     }
 }
 
@@ -721,6 +785,7 @@ foreach ($products as $productRow) {
         'gr' => (string)($productRow['productWarningGR'] ?? ''),
     ];
 }
+$globalProductWarnings = app_product_global_warning_texts($conn);
 
 $categories = ['Animals','Blankets','Bags','Decor','Dolls'];
 
@@ -855,7 +920,14 @@ $statusFilterOptions = [
                 </td>
                 <td class="text-muted"><?= htmlspecialchars($p['category'] ?? '—') ?></td>
                 <td>
-                  <span class="price-new">€<?= number_format($p['basePrice'],2) ?></span>
+                  <?php
+                    $displayMinPrice = (float)($p['displayMinPrice'] ?? $p['basePrice'] ?? 0);
+                    $displayMaxPrice = (float)($p['displayMaxPrice'] ?? $p['basePrice'] ?? 0);
+                  ?>
+                  <span class="price-new"><?= htmlspecialchars(productMgmtFormatPriceRange($displayMinPrice, $displayMaxPrice)) ?></span>
+                  <?php if (abs($displayMaxPrice - $displayMinPrice) > 0.009): ?>
+                    <div class="text-sm text-muted">Base: €<?= number_format((float)$p['basePrice'], 2) ?></div>
+                  <?php endif; ?>
                   <?php if ((float)$p['costPrice'] > 0): ?>
                     <div class="text-sm text-muted">Cost: €<?= number_format((float)$p['costPrice'], 2) ?></div>
                   <?php endif; ?>
@@ -875,7 +947,7 @@ $statusFilterOptions = [
                     <span class="text-muted">&mdash;</span>
                   <?php endif; ?>
                 </td>
-                <td><?= $p['cartStatus'] === 'made_to_order' ? 'N/A' : (int)$p['inventory'] ?></td>
+                <td><?= (int)$p['inventory'] ?></td>
                 <td style="text-align:right">
                   <a href="?edit=<?= $p['productID'] ?><?= ($searchTerm !== '' || $statusFilter !== '') ? '&' . http_build_query(['q' => $searchTerm, 'status_filter' => $statusFilter]) : '' ?>" class="btn-edit">
                     <i class="fas fa-pen"></i> Edit
@@ -919,29 +991,32 @@ $statusFilterOptions = [
       <div class="card" style="margin-top:24px">
         <div class="card-title">Edit Product Warning Box</div>
         <p class="text-sm text-muted" style="margin-bottom:20px">
-          Edit the warning box shown on each product page. Leave both messages blank to use the default product warnings.
+          Edit the default warning shown on all product pages, or choose one product to create a product-specific override. Clear both product-specific messages to use the global warning again.
         </p>
         <form method="POST" data-ignore-unsaved-warning>
           <input type="hidden" name="action" value="update_warning_message">
           <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
           <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
           <div class="form-group" style="max-width:420px">
-            <label class="form-label">Product</label>
-            <select id="warning-product" name="productID" class="form-input" onchange="pmWarningLoad()" required>
-              <option value="">— Select product —</option>
+            <label class="form-label">Warning Applies To</label>
+            <select id="warning-target" name="warningTarget" class="form-input" onchange="pmWarningLoad()" required>
+              <option value="global">All products default warning</option>
               <?php foreach ($products as $p): ?>
                 <option value="<?= (int)$p['productID'] ?>"><?= htmlspecialchars($p['nameEN']) ?></option>
               <?php endforeach; ?>
             </select>
+            <div id="warning-scope-help" class="text-sm text-muted" style="margin-top:6px">
+              Products with empty custom warnings use this global message.
+            </div>
           </div>
           <div class="form-grid-2">
             <div class="form-group">
               <label class="form-label">Warning Message (EN)</label>
-              <textarea id="warning-en" name="productWarningEN" class="form-input" rows="5" maxlength="2500" placeholder="One warning per line"></textarea>
+              <textarea id="warning-en" name="productWarningEN" class="form-input" rows="5" maxlength="2500" placeholder="One warning per line"><?= htmlspecialchars($globalProductWarnings['en'] ?? '') ?></textarea>
             </div>
             <div class="form-group">
               <label class="form-label">Warning Message (GR)</label>
-              <textarea id="warning-gr" name="productWarningGR" class="form-input" rows="5" maxlength="2500" placeholder="One warning per line"></textarea>
+              <textarea id="warning-gr" name="productWarningGR" class="form-input" rows="5" maxlength="2500" placeholder="One warning per line"><?= htmlspecialchars($globalProductWarnings['gr'] ?? '') ?></textarea>
             </div>
           </div>
           <div style="display:flex;justify-content:flex-end">
@@ -950,104 +1025,6 @@ $statusFilterOptions = [
             </button>
           </div>
         </form>
-      </div>
-
-      <div class="card" style="margin-top:24px">
-        <div class="card-title">Product Colour Photos</div>
-        <p class="text-sm text-muted" style="margin-bottom:20px">Upload product photos per colour. These appear on the storefront when the customer selects a colour.</p>
-
-        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px">
-          <div class="form-group" style="flex:1;min-width:200px">
-            <label class="form-label">Product</label>
-            <select id="pcp-product" class="form-input" onchange="pcpLoadColors()">
-              <option value="">— Select product —</option>
-              <?php foreach ($products as $p): ?>
-                <option value="<?= (int)$p['productID'] ?>"><?= htmlspecialchars($p['nameEN']) ?></option>
-              <?php endforeach; ?>
-            </select>
-          </div>
-          <div class="form-group" style="flex:1;min-width:200px">
-            <label class="form-label">Colour</label>
-            <select id="pcp-color" class="form-input" disabled onchange="pcpLoadPhotos()">
-              <option value="">— Select colour —</option>
-            </select>
-          </div>
-        </div>
-
-        <div id="pcp-upload-area" style="display:none;margin-bottom:20px">
-          <label class="form-label">Upload Photo(s)</label>
-          <div style="display:flex;align-items:center;gap:12px">
-            <input type="file" id="pcp-file" class="form-input" accept="image/*" multiple style="flex:1">
-            <button class="btn btn-primary" onclick="pcpUpload()" style="white-space:nowrap">
-              <i class="fas fa-upload"></i> Upload
-            </button>
-          </div>
-          <div id="pcp-upload-progress" style="margin-top:8px;font-size:13px;color:#6b7280"></div>
-        </div>
-
-        <div id="pcp-photos-grid" style="display:flex;flex-wrap:wrap;gap:12px"></div>
-        <div id="pcp-empty" style="display:none;font-size:13px;color:#9ca3af;padding:12px 0">No photos yet for this product &amp; colour combination.</div>
-      </div>
-
-      <div class="card" style="margin-top:24px">
-        <div class="card-title">Multi-Colour Selection</div>
-        <p class="text-sm text-muted" style="margin-bottom:20px">
-          Optional: let customers pick 2 or 3 yarn colours for this product (e.g. a striped bee with Colour A + Colour B).
-          Upload a diagram photo showing where each colour goes.
-        </p>
-
-        <div class="form-group" style="max-width:340px">
-          <label class="form-label">Product</label>
-          <select id="mcs-product" class="form-input" onchange="mcsLoadConfig()">
-            <option value="">— Select product —</option>
-            <?php foreach ($products as $p): ?>
-              <option value="<?= (int)$p['productID'] ?>"><?= htmlspecialchars($p['nameEN']) ?></option>
-            <?php endforeach; ?>
-          </select>
-        </div>
-
-        <div id="mcs-config-area" style="display:none">
-
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
-            <input type="checkbox" id="mcs-enabled" onchange="mcsToggle()" style="width:16px;height:16px;cursor:pointer">
-            <label for="mcs-enabled" style="font-size:14px;font-weight:500;cursor:pointer">Enable multi-colour selection for this product</label>
-          </div>
-
-          <div id="mcs-options" style="display:none">
-            <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-bottom:20px">
-              <div class="form-group" style="flex:0 0 200px;margin-bottom:0">
-                <label class="form-label">Number of colours</label>
-                <select id="mcs-num-colors" class="form-input">
-                  <option value="2">2 Colours (A + B)</option>
-                  <option value="3">3 Colours (A + B + C)</option>
-                </select>
-              </div>
-              <button class="btn btn-primary" onclick="mcsSaveConfig()" style="white-space:nowrap">
-                <i class="fas fa-save"></i> Save Config
-              </button>
-              <span id="mcs-save-msg" style="font-size:13px;color:#16a34a;display:none">Saved!</span>
-            </div>
-
-            <div style="margin-bottom:12px">
-              <label class="form-label">Diagram Photo(s)</label>
-              <p class="text-sm text-muted" style="margin-bottom:8px">
-                Upload a photo like the bee example — showing where Colour A, B (and C) appear on the product.
-                Multiple photos → carousel on the storefront.
-              </p>
-              <div style="display:flex;align-items:center;gap:12px">
-                <input type="file" id="mcs-file" class="form-input" accept="image/*" multiple style="flex:1">
-                <button class="btn btn-primary" onclick="mcsUpload()" style="white-space:nowrap">
-                  <i class="fas fa-upload"></i> Upload
-                </button>
-              </div>
-              <div id="mcs-upload-progress" style="margin-top:8px;font-size:13px;color:#6b7280"></div>
-            </div>
-
-            <div id="mcs-photos-grid" style="display:flex;flex-wrap:wrap;gap:12px"></div>
-            <div id="mcs-empty" style="display:none;font-size:13px;color:#9ca3af;padding:8px 0">No diagram photos uploaded yet.</div>
-          </div>
-
-        </div>
       </div>
 
     </div>
@@ -1065,7 +1042,7 @@ $statusFilterOptions = [
       <div class="form-group">
         <label class="form-label">Product Photos <span class="text-muted">(up to <?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS ?>)</span></label>
         <input type="file" name="photos[]" class="form-input" accept="image/*" multiple data-product-photo-input data-photo-slots="<?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS ?>">
-        <span class="form-hint">Hold Ctrl/Cmd to select multiple photos. Uploaded product photos are optimized and stored as JPG automatically.</span>
+        <span class="form-hint">Hold Ctrl/Cmd to select multiple photos. Uploaded product photos are optimized and stored as WebP automatically.</span>
       </div>
       <div class="form-grid-2">
         <div class="form-group">
@@ -1087,8 +1064,9 @@ $statusFilterOptions = [
       </div>
       <div class="form-grid-2">
         <div class="form-group">
-          <label class="form-label">Selling Price (€) *</label>
-          <input name="basePrice" type="number" step="0.01" min="0" class="form-input" required placeholder="0.00">
+          <label class="form-label">Base / Fallback Selling Price (€)</label>
+          <input name="basePrice" type="number" step="0.01" min="0" class="form-input" placeholder="Auto from size prices">
+          <span class="form-hint">Used when a size has no custom price. If every size has a price, you can leave this blank.</span>
         </div>
         <div class="form-group">
           <label class="form-label">Material Cost (€) <span class="text-muted">(internal)</span></label>
@@ -1096,29 +1074,14 @@ $statusFilterOptions = [
           <span class="form-hint">Used for profitability tracking. Customers only see selling price.</span>
         </div>
       </div>
-      <div class="form-grid-2">
-        <div class="form-group">
-          <label class="form-label">Category</label>
-          <select name="category" class="form-input">
-            <option value="">— Select —</option>
-            <?php foreach ($categories as $cat): ?>
-              <option value="<?= htmlspecialchars((string)$cat) ?>"><?= htmlspecialchars((string)$cat) ?></option>
-            <?php endforeach; ?>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Availability</label>
-          <select name="cartStatus" class="form-input">
-            <?php foreach ($statuses as $val=>$lbl): ?>
-              <option value="<?= htmlspecialchars((string)$val) ?>"><?= htmlspecialchars((string)$lbl) ?></option>
-            <?php endforeach; ?>
-          </select>
-        </div>
-      </div>
-      <div class="form-group mto-private-email-field" data-private-email-field style="display:none;">
-        <label class="form-label">Private Customer Email (Made to Order)</label>
-        <input name="privateCustomerEmail" type="email" class="form-input" placeholder="customer@example.com">
-        <span class="form-hint">Only this email can use the private product link in shop.</span>
+      <div class="form-group">
+        <label class="form-label">Category</label>
+        <select name="category" class="form-input">
+          <option value="">— Select —</option>
+          <?php foreach ($categories as $cat): ?>
+            <option value="<?= htmlspecialchars((string)$cat) ?>"><?= htmlspecialchars((string)$cat) ?></option>
+          <?php endforeach; ?>
+        </select>
       </div>
       <div class="form-grid-2">
         <div class="form-group">
@@ -1129,6 +1092,17 @@ $statusFilterOptions = [
           <label class="form-label">SKU</label>
           <input name="sku" class="form-input" placeholder="Auto-generated if blank">
         </div>
+      </div>
+      <div class="form-group" data-size-editor data-size-prices='{}'>
+        <label class="form-label">Available Sizes</label>
+        <div data-size-chips style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:28px;"></div>
+        <div style="display:flex;gap:8px;">
+          <input type="text" data-size-input class="form-input" placeholder="e.g. Small, Medium, Large" style="flex:1;">
+          <button type="button" data-size-add class="btn-save" style="padding:8px 14px;white-space:nowrap;">Add</button>
+        </div>
+        <input type="hidden" name="availableSizes" data-size-hidden value="Small,Medium,Large">
+        <div data-size-price-rows style="margin-top:10px;"></div>
+        <p class="text-sm text-muted" style="margin-top:6px;">Add a selling price per size to show a price range in Product Management and Shop. Blank size prices use the fallback price.</p>
       </div>
       <div class="form-group">
         <label class="form-label">Homepage Promotion</label>
@@ -1185,7 +1159,7 @@ $statusFilterOptions = [
         <?php endif; ?>
         <?php if (count($productPhotos) < PRODUCT_MGMT_MAX_PRODUCT_PHOTOS): ?>
           <input type="file" name="photos[]" class="form-input" accept="image/*" multiple style="margin-top:8px;" data-product-photo-input data-photo-slots="<?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS - count($productPhotos) ?>">
-          <span class="form-hint">Add up to <?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS - count($productPhotos) ?> more photo(s) — hold Ctrl/Cmd to select multiple. Uploaded product photos are optimized and stored as JPG automatically.</span>
+          <span class="form-hint">Add up to <?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS - count($productPhotos) ?> more photo(s) — hold Ctrl/Cmd to select multiple. Uploaded product photos are optimized and stored as WebP automatically.</span>
         <?php endif; ?>
       </div>
       <div class="form-grid-2">
@@ -1208,32 +1182,23 @@ $statusFilterOptions = [
       </div>
       <div class="form-grid-2">
         <div class="form-group">
-          <label class="form-label">Selling Price (€) *</label>
-          <input name="basePrice" type="number" step="0.01" class="form-input" required value="<?= $editProduct['basePrice'] ?>">
+          <label class="form-label">Base / Fallback Selling Price (€)</label>
+          <input name="basePrice" type="number" step="0.01" min="0" class="form-input" value="<?= $editProduct['basePrice'] ?>">
+          <span class="form-hint">Used when a size has no custom price. If every size has a price, you can leave this blank.</span>
         </div>
         <div class="form-group">
           <label class="form-label">Material Cost (€) <span class="text-muted">(internal)</span></label>
           <input name="costPrice" type="number" step="0.01" class="form-input" value="<?= $editProduct['costPrice'] ?>">
         </div>
       </div>
-      <div class="form-grid-2">
-        <div class="form-group">
-          <label class="form-label">Category</label>
-          <select name="category" class="form-input">
-            <option value="">— Select —</option>
-            <?php foreach ($categories as $cat): ?>
-              <option value="<?= htmlspecialchars((string)$cat) ?>" <?= $editProduct['category']===$cat?'selected':'' ?>><?= htmlspecialchars((string)$cat) ?></option>
-            <?php endforeach; ?>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Availability</label>
-          <select name="cartStatus" class="form-input">
-            <?php foreach ($statuses as $val=>$lbl): ?>
-              <option value="<?= htmlspecialchars((string)$val) ?>" <?= $editProduct['cartStatus']===$val?'selected':'' ?>><?= htmlspecialchars((string)$lbl) ?></option>
-            <?php endforeach; ?>
-          </select>
-        </div>
+      <div class="form-group">
+        <label class="form-label">Category</label>
+        <select name="category" class="form-input">
+          <option value="">— Select —</option>
+          <?php foreach ($categories as $cat): ?>
+            <option value="<?= htmlspecialchars((string)$cat) ?>" <?= $editProduct['category']===$cat?'selected':'' ?>><?= htmlspecialchars((string)$cat) ?></option>
+          <?php endforeach; ?>
+        </select>
       </div>
       <div
         class="form-group mto-private-email-field"
@@ -1247,6 +1212,7 @@ $statusFilterOptions = [
           class="form-input"
           placeholder="customer@example.com"
           value="<?= htmlspecialchars((string)($editProduct['privateCustomerEmail'] ?? '')) ?>"
+          <?= (string)($editProduct['cartStatus'] ?? '') === 'made_to_order' ? 'required' : '' ?>
         >
         <span class="form-hint">Only this email can use the private product link in shop.</span>
         <?php if ((string)($editProduct['cartStatus'] ?? '') === 'made_to_order' && trim((string)($editProduct['privateAccessToken'] ?? '')) !== ''): ?>
@@ -1264,15 +1230,16 @@ $statusFilterOptions = [
         <label class="form-label">Stock Quantity</label>
         <input name="inventory" type="number" min="0" class="form-input" value="<?= (int)$editProduct['inventory'] ?>">
       </div>
-      <div class="form-group">
+      <div class="form-group" data-size-editor data-size-prices='<?= htmlspecialchars(json_encode($editSizePrices, JSON_UNESCAPED_UNICODE | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES, 'UTF-8') ?>'>
         <label class="form-label">Available Sizes</label>
-        <div id="pm-size-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:28px;"></div>
+        <div id="pm-size-chips" data-size-chips style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:28px;"></div>
         <div style="display:flex;gap:8px;">
-          <input type="text" id="pm-size-input" class="form-input" placeholder="e.g. Small, Medium, Large" style="flex:1;">
-          <button type="button" id="pm-size-add-btn" class="btn-save" style="padding:8px 14px;white-space:nowrap;">Add</button>
+          <input type="text" id="pm-size-input" data-size-input class="form-input" placeholder="e.g. Small, Medium, Large" style="flex:1;">
+          <button type="button" id="pm-size-add-btn" data-size-add class="btn-save" style="padding:8px 14px;white-space:nowrap;">Add</button>
         </div>
-        <input type="hidden" name="availableSizes" id="pm-sizes-hidden" value="<?= htmlspecialchars($editProduct['availableSizes'] ?? '') ?>">
-        <p class="text-sm text-muted" style="margin-top:6px;">Type a size and press Add or Enter. These appear as selectable chips on the product page.</p>
+        <input type="hidden" name="availableSizes" id="pm-sizes-hidden" data-size-hidden value="<?= htmlspecialchars($editProduct['availableSizes'] ?? '') ?>">
+        <div data-size-price-rows style="margin-top:10px;"></div>
+        <p class="text-sm text-muted" style="margin-top:6px;">Type a size and press Add or Enter. Fill different size prices to show a price range in Product Management and Shop.</p>
       </div>
       <div class="form-group">
         <label class="form-label">Homepage Promotion</label>
@@ -1404,242 +1371,26 @@ document.addEventListener('DOMContentLoaded', function () {
 
 <script>
 
-var pcpColorMap = <?= json_encode($pcpColorsByProduct, JSON_UNESCAPED_UNICODE) ?>;
 var pmWarningMap = <?= json_encode($productWarningsByProduct, JSON_UNESCAPED_UNICODE) ?>;
-var pcpAjax     = 'ajax/product_color_photo.php';
+var pmGlobalWarning = <?= json_encode([
+  'en' => (string)($globalProductWarnings['en'] ?? ''),
+  'gr' => (string)($globalProductWarnings['gr'] ?? ''),
+], JSON_UNESCAPED_UNICODE) ?>;
 
 function pmWarningLoad() {
-  var pid = parseInt(document.getElementById('warning-product').value || '0', 10) || 0;
-  var data = pmWarningMap[pid] || { en: '', gr: '' };
+  var targetEl = document.getElementById('warning-target');
+  var helpEl = document.getElementById('warning-scope-help');
+  var target = targetEl ? targetEl.value : 'global';
+  var data = target === 'global'
+    ? pmGlobalWarning
+    : (pmWarningMap[parseInt(target || '0', 10) || 0] || { en: '', gr: '' });
   document.getElementById('warning-en').value = data.en || '';
   document.getElementById('warning-gr').value = data.gr || '';
-}
-
-function pcpLoadColors() {
-  var pid      = parseInt(document.getElementById('pcp-product').value) || 0;
-  var colorSel = document.getElementById('pcp-color');
-  colorSel.innerHTML = '<option value="">— Select colour —</option>';
-  colorSel.disabled  = true;
-  document.getElementById('pcp-upload-area').style.display = 'none';
-  document.getElementById('pcp-photos-grid').innerHTML     = '';
-  document.getElementById('pcp-empty').style.display       = 'none';
-  if (!pid || !pcpColorMap[pid]) return;
-  pcpColorMap[pid].forEach(function(c) {
-    var opt = document.createElement('option');
-    opt.value       = c.id;
-    opt.textContent = c.id + ' — ' + c.name;
-    colorSel.appendChild(opt);
-  });
-  colorSel.disabled = false;
-}
-
-function pcpLoadPhotos() {
-  var pid = parseInt(document.getElementById('pcp-product').value) || 0;
-  var cid = parseInt(document.getElementById('pcp-color').value)   || 0;
-  var grid    = document.getElementById('pcp-photos-grid');
-  var empty   = document.getElementById('pcp-empty');
-  var upload  = document.getElementById('pcp-upload-area');
-  grid.innerHTML = '';
-  empty.style.display  = 'none';
-  upload.style.display = 'none';
-  if (!pid || !cid) return;
-  upload.style.display = 'block';
-  fetch(pcpAjax + '?action=list&productID=' + pid + '&colorID=' + cid)
-    .then(function(r){ return r.json(); })
-    .then(function(data) {
-      if (!data.ok || !data.photos.length) {
-        empty.style.display = 'block';
-        return;
-      }
-      data.photos.forEach(function(ph) { pcpAddThumb(ph); });
-    });
-}
-
-function pcpAddThumb(ph) {
-  var grid = document.getElementById('pcp-photos-grid');
-  var base = '<?= htmlspecialchars(productMgmtBuildProjectBasePath(), ENT_QUOTES) ?>/';
-  var wrap = document.createElement('div');
-  wrap.style.cssText = 'position:relative;width:100px;height:100px';
-  wrap.innerHTML =
-    '<img src="' + base + ph.photoPath + '" style="width:100px;height:100px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">' +
-    '<button onclick="pcpDelete(' + ph.id + ',this)" style="position:absolute;top:4px;right:4px;background:#dc2626;color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:12px;line-height:1" title="Delete"><i class="fas fa-times"></i></button>';
-  grid.appendChild(wrap);
-  document.getElementById('pcp-empty').style.display = 'none';
-}
-
-function pcpUpload() {
-  var pid   = parseInt(document.getElementById('pcp-product').value) || 0;
-  var cid   = parseInt(document.getElementById('pcp-color').value)   || 0;
-  var files = document.getElementById('pcp-file').files;
-  var prog  = document.getElementById('pcp-upload-progress');
-  if (!pid || !cid || !files.length) return;
-  prog.textContent = 'Uploading...';
-  var remaining = files.length;
-  Array.from(files).forEach(function(file) {
-    var fd = new FormData();
-    fd.append('action',    'upload');
-    fd.append('productID', pid);
-    fd.append('colorID',   cid);
-    fd.append('photo',     file);
-    fd.append('csrf_token', window.APP_CSRF_TOKEN || '');
-    fetch(pcpAjax, { method: 'POST', body: fd })
-      .then(function(r){ return r.json(); })
-      .then(function(data) {
-        if (data.ok) pcpAddThumb(data);
-        remaining--;
-        if (remaining === 0) {
-          prog.textContent = 'Done.';
-          document.getElementById('pcp-file').value = '';
-          setTimeout(function(){ prog.textContent = ''; }, 2000);
-        }
-      });
-  });
-}
-
-function pcpDelete(id, btn) {
-  if (!confirm('Delete this photo?')) return;
-  var fd = new FormData();
-  fd.append('action', 'delete');
-  fd.append('id', id);
-  fd.append('csrf_token', window.APP_CSRF_TOKEN || '');
-  fetch(pcpAjax, { method: 'POST', body: fd })
-    .then(function(r){ return r.json(); })
-    .then(function(data) {
-      if (data.ok) {
-        btn.closest('div').remove();
-        var grid = document.getElementById('pcp-photos-grid');
-        if (!grid.children.length) document.getElementById('pcp-empty').style.display = 'block';
-      }
-    });
-}
-
-var mcsAjax = 'ajax/color_scheme.php';
-var mcsBase = '<?= htmlspecialchars(productMgmtBuildProjectBasePath(), ENT_QUOTES) ?>/';
-
-function mcsLoadConfig() {
-  var pid = parseInt(document.getElementById('mcs-product').value) || 0;
-  var area = document.getElementById('mcs-config-area');
-  var opts = document.getElementById('mcs-options');
-  var grid = document.getElementById('mcs-photos-grid');
-  area.style.display = 'none';
-  opts.style.display = 'none';
-  grid.innerHTML = '';
-  document.getElementById('mcs-empty').style.display = 'none';
-  if (!pid) return;
-  fetch(mcsAjax + '?action=get_config&productID=' + pid)
-    .then(function(r){ return r.json(); })
-    .then(function(data) {
-      if (!data.ok) return;
-      area.style.display = 'block';
-      document.getElementById('mcs-enabled').checked = data.is_enabled;
-      document.getElementById('mcs-num-colors').value = data.num_colors || 2;
-      if (data.is_enabled) {
-        opts.style.display = 'block';
-        mcsLoadPhotos(pid);
-      }
-    });
-}
-
-function mcsToggle() {
-  var enabled = document.getElementById('mcs-enabled').checked;
-  document.getElementById('mcs-options').style.display = enabled ? 'block' : 'none';
-  if (enabled) {
-    var pid = parseInt(document.getElementById('mcs-product').value) || 0;
-    if (pid) mcsLoadPhotos(pid);
+  if (helpEl) {
+    helpEl.textContent = target === 'global'
+      ? 'Products with empty custom warnings use this global message.'
+      : 'This overrides the global warning only for the selected product. Clear both fields to return it to the global warning.';
   }
-}
-
-function mcsSaveConfig() {
-  var pid       = parseInt(document.getElementById('mcs-product').value) || 0;
-  var isEnabled = document.getElementById('mcs-enabled').checked ? 1 : 0;
-  var numColors = parseInt(document.getElementById('mcs-num-colors').value) || 2;
-  var msg       = document.getElementById('mcs-save-msg');
-  if (!pid) return;
-  var fd = new FormData();
-  fd.append('action',     'save_config');
-  fd.append('productID',  pid);
-  fd.append('is_enabled', isEnabled);
-  fd.append('num_colors', numColors);
-  fd.append('csrf_token', window.APP_CSRF_TOKEN || '');
-  fetch(mcsAjax, { method: 'POST', body: fd })
-    .then(function(r){ return r.json(); })
-    .then(function(data) {
-      if (data.ok) {
-        msg.style.display = 'inline';
-        setTimeout(function(){ msg.style.display = 'none'; }, 2500);
-      }
-    });
-}
-
-function mcsLoadPhotos(pid) {
-  var grid  = document.getElementById('mcs-photos-grid');
-  var empty = document.getElementById('mcs-empty');
-  grid.innerHTML = '';
-  empty.style.display = 'none';
-  fetch(mcsAjax + '?action=list_photos&productID=' + pid)
-    .then(function(r){ return r.json(); })
-    .then(function(data) {
-      if (!data.ok || !data.photos.length) {
-        empty.style.display = 'block';
-        return;
-      }
-      data.photos.forEach(function(ph){ mcsAddThumb(ph); });
-    });
-}
-
-function mcsAddThumb(ph) {
-  var grid = document.getElementById('mcs-photos-grid');
-  var wrap = document.createElement('div');
-  wrap.style.cssText = 'position:relative;width:120px;height:120px';
-  wrap.innerHTML =
-    '<img src="' + mcsBase + ph.photoPath + '" style="width:120px;height:120px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">' +
-    '<button onclick="mcsDeletePhoto(' + ph.id + ',this)" style="position:absolute;top:4px;right:4px;background:#dc2626;color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:12px;line-height:1" title="Delete"><i class="fas fa-times"></i></button>';
-  grid.appendChild(wrap);
-  document.getElementById('mcs-empty').style.display = 'none';
-}
-
-function mcsUpload() {
-  var pid   = parseInt(document.getElementById('mcs-product').value) || 0;
-  var files = document.getElementById('mcs-file').files;
-  var prog  = document.getElementById('mcs-upload-progress');
-  if (!pid || !files.length) return;
-  prog.textContent = 'Uploading...';
-  var remaining = files.length;
-  Array.from(files).forEach(function(file) {
-    var fd = new FormData();
-    fd.append('action',    'upload_photo');
-    fd.append('productID', pid);
-    fd.append('photo',     file);
-    fd.append('csrf_token', window.APP_CSRF_TOKEN || '');
-    fetch(mcsAjax, { method: 'POST', body: fd })
-      .then(function(r){ return r.json(); })
-      .then(function(data) {
-        if (data.ok) mcsAddThumb(data);
-        remaining--;
-        if (remaining === 0) {
-          prog.textContent = 'Done.';
-          document.getElementById('mcs-file').value = '';
-          setTimeout(function(){ prog.textContent = ''; }, 2000);
-        }
-      });
-  });
-}
-
-function mcsDeletePhoto(id, btn) {
-  if (!confirm('Delete this diagram photo?')) return;
-  var fd = new FormData();
-  fd.append('action',     'delete_photo');
-  fd.append('id',         id);
-  fd.append('csrf_token', window.APP_CSRF_TOKEN || '');
-  fetch(mcsAjax, { method: 'POST', body: fd })
-    .then(function(r){ return r.json(); })
-    .then(function(data) {
-      if (data.ok) {
-        btn.closest('div').remove();
-        var grid = document.getElementById('mcs-photos-grid');
-        if (!grid.children.length) document.getElementById('mcs-empty').style.display = 'block';
-      }
-    });
 }
 
 document.querySelectorAll('[data-product-photo-input]').forEach(function(input) {
@@ -1658,6 +1409,7 @@ document.querySelectorAll('[data-product-photo-input]').forEach(function(input) 
     var textInput  = document.getElementById('pm-size-input');
     var addBtn     = document.getElementById('pm-size-add-btn');
     if (!chipsWrap || !hiddenInput || !textInput) return;
+    if (chipsWrap.closest('[data-size-editor]')) return;
 
     function getSizes() {
         return hiddenInput.value.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
@@ -1708,6 +1460,116 @@ document.querySelectorAll('[data-product-photo-input]').forEach(function(input) 
     });
 
     renderChips();
+})();
+
+(function () {
+    function parsePrices(editor) {
+        try {
+            var parsed = JSON.parse(editor.getAttribute('data-size-prices') || '{}');
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (err) {
+            return {};
+        }
+    }
+
+    function setupSizeEditor(editor) {
+        var chipsWrap = editor.querySelector('[data-size-chips]');
+        var hiddenInput = editor.querySelector('[data-size-hidden]');
+        var textInput = editor.querySelector('[data-size-input]');
+        var addBtn = editor.querySelector('[data-size-add]');
+        var priceRows = editor.querySelector('[data-size-price-rows]');
+        if (!chipsWrap || !hiddenInput || !textInput || !addBtn || !priceRows) return;
+
+        var prices = parsePrices(editor);
+        function getSizes() {
+            return hiddenInput.value.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+        }
+        function setSizes(arr) {
+            var seen = {};
+            hiddenInput.value = arr.filter(function(size) {
+                var key = String(size || '').trim().toLowerCase();
+                if (!key || seen[key]) return false;
+                seen[key] = true;
+                return true;
+            }).join(',');
+        }
+        function priceForSize(size) {
+            if (Object.prototype.hasOwnProperty.call(prices, size)) return prices[size];
+            var target = String(size || '').toLowerCase();
+            var found = '';
+            Object.keys(prices).forEach(function(key) {
+                if (String(key).toLowerCase() === target) found = prices[key];
+            });
+            return found;
+        }
+        function renderPrices() {
+            priceRows.innerHTML = '';
+            getSizes().forEach(function(size) {
+                var row = document.createElement('div');
+                row.style.cssText = 'display:grid;grid-template-columns:minmax(110px,1fr) minmax(120px,160px);gap:8px;align-items:center;margin-bottom:8px;';
+                var label = document.createElement('label');
+                label.className = 'form-label';
+                label.style.margin = '0';
+                label.textContent = size + ' price';
+                var input = document.createElement('input');
+                input.type = 'number';
+                input.step = '0.01';
+                input.min = '0';
+                input.name = 'sizePrices[' + size + ']';
+                input.className = 'form-input';
+                input.placeholder = 'Fallback price';
+                var existing = priceForSize(size);
+                if (existing !== '' && existing !== null && typeof existing !== 'undefined') {
+                    input.value = Number(existing).toFixed(2);
+                }
+                input.addEventListener('input', function() { prices[size] = input.value; });
+                row.appendChild(label);
+                row.appendChild(input);
+                priceRows.appendChild(row);
+            });
+        }
+        function renderChips() {
+            chipsWrap.innerHTML = '';
+            getSizes().forEach(function(size) {
+                var chip = document.createElement('span');
+                chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#f3eeff;border:1px solid #ddd2f5;border-radius:20px;padding:3px 10px;font-size:13px;color:#6b5b8a;font-weight:500;';
+                chip.textContent = size;
+                var del = document.createElement('button');
+                del.type = 'button';
+                del.textContent = 'x';
+                del.style.cssText = 'background:none;border:none;cursor:pointer;font-size:15px;color:#9b7fc7;padding:0 0 0 4px;line-height:1;';
+                del.addEventListener('click', function() {
+                    var remaining = getSizes().filter(function(s){ return s !== size; });
+                    if (remaining.length === 0) return;
+                    setSizes(remaining);
+                    renderChips();
+                });
+                chip.appendChild(del);
+                chipsWrap.appendChild(chip);
+            });
+            renderPrices();
+        }
+        function addSize() {
+            var raw = textInput.value.trim();
+            if (!raw) return;
+            var parts = raw.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+            var current = getSizes();
+            parts.forEach(function(s) {
+                if (s && !current.some(function(existing) { return existing.toLowerCase() === s.toLowerCase(); })) current.push(s);
+            });
+            setSizes(current);
+            renderChips();
+            textInput.value = '';
+            textInput.focus();
+        }
+        addBtn.addEventListener('click', addSize);
+        textInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); addSize(); }
+        });
+        renderChips();
+    }
+
+    document.querySelectorAll('[data-size-editor]').forEach(setupSizeEditor);
 })();
 </script>
 </body>

@@ -446,7 +446,9 @@ if (!function_exists('app_homepage_expand_hero_asset')) {
             $writePath = $targetPath . '.tmp';
         }
 
-        app_homepage_write_gd_image_resource($canvas, $writePath, 'image/jpeg');
+        $targetExtension = strtolower((string)pathinfo($targetPath, PATHINFO_EXTENSION));
+        $outputMime = $targetExtension === 'webp' ? 'image/webp' : 'image/jpeg';
+        app_homepage_write_gd_image_resource($canvas, $writePath, $outputMime);
 
         if ($replaceOriginal) {
             @unlink($targetPath);

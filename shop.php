@@ -420,9 +420,10 @@ if ($materialRes) {
 }
 
 $colorFilterOptions = [];
+$colorDisplaySql = app_color_display_sql('c');
 $colorRes = $conn->query("
-    SELECT colorID, colorName, globalInventoryAvailable
-    FROM colors
+    SELECT c.colorID, {$colorDisplaySql} AS colorName, c.globalInventoryAvailable
+    FROM colors c
     WHERE isActive = 1
     ORDER BY colorName ASC
 ");
@@ -440,18 +441,32 @@ $minPrice = 0;
 $maxPrice = 100;
 $priceBoundsRes = $conn->query("
     SELECT
-        MIN(COALESCE(vstats.min_price, p.basePrice)) AS min_price,
-        MAX(COALESCE(vstats.max_price, p.basePrice)) AS max_price
+        MIN(CASE
+            WHEN vstats.min_price IS NOT NULL AND sizestats.min_price IS NOT NULL THEN LEAST(vstats.min_price, sizestats.min_price)
+            ELSE COALESCE(vstats.min_price, sizestats.min_price, p.basePrice)
+        END) AS min_price,
+        MAX(CASE
+            WHEN vstats.max_price IS NOT NULL AND sizestats.max_price IS NOT NULL THEN GREATEST(vstats.max_price, sizestats.max_price)
+            ELSE COALESCE(vstats.max_price, sizestats.max_price, p.basePrice)
+        END) AS max_price
     FROM products p
     LEFT JOIN (
         SELECT
             productID,
-            MIN(CASE WHEN price IS NOT NULL AND price > 0 THEN price END) AS min_price,
-            MAX(CASE WHEN price IS NOT NULL AND price > 0 THEN price END) AS max_price
+            MIN(CASE WHEN price IS NOT NULL AND price >= 0 THEN price END) AS min_price,
+            MAX(CASE WHEN price IS NOT NULL AND price >= 0 THEN price END) AS max_price
         FROM product_variations
         GROUP BY productID
     ) vstats ON vstats.productID = p.productID
-    WHERE ({$categoryVisibilityWhere})
+    LEFT JOIN (
+        SELECT
+            productID,
+            MIN(CASE WHEN price IS NOT NULL AND price >= 0 THEN price END) AS min_price,
+            MAX(CASE WHEN price IS NOT NULL AND price >= 0 THEN price END) AS max_price
+        FROM product_size_prices
+        GROUP BY productID
+    ) sizestats ON sizestats.productID = p.productID
+    WHERE ({$catalogVisibilityWhere})
 ");
 if ($priceBoundsRes && ($bounds = $priceBoundsRes->fetch_assoc())) {
     if ($bounds['min_price'] !== null && $bounds['max_price'] !== null) {
@@ -510,8 +525,15 @@ $products = [];
 $sql = "
     SELECT p.productID, p.sku, p.nameEN, p.nameGR, p.basePrice, p.inventory,
            p.cartStatus, p.category, p.materialType, p.hasVariants,
-           COALESCE(vstats.min_price, p.basePrice) AS displayMinPrice,
-           COALESCE(vstats.max_price, p.basePrice) AS displayMaxPrice,
+           CASE
+               WHEN vstats.min_price IS NOT NULL AND sizestats.min_price IS NOT NULL THEN LEAST(vstats.min_price, sizestats.min_price)
+               ELSE COALESCE(vstats.min_price, sizestats.min_price, p.basePrice)
+           END AS displayMinPrice,
+           CASE
+               WHEN vstats.max_price IS NOT NULL AND sizestats.max_price IS NOT NULL THEN GREATEST(vstats.max_price, sizestats.max_price)
+               ELSE COALESCE(vstats.max_price, sizestats.max_price, p.basePrice)
+           END AS displayMaxPrice,
+           COALESCE(sizestats.price_count, 0) AS sizePriceCount,
            CASE
                WHEN pso.productID IS NULL THEN COALESCE(os.total_qty, 0)
                ELSE pso.manual_total_sales + GREATEST(
@@ -532,11 +554,20 @@ $sql = "
     LEFT JOIN (
         SELECT
             productID,
-            MIN(CASE WHEN price IS NOT NULL AND price > 0 THEN price END) AS min_price,
-            MAX(CASE WHEN price IS NOT NULL AND price > 0 THEN price END) AS max_price
+            MIN(CASE WHEN price IS NOT NULL AND price >= 0 THEN price END) AS min_price,
+            MAX(CASE WHEN price IS NOT NULL AND price >= 0 THEN price END) AS max_price
         FROM product_variations
         GROUP BY productID
     ) vstats ON vstats.productID = p.productID
+    LEFT JOIN (
+        SELECT
+            productID,
+            MIN(CASE WHEN price IS NOT NULL AND price >= 0 THEN price END) AS min_price,
+            MAX(CASE WHEN price IS NOT NULL AND price >= 0 THEN price END) AS max_price,
+            COUNT(CASE WHEN price IS NOT NULL AND price >= 0 THEN 1 END) AS price_count
+        FROM product_size_prices
+        GROUP BY productID
+    ) sizestats ON sizestats.productID = p.productID
     LEFT JOIN product_sales_overrides pso ON pso.productID = p.productID
     WHERE ({$catalogVisibilityWhere})
 ";
@@ -607,7 +638,10 @@ if (!empty($selectedColors)) {
     }
 }
 
-$sql .= " AND COALESCE(vstats.min_price, p.basePrice) <= ?";
+$sql .= " AND (CASE
+    WHEN vstats.min_price IS NOT NULL AND sizestats.min_price IS NOT NULL THEN LEAST(vstats.min_price, sizestats.min_price)
+    ELSE COALESCE(vstats.min_price, sizestats.min_price, p.basePrice)
+END) <= ?";
 $bindTypes .= 'd';
 $bindValues[] = (float)$selectedPriceMax;
 
@@ -1029,7 +1063,10 @@ foreach ($products as $p) {
                             $stars  = '';
                             $displayMinPrice = (float)($p['displayMinPrice'] ?? $p['basePrice'] ?? 0);
                             $displayMaxPrice = (float)($p['displayMaxPrice'] ?? $p['basePrice'] ?? 0);
-                            $requiresOptionSelection = ((int)($p['hasVariants'] ?? 0) === 1) || !empty($variationPaths) || !empty($colorPaths);
+                            $requiresOptionSelection = ((int)($p['hasVariants'] ?? 0) === 1)
+                                || !empty($variationPaths)
+                                || !empty($colorPaths)
+                                || (int)($p['sizePriceCount'] ?? 0) > 0;
                             $filled = (int)round($rev['avg']);
                             for ($i = 1; $i <= 5; $i++) {
                                 $stars .= $i <= $filled ? '&#9733;' : '&#9734;';
@@ -1111,9 +1148,9 @@ foreach ($products as $p) {
                                 <div class="shop-price-row">
                                     <span class="shop-price">
                                         <?php if ($displayMaxPrice > $displayMinPrice): ?>
-                                            &euro;<?= number_format($displayMinPrice, 0) ?> - &euro;<?= number_format($displayMaxPrice, 0) ?>
+                                            &euro;<?= number_format($displayMinPrice, 2) ?> - &euro;<?= number_format($displayMaxPrice, 2) ?>
                                         <?php else: ?>
-                                            &euro;<?= number_format($displayMinPrice, 0) ?>
+                                            &euro;<?= number_format($displayMinPrice, 2) ?>
                                         <?php endif; ?>
                                     </span>
                                     <?php if ($p['cartStatus'] === 'made_to_order'): ?>

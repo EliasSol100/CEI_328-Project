@@ -3,6 +3,7 @@ session_start();
 
 require_once "../authentication/database.php";
 require_once "../include/security.php";
+require_once "../include/image_storage.php";
 require_once "../include/loyalty_program.php";
 require_once "../include/translation_helpers.php";
 
@@ -387,13 +388,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             } else {
                 $finfo = new finfo(FILEINFO_MIME_TYPE);
                 $mimeType = (string)($finfo->file((string)$file["tmp_name"]) ?: "");
-                $extensions = [
-                    "image/jpeg" => "jpg",
-                    "image/png" => "png",
-                    "image/gif" => "gif",
-                    "image/webp" => "webp",
-                ];
-                if (!isset($extensions[$mimeType]) || !app_allowed_image_mime($mimeType)) {
+                if (!app_allowed_image_mime($mimeType)) {
                     $errorMessage = "Only JPG, JPEG, PNG, GIF or WEBP files are allowed.";
                 } else {
                     $uploadDir = __DIR__ . "/../uploads/avatars";
@@ -401,10 +396,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         mkdir($uploadDir, 0775, true);
                     }
 
-                    $filename   = "user_" . $userId . "_" . time() . "." . $extensions[$mimeType];
+                    $filename   = "user_" . $userId . "_" . time() . ".webp";
                     $targetPath = $uploadDir . "/" . $filename;
 
-                    if (move_uploaded_file($file["tmp_name"], $targetPath)) {
+                    if (app_image_convert_file_to_webp((string)$file["tmp_name"], $targetPath, 800, 800, 82)) {
 
                         if (!empty($user["profile_image"])) {
                             $oldPath = $uploadDir . "/" . $user["profile_image"];
@@ -421,7 +416,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         $successMessage = "Profile picture updated.";
                         $user["profile_image"] = $filename;
                     } else {
-                        $errorMessage = "Could not save uploaded file.";
+                        $errorMessage = "Could not convert and save uploaded file.";
                     }
                 }
             }
@@ -1439,7 +1434,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                     <input type="file" name="profile_image" id="profile_image"
                            class="form-control" accept="image/*" required>
                     <small class="text-muted" data-translate="avatarModalNote">
-                        JPG, PNG, GIF or WEBP. Max size 2MB.
+                        JPG, PNG, GIF or WEBP. Uploaded images are converted to WebP automatically. Max size 2MB.
                     </small>
                 </div>
             </div>
@@ -1637,4 +1632,3 @@ document.addEventListener('DOMContentLoaded', function () {
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
-

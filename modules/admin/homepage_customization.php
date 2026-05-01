@@ -4,7 +4,7 @@ require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/../../include/security.php';
 require_once __DIR__ . '/../../include/homepage_customization.php';
 
-$current_page = 'homepage_customization';
+$current_page = 'content_management';
 $flash = '';
 $homepageTabs = [
     'hero' => [
@@ -188,7 +188,7 @@ function homepageCustomizationValue(string $value): string
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Homepage Editor - Athena Admin</title>
+  <title>Homepage Image Editor - Athena Admin</title>
   <link rel="stylesheet" href="assets/admin.css?v=<?= (int)@filemtime(__DIR__ . '/assets/admin.css') ?>">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -199,7 +199,7 @@ function homepageCustomizationValue(string $value): string
   <main class="admin-main">
     <div class="content-header">
       <div class="content-header-left">
-        <h1>Homepage Editor</h1>
+        <h1>Homepage Image Editor</h1>
         <p>Work section by section, save only what you need, or batch multiple updates together with one save.</p>
       </div>
     </div>

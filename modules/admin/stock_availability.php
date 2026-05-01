@@ -9,6 +9,22 @@ $current_page = 'stock_availability';
 $flash = '';
 
 app_product_options_ensure_schema($conn);
+app_product_sync_stock_statuses($conn);
+
+function stock_normalize_tab(string $value): string
+{
+    return in_array($value, ['products', 'assign', 'photos', 'multi', 'add', 'inventory'], true) ? $value : 'products';
+}
+
+function stock_build_project_base_path(): string
+{
+    $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
+    $base = rtrim(str_replace('\\', '/', dirname(dirname(dirname($script)))), '/');
+    if ($base === '/' || $base === '.' || $base === '') {
+        return '';
+    }
+    return $base;
+}
 
 function ensureProductSalesOverridesSchema(mysqli $conn): void {
     static $checked = false;
@@ -52,16 +68,34 @@ ensureProductSalesOverridesSchema($conn);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $action = $_POST['action'] ?? '';
+    $activeTab = stock_normalize_tab((string)($_POST['active_tab'] ?? 'products'));
 
     if ($action === 'update_stock') {
         $productID = (int)$_POST['productID'];
-        $inventory = (int)$_POST['inventory'];
-        $status    = $_POST['cartStatus'] ?? 'active';
+        $inventory = max(0, (int)$_POST['inventory']);
 
-        $stmt = mysqli_prepare($conn, "UPDATE products SET inventory=?, cartStatus=? WHERE productID=?");
-        mysqli_stmt_bind_param($stmt, 'isi', $inventory, $status, $productID);
-        mysqli_stmt_execute($stmt);
-        $flash = 'ok:Stock updated.';
+        if (!$productID) {
+            $flash = 'err:Invalid product ID.';
+        } else {
+            $currentStatus = '';
+            $statusStmt = mysqli_prepare($conn, "SELECT cartStatus FROM products WHERE productID = ? LIMIT 1");
+            if ($statusStmt) {
+                mysqli_stmt_bind_param($statusStmt, 'i', $productID);
+                mysqli_stmt_execute($statusStmt);
+                $statusRes = mysqli_stmt_get_result($statusStmt);
+                if ($statusRes && ($statusRow = mysqli_fetch_assoc($statusRes))) {
+                    $currentStatus = (string)($statusRow['cartStatus'] ?? '');
+                }
+                mysqli_stmt_close($statusStmt);
+            }
+
+            $status = app_product_status_from_stock($inventory, $currentStatus);
+            $stmt = mysqli_prepare($conn, "UPDATE products SET inventory=?, cartStatus=? WHERE productID=?");
+            mysqli_stmt_bind_param($stmt, 'isi', $inventory, $status, $productID);
+            mysqli_stmt_execute($stmt);
+            mysqli_stmt_close($stmt);
+            $flash = 'ok:Stock updated.';
+        }
     }
 
     if ($action === 'update_color_stock') {
@@ -75,14 +109,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!empty($_FILES['yarn_photo']) && $_FILES['yarn_photo']['error'] === UPLOAD_ERR_OK) {
             $file     = $_FILES['yarn_photo'];
-            $binary   = file_get_contents((string)$file['tmp_name']);
-            if (is_string($binary) && $binary !== '') {
-                $webpBinary = app_image_binary_to_optimized_webp($binary, 1200, 1200, 82);
-                if (is_string($webpBinary) && $webpBinary !== '') {
-                    $destDir  = __DIR__ . '/../../assets/yarn_colors/';
-                    if (!is_dir($destDir)) mkdir($destDir, 0755, true);
-                    $filename = 'color_' . $colorID . '.webp';
-                    file_put_contents($destDir . $filename, $webpBinary);
+            $tmpName  = (string)($file['tmp_name'] ?? '');
+            $finfo    = new finfo(FILEINFO_MIME_TYPE);
+            $mimeType = $tmpName !== '' ? (string)($finfo->file($tmpName) ?: '') : '';
+            if ($tmpName !== '' && app_allowed_image_mime($mimeType) && (int)$file['size'] <= 5 * 1024 * 1024) {
+                $destDir  = __DIR__ . '/../../assets/yarn_colors/';
+                if (!is_dir($destDir)) mkdir($destDir, 0755, true);
+                $filename = 'color_' . $colorID . '.webp';
+                if (app_image_convert_file_to_webp($tmpName, $destDir . $filename, 1200, 1200, 82)) {
                     $photoPath = 'assets/yarn_colors/' . $filename;
                     $pStmt = mysqli_prepare($conn, "UPDATE color_yarn_types SET photoPath=? WHERE colorID=?");
                     if ($pStmt) {
@@ -196,6 +230,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'assign_product_colors') {
         $productID = (int)($_POST['productID'] ?? 0);
         $colorIDs  = array_filter(array_map('intval', $_POST['colorIDs'] ?? []));
+        $availableColorIDs = array_fill_keys(array_filter(array_map('intval', $_POST['availableColorIDs'] ?? [])), true);
 
         if (!$productID) {
             $flash = 'err:Select a product first.';
@@ -211,6 +246,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
 
+            $stmt = mysqli_prepare($conn, "DELETE FROM product_color_availability WHERE productID = ?");
+            mysqli_stmt_bind_param($stmt, 'i', $productID);
+            mysqli_stmt_execute($stmt);
+            mysqli_stmt_close($stmt);
+
             foreach ($colorIDs as $colorID) {
                 $stmt = mysqli_prepare($conn,
                     "INSERT INTO product_variations (productID, colorID) VALUES (?, ?)");
@@ -219,6 +259,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $newVarID = (int)mysqli_insert_id($conn);
                 mysqli_stmt_close($stmt);
 
+                $isAvailable = isset($availableColorIDs[$colorID]) ? 1 : 0;
+                $stmt = mysqli_prepare($conn,
+                    "INSERT INTO product_color_availability (productID, colorID, isAvailable)
+                     VALUES (?, ?, ?)
+                     ON DUPLICATE KEY UPDATE isAvailable = VALUES(isAvailable)");
+                mysqli_stmt_bind_param($stmt, 'iii', $productID, $colorID, $isAvailable);
+                mysqli_stmt_execute($stmt);
+                mysqli_stmt_close($stmt);
             }
 
             $hasVariants = !empty($colorIDs) ? 1 : 0;
@@ -235,6 +283,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'add_color') {
         $colorID     = (int)($_POST['colorID'] ?? 0);
         $colorName   = trim($_POST['colorName'] ?? '');
+        $displayCode = trim($_POST['displayCode'] ?? '');
         $typeIDRaw   = $_POST['typeID'] ?? '';
         $newTypeName = trim($_POST['newTypeName'] ?? '');
         $stock       = max(0, (int)($_POST['globalInventoryAvailable'] ?? 50));
@@ -267,12 +316,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $hexRaw  = trim($_POST['hexCode'] ?? '');
             $hexCode = preg_match('/^#[0-9a-fA-F]{6}$/', $hexRaw) ? $hexRaw : '#ece6f6';
+            $displayCodeForDb = $displayCode !== '' ? $displayCode : null;
+            $colorNameForDb = $colorName;
+            if ($displayCode !== '' && !preg_match('/\s+' . preg_quote($displayCode, '/') . '$/u', $colorNameForDb)) {
+                $colorNameForDb = trim($colorNameForDb . ' ' . $displayCode);
+            }
 
             $stmt = mysqli_prepare($conn,
-                "INSERT INTO colors (colorID, colorName, hexCode, globalInventoryAvailable, isActive)
-                 VALUES (?, ?, ?, ?, 1)
-                 ON DUPLICATE KEY UPDATE hexCode = VALUES(hexCode)");
-            mysqli_stmt_bind_param($stmt, 'issi', $colorID, $colorName, $hexCode, $stock);
+                "INSERT INTO colors (colorID, colorName, displayCode, hexCode, globalInventoryAvailable, isActive)
+                 VALUES (?, ?, ?, ?, ?, 1)
+                 ON DUPLICATE KEY UPDATE
+                    colorName = VALUES(colorName),
+                    displayCode = VALUES(displayCode),
+                    hexCode = VALUES(hexCode),
+                    globalInventoryAvailable = VALUES(globalInventoryAvailable)");
+            mysqli_stmt_bind_param($stmt, 'isssi', $colorID, $colorNameForDb, $displayCodeForDb, $hexCode, $stock);
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
 
@@ -282,7 +340,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $finfo    = new finfo(FILEINFO_MIME_TYPE);
                 $mimeType = (string)($finfo->file((string)$file['tmp_name']) ?: '');
                 if (app_allowed_image_mime($mimeType) && $file['size'] <= 2 * 1024 * 1024) {
-                    $filename = 'type' . $typeID . '_color' . $colorID . '.jpg';
+                    $filename = 'type' . $typeID . '_color' . $colorID . '.webp';
                     $destDir  = __DIR__ . '/../../assets/yarn_colors/';
                     if (!is_dir($destDir)) mkdir($destDir, 0755, true);
                     foreach (['jpg', 'jpeg', 'png', 'gif', 'webp'] as $candidateExt) {
@@ -291,7 +349,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             @unlink($existing);
                         }
                     }
-                    if (app_image_convert_file_to_jpeg((string)$file['tmp_name'], $destDir . $filename, 1200, 1200, 84)) {
+                    if (app_image_convert_file_to_webp((string)$file['tmp_name'], $destDir . $filename, 1200, 1200, 84)) {
                         $photoPath = 'assets/yarn_colors/' . $filename;
                     }
                 }
@@ -303,7 +361,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
 
-            // Auto-assign new colour to all published products
+
             $prodRes = mysqli_query($conn,
                 "SELECT productID FROM products
                  WHERE cartStatus IN ('active','low_stock','out_of_stock','made_to_order')");
@@ -327,13 +385,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    header('Location: stock_availability.php?flash=' . urlencode($flash));
+    header('Location: stock_availability.php?tab=' . urlencode($activeTab) . '&flash=' . urlencode($flash));
     exit;
 }
 
 if (isset($_GET['flash'])) {
     $flash = $_GET['flash'];
 }
+$activeTab = stock_normalize_tab((string)($_GET['tab'] ?? 'products'));
 
 $autoSalesMap = [];
 $salesRes = mysqli_query($conn, "SELECT productID, COALESCE(SUM(quantity),0) AS total_qty FROM order_items GROUP BY productID");
@@ -362,16 +421,55 @@ if ($r) {
     }
 }
 
+$colorDisplaySql = app_color_display_sql('c');
 $productColorMap = [];
 $r = mysqli_query($conn, "
-    SELECT productID, colorID FROM product_variations
+    SELECT productID, colorID
+    FROM product_variations
     WHERE colorID IS NOT NULL
       AND (size IS NULL OR size = '')
       AND (yarnType IS NULL OR yarnType = '')
+    UNION
+    SELECT productID, colorID
+    FROM product_color_photos
+    WHERE colorID IS NOT NULL
 ");
 if ($r) {
     while ($row = mysqli_fetch_assoc($r)) {
         $productColorMap[(int)$row['productID']][(int)$row['colorID']] = true;
+    }
+}
+
+$pcpColorsByProduct = [];
+$r = mysqli_query($conn,
+    "SELECT DISTINCT product_colours.productID, product_colours.colorID, {$colorDisplaySql} AS colorName
+     FROM (
+        SELECT productID, colorID
+        FROM product_variations
+        WHERE colorID IS NOT NULL
+          AND (size IS NULL OR size = '')
+          AND (yarnType IS NULL OR yarnType = '')
+        UNION
+        SELECT productID, colorID
+        FROM product_color_photos
+        WHERE colorID IS NOT NULL
+     ) product_colours
+     JOIN colors c ON c.colorID = product_colours.colorID
+     ORDER BY c.colorName ASC");
+if ($r) {
+    while ($row = mysqli_fetch_assoc($r)) {
+        $pcpColorsByProduct[(int)$row['productID']][] = [
+            'id' => (int)$row['colorID'],
+            'name' => (string)$row['colorName'],
+        ];
+    }
+}
+
+$productColorAvailabilityMap = [];
+$r = mysqli_query($conn, "SELECT productID, colorID, isAvailable FROM product_color_availability");
+if ($r) {
+    while ($row = mysqli_fetch_assoc($r)) {
+        $productColorAvailabilityMap[(int)$row['productID']][(int)$row['colorID']] = (int)$row['isAvailable'];
     }
 }
 
@@ -386,6 +484,7 @@ if ($r) {
 $colours = [];
 $r = mysqli_query($conn, "
     SELECT c.*,
+           {$colorDisplaySql} AS displayName,
            GROUP_CONCAT(DISTINCT yt.typeName ORDER BY yt.typeName SEPARATOR ', ') AS typeNames,
            GROUP_CONCAT(DISTINCT cyt.typeID ORDER BY cyt.typeID SEPARATOR ',') AS typeIDs,
            MIN(cyt.photoPath) AS photoPath
@@ -393,7 +492,7 @@ $r = mysqli_query($conn, "
     LEFT JOIN color_yarn_types cyt ON cyt.colorID = c.colorID
     LEFT JOIN yarn_types yt ON yt.typeID = cyt.typeID
     GROUP BY c.colorID
-    ORDER BY c.colorName
+    ORDER BY displayName
 ");
 if ($r) {
     while ($row = mysqli_fetch_assoc($r)) {
@@ -402,27 +501,25 @@ if ($r) {
     }
 }
 
-$statusOptions = [
-    'active'       => 'In Stock',
-    'low_stock'    => 'Low Stock',
-    'out_of_stock' => 'Out of Stock',
-    'made_to_order'=> 'Made to Order',
-];
-$statusBadge = [
-    'active'        => 'badge-green',
-    'low_stock'     => 'badge-warning',
-    'out_of_stock'  => 'badge-red',
-    'made_to_order' => 'badge-muted',
-];
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Stock & Availability – Athena Admin</title>
+  <title>Product Page &amp; Stock - Athena Admin</title>
   <link rel="stylesheet" href="assets/admin.css?v=<?= (int)@filemtime(__DIR__ . '/assets/admin.css') ?>">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    .stock-category-nav { margin-bottom:18px; }
+    .stock-category-nav .tab-btn { flex:1 1 190px; justify-content:center; min-height:40px; }
+    .stock-tab-panel .card { margin-bottom:0; }
+    .stock-panel-tools { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:6px; flex-wrap:wrap; }
+    @media (max-width: 760px) {
+      .stock-category-nav .tab-btn { flex-basis:100%; }
+      .stock-panel-tools { align-items:flex-start; }
+    }
+  </style>
 </head>
 <body>
 <div class="admin-wrapper">
@@ -431,8 +528,8 @@ $statusBadge = [
   <main class="admin-main">
     <div class="content-header">
       <div class="content-header-left">
-        <h1>Stock &amp; Availability</h1>
-        <p>Manage product stock levels and colour yarn availability.</p>
+        <h1>Product Page &amp; Stock</h1>
+        <p>Manage product stock, colour availability, and product page setup.</p>
       </div>
     </div>
 
@@ -443,10 +540,32 @@ $statusBadge = [
         <div class="flash flash-<?= $type === 'ok' ? 'success' : 'error' ?>"><?= htmlspecialchars($msg) ?></div>
       <?php endif; ?>
 
-      <div class="card mb-6">
+      <div class="tab-nav stock-category-nav" data-tab-group="stock-availability">
+        <button type="button" class="tab-btn<?= $activeTab === 'products' ? ' active' : '' ?>" data-tab="stock-panel-products" data-tab-key="products" onclick="switchStockTab(this)">
+          <i class="fas fa-boxes-stacked"></i> Product Stock
+        </button>
+        <button type="button" class="tab-btn<?= $activeTab === 'assign' ? ' active' : '' ?>" data-tab="stock-panel-assign" data-tab-key="assign" onclick="switchStockTab(this)">
+          <i class="fas fa-palette"></i> Assign Colours
+        </button>
+        <button type="button" class="tab-btn<?= $activeTab === 'photos' ? ' active' : '' ?>" data-tab="stock-panel-photos" data-tab-key="photos" onclick="switchStockTab(this)">
+          <i class="fas fa-images"></i> Colour Photos
+        </button>
+        <button type="button" class="tab-btn<?= $activeTab === 'multi' ? ' active' : '' ?>" data-tab="stock-panel-multi" data-tab-key="multi" onclick="switchStockTab(this)">
+          <i class="fas fa-swatchbook"></i> Multi-Colour
+        </button>
+        <button type="button" class="tab-btn<?= $activeTab === 'add' ? ' active' : '' ?>" data-tab="stock-panel-add" data-tab-key="add" onclick="switchStockTab(this)">
+          <i class="fas fa-plus"></i> Add Colour
+        </button>
+        <button type="button" class="tab-btn<?= $activeTab === 'inventory' ? ' active' : '' ?>" data-tab="stock-panel-inventory" data-tab-key="inventory" onclick="switchStockTab(this)">
+          <i class="fas fa-layer-group"></i> Colour Inventory
+        </button>
+      </div>
+
+      <section id="stock-panel-products" class="tab-content stock-tab-panel<?= $activeTab === 'products' ? ' active' : '' ?>" data-tab-target="stock-availability">
+      <div class="card">
         <div class="card-title">Product Stock Levels</div>
         <p class="text-sm text-muted mb-4">
-          Update the quantity and availability status per product. Changes reflect immediately on the storefront.
+          Update product stock and current sales. Availability is calculated automatically from the stock quantity.
         </p>
         <table class="data-table stock-table">
           <thead>
@@ -454,9 +573,7 @@ $statusBadge = [
               <th class="col-product">Product</th>
               <th class="col-category">Category</th>
               <th class="col-stock">Current Stock</th>
-              <th class="col-status">Status</th>
               <th class="col-auto">Current Sales</th>
-              <th class="col-update">Update</th>
             </tr>
           </thead>
           <tbody>
@@ -466,36 +583,41 @@ $statusBadge = [
               $autoSales = (int)($autoSalesMap[$pid] ?? 0);
               $hasManualSales = array_key_exists($pid, $manualSalesMap);
               $currentSales = $autoSales;
-              $effectiveStatus = (string)$p['cartStatus'];
-              if ($effectiveStatus !== 'made_to_order' && (int)$p['inventory'] <= 0) {
-                  $effectiveStatus = 'out_of_stock';
-              } elseif ($effectiveStatus === 'active' && (int)$p['inventory'] > 0 && (int)$p['inventory'] <= 3) {
-                  $effectiveStatus = 'low_stock';
-              }
               if ($hasManualSales) {
-                  $currentSales = (int)($manualSalesMap[$pid]['manual_total_sales'] ?? 0);
+                  $manualSales = (int)($manualSalesMap[$pid]['manual_total_sales'] ?? 0);
+                  $baselineSales = $manualSalesMap[$pid]['auto_sales_baseline'] ?? null;
+                  if ($baselineSales === null) {
+                      $baselineSales = $autoSales;
+                  }
+                  $currentSales = $manualSales + max(0, $autoSales - (int)$baselineSales);
               }
             ?>
             <tr>
               <td class="col-product font-600"><?= htmlspecialchars($p['nameEN']) ?></td>
               <td class="col-category text-muted"><?= htmlspecialchars($p['category'] ?? '—') ?></td>
               <td class="col-stock">
-                <div class="stock-cell">
-                  <?php if ($p['cartStatus'] === 'made_to_order'): ?>
-                    <span class="text-muted stock-number">N/A</span>
-                  <?php else: ?>
-                    <span class="font-600 stock-number"><?= (int)$p['inventory'] ?></span>
-                  <?php endif; ?>
-                </div>
-              </td>
-              <td class="col-status">
-                <span class="badge <?= $statusBadge[$effectiveStatus] ?? 'badge-muted' ?>">
-                  <?= $statusOptions[$effectiveStatus] ?? $effectiveStatus ?>
-                </span>
+                <form method="POST" class="stock-cell" data-ignore-unsaved-warning>
+                  <input type="hidden" name="action" value="update_stock">
+                  <input type="hidden" name="active_tab" value="products" data-active-tab-input="stock-availability">
+                  <input type="hidden" name="productID" value="<?= $pid ?>">
+                  <div class="input-with-icon">
+                    <input
+                      type="number"
+                      name="inventory"
+                      value="<?= (int)$p['inventory'] ?>"
+                      min="0"
+                      class="form-input has-icon-right"
+                    >
+                    <button type="submit" class="icon-btn" aria-label="Save stock quantity">
+                      <i class="fas fa-save"></i>
+                    </button>
+                  </div>
+                </form>
               </td>
               <td class="col-auto">
                 <form method="POST" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap" data-ignore-unsaved-warning data-stock-warning>
                   <input type="hidden" name="action" value="update_sales_override">
+                  <input type="hidden" name="active_tab" value="products" data-active-tab-input="stock-availability">
                   <input type="hidden" name="productID" value="<?= $pid ?>">
                   <div class="input-with-icon">
                     <input
@@ -513,41 +635,22 @@ $statusBadge = [
                   </div>
                 </form>
               </td>
-              <td class="col-update">
-                <form method="POST" style="display:flex;gap:8px;align-items:center" data-ignore-unsaved-warning data-stock-warning>
-                  <input type="hidden" name="action"    value="update_stock">
-                  <input type="hidden" name="productID" value="<?= $pid ?>">
-                  <input
-                    type="number"
-                    name="inventory"
-                    value="<?= (int)$p['inventory'] ?>"
-                    min="0"
-                    class="form-input"
-                    style="width:80px;padding:6px 8px"
-                  >
-                  <select name="cartStatus" class="form-input" style="width:150px">
-                    <?php foreach ($statusOptions as $val=>$lbl): ?>
-                      <option value="<?= $val ?>" <?= $effectiveStatus===$val?'selected':'' ?>><?= $lbl ?></option>
-                    <?php endforeach; ?>
-                  </select>
-                  <button type="submit" class="btn-primary" style="padding:6px 12px;font-size:12px">
-                    <i class="fas fa-save"></i> Save
-                  </button>
-                </form>
-              </td>
             </tr>
             <?php endforeach; ?>
           </tbody>
         </table>
       </div>
+      </section>
 
-      <div class="card mb-6">
+      <section id="stock-panel-assign" class="tab-content stock-tab-panel<?= $activeTab === 'assign' ? ' active' : '' ?>" data-tab-target="stock-availability">
+      <div class="card">
         <div class="card-title">Assign Colours to Products</div>
         <p class="text-sm text-muted mb-4">
-          Select which colours are available for each product. These will appear as a colour dropdown on the product page.
+          Choose which colours appear for each product. Keep a colour assigned but turn off its product availability to show it on the product page with the red unavailable line.
         </p>
         <form method="POST" id="assign-colors-form">
           <input type="hidden" name="action" value="assign_product_colors">
+          <input type="hidden" name="active_tab" value="assign" data-active-tab-input="stock-availability">
 
           <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
             <div style="flex:0 0 280px">
@@ -572,54 +675,179 @@ $statusBadge = [
           <div id="colour-assign-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px">
             <?php foreach ($colours as $c): ?>
             <?php $swatchHex = preg_match('/^#[0-9a-fA-F]{6}$/', (string)($c['hexCode'] ?? '')) ? $c['hexCode'] : '#ece6f6'; ?>
-            <?php $photoPath = !empty($c['photoPath']) ? htmlspecialchars($c['photoPath']) : null; ?>
-            <label class="colour-assign-card" data-color-id="<?= $c['colorID'] ?>"
+            <?php $photoUrl = !empty($c['photoPath']) ? app_image_asset_url(app_image_prefer_optimized_asset_path((string)$c['photoPath'])) : ''; ?>
+            <div class="colour-assign-card" data-color-id="<?= $c['colorID'] ?>"
                    style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 8px;border:2px solid #e5e7eb;border-radius:10px;cursor:pointer;user-select:none;transition:border-color .15s">
-              <?php if ($photoPath): ?>
-                <img src="/athina-eshop/<?= $photoPath ?>" alt="" style="width:48px;height:48px;object-fit:cover;border-radius:50%">
+              <?php if ($photoUrl !== ''): ?>
+                <img src="<?= htmlspecialchars($photoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="" style="width:48px;height:48px;object-fit:cover;border-radius:50%">
               <?php else: ?>
                 <span class="colour-swatch-preview is-large" style="background:<?= htmlspecialchars($swatchHex) ?>"></span>
               <?php endif; ?>
-              <span style="font-size:11px;font-weight:600;color:#374151;text-align:center"><?= htmlspecialchars($c['colorName']) ?></span>
-              <span style="font-size:11px;color:#9ca3af">#<?= (int)$c['colorID'] ?></span>
-              <input type="checkbox" name="colorIDs[]" value="<?= $c['colorID'] ?>"
-                     style="margin:0" class="colour-checkbox">
-            </label>
+              <span style="font-size:11px;font-weight:600;color:#374151;text-align:center"><?= htmlspecialchars($c['displayName'] ?? $c['colorName']) ?></span>
+              <?php if (!empty($c['displayCode']) && (string)$c['displayCode'] !== (string)($c['displayName'] ?? '')): ?>
+              <span style="font-size:10px;color:#9ca3af;text-align:center">Code <?= htmlspecialchars($c['displayCode']) ?></span>
+              <?php endif; ?>
+              <span style="font-size:10px;color:#6b7280;text-align:center;min-height:12px"><?= htmlspecialchars($c['typeNames'] ?? '') ?></span>
+              <span style="font-size:11px;color:#9ca3af">Internal #<?= (int)$c['colorID'] ?></span>
+              <div class="assign-switch-row">
+                <span>Assigned</span>
+                <label class="toggle-wrap assign-toggle" title="Show this colour on this product">
+                  <input type="checkbox" name="colorIDs[]" value="<?= $c['colorID'] ?>" class="colour-checkbox">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="assign-switch-row is-available">
+                <span>Available</span>
+                <label class="toggle-wrap assign-toggle" title="Allow customers to select this colour for this product">
+                  <input type="checkbox" name="availableColorIDs[]" value="<?= $c['colorID'] ?>" class="colour-available-checkbox">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
             <?php endforeach; ?>
           </div>
           <?php endif; ?>
         </form>
       </div>
+      </section>
 
-      <div class="card mb-6">
+      <section id="stock-panel-photos" class="tab-content stock-tab-panel<?= $activeTab === 'photos' ? ' active' : '' ?>" data-tab-target="stock-availability">
+      <div class="card">
+        <div class="card-title">Product Colour Photos</div>
+        <p class="text-sm text-muted" style="margin-bottom:20px">
+          Upload product photos per colour. These appear on the storefront when the customer selects a colour.
+        </p>
+
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px">
+          <div class="form-group" style="flex:1;min-width:200px">
+            <label class="form-label">Product</label>
+            <select id="pcp-product" class="form-input" onchange="pcpLoadColors()">
+              <option value="">— Select product —</option>
+              <?php foreach ($products as $p): ?>
+                <option value="<?= (int)$p['productID'] ?>"><?= htmlspecialchars($p['nameEN']) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="form-group" style="flex:1;min-width:200px">
+            <label class="form-label">Colour</label>
+            <select id="pcp-color" class="form-input" disabled onchange="pcpLoadPhotos()">
+              <option value="">— Select colour —</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="pcp-upload-area" style="display:none;margin-bottom:20px">
+          <label class="form-label">Upload Photo(s)</label>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <input type="file" id="pcp-file" class="form-input" accept="image/*" multiple style="flex:1;min-width:220px">
+            <button type="button" class="btn-primary" onclick="pcpUpload()" style="white-space:nowrap">
+              <i class="fas fa-upload"></i> Upload
+            </button>
+          </div>
+          <div id="pcp-upload-progress" style="margin-top:8px;font-size:13px;color:#6b7280"></div>
+        </div>
+
+        <div id="pcp-photos-grid" style="display:flex;flex-wrap:wrap;gap:12px"></div>
+        <div id="pcp-empty" style="display:none;font-size:13px;color:#9ca3af;padding:12px 0">No photos yet for this product &amp; colour combination.</div>
+      </div>
+      </section>
+
+      <section id="stock-panel-multi" class="tab-content stock-tab-panel<?= $activeTab === 'multi' ? ' active' : '' ?>" data-tab-target="stock-availability">
+      <div class="card">
+        <div class="card-title">Multi-Colour Selection</div>
+        <p class="text-sm text-muted" style="margin-bottom:20px">
+          Optional: let customers pick 2 or 3 yarn colours for this product. Upload a diagram photo showing where each colour goes.
+        </p>
+
+        <div class="form-group" style="max-width:340px">
+          <label class="form-label">Product</label>
+          <select id="mcs-product" class="form-input" onchange="mcsLoadConfig()">
+            <option value="">— Select product —</option>
+            <?php foreach ($products as $p): ?>
+              <option value="<?= (int)$p['productID'] ?>"><?= htmlspecialchars($p['nameEN']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+
+        <div id="mcs-config-area" style="display:none">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+            <input type="checkbox" id="mcs-enabled" onchange="mcsToggle()" style="width:16px;height:16px;cursor:pointer">
+            <label for="mcs-enabled" style="font-size:14px;font-weight:500;cursor:pointer">Enable multi-colour selection for this product</label>
+          </div>
+
+          <div id="mcs-options" style="display:none">
+            <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-bottom:20px">
+              <div class="form-group" style="flex:0 0 200px;margin-bottom:0">
+                <label class="form-label">Number of colours</label>
+                <select id="mcs-num-colors" class="form-input">
+                  <option value="2">2 Colours (A + B)</option>
+                  <option value="3">3 Colours (A + B + C)</option>
+                </select>
+              </div>
+              <button type="button" class="btn-primary" onclick="mcsSaveConfig()" style="white-space:nowrap">
+                <i class="fas fa-save"></i> Save Config
+              </button>
+              <span id="mcs-save-msg" style="font-size:13px;color:#16a34a;display:none">Saved!</span>
+            </div>
+
+            <div style="margin-bottom:12px">
+              <label class="form-label">Diagram Photo(s)</label>
+              <p class="text-sm text-muted" style="margin-bottom:8px">
+                Upload a photo showing where Colour A, B, and C appear on the product. Multiple photos appear as a carousel on the storefront.
+              </p>
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                <input type="file" id="mcs-file" class="form-input" accept="image/*" multiple style="flex:1;min-width:220px">
+                <button type="button" class="btn-primary" onclick="mcsUpload()" style="white-space:nowrap">
+                  <i class="fas fa-upload"></i> Upload
+                </button>
+              </div>
+              <div id="mcs-upload-progress" style="margin-top:8px;font-size:13px;color:#6b7280"></div>
+            </div>
+
+            <div id="mcs-photos-grid" style="display:flex;flex-wrap:wrap;gap:12px"></div>
+            <div id="mcs-empty" style="display:none;font-size:13px;color:#9ca3af;padding:8px 0">No diagram photos uploaded yet.</div>
+          </div>
+        </div>
+      </div>
+      </section>
+
+      <section id="stock-panel-add" class="tab-content stock-tab-panel<?= $activeTab === 'add' ? ' active' : '' ?>" data-tab-target="stock-availability">
+      <div class="card">
         <div class="card-title">Add Yarn Colour</div>
         <p class="text-sm text-muted mb-4">
-          Add a new colour to the inventory. If the Color ID already exists in another yarn type, only the yarn type link and photo will be added.
+          Add a new colour to the inventory. Reused yarn codes should have separate internal IDs and the same display code.
         </p>
         <form method="POST" enctype="multipart/form-data" id="add-color-form">
           <input type="hidden" name="action" value="add_color">
-          <div style="display:grid;grid-template-columns:100px 1fr 1fr 80px 80px;gap:12px;align-items:end;flex-wrap:wrap">
+          <input type="hidden" name="active_tab" value="add" data-active-tab-input="stock-availability">
+          <div style="display:grid;grid-template-columns:120px 120px 1fr 1fr 90px;gap:12px;align-items:end;flex-wrap:wrap">
 
             <div>
-              <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Color ID *</label>
-              <input type="number" name="colorID" min="1" placeholder="e.g. 55"
+              <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Internal ID *</label>
+              <input type="number" name="colorID" min="1" placeholder="e.g. 300055"
                 class="form-input" style="width:100%" required>
             </div>
 
             <div>
+              <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Display Code</label>
+              <input type="text" name="displayCode" maxlength="32" placeholder="e.g. 55"
+                class="form-input" style="width:100%">
+            </div>
+
+            <div>
               <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Color Name *</label>
-              <input type="text" name="colorName" placeholder="e.g. White"
+              <input type="text" name="colorName" placeholder="e.g. Velvet"
                 class="form-input" style="width:100%" required>
             </div>
 
             <div>
               <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Yarn Type *</label>
               <select name="typeID" id="typeID-select" class="form-input" style="width:100%" required>
-                <option value="">— Select type —</option>
+                <option value="">-- Select type --</option>
                 <?php foreach ($yarnTypes as $yt): ?>
                 <option value="<?= $yt['typeID'] ?>"><?= htmlspecialchars($yt['typeName']) ?></option>
                 <?php endforeach; ?>
-                <option value="new">+ Add New Type…</option>
+                <option value="new">+ Add New Type...</option>
               </select>
             </div>
 
@@ -638,11 +866,11 @@ $statusBadge = [
           </div>
 
           <div style="margin-top:12px">
-            <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Photo <span class="text-muted" style="font-weight:400">(optional, JPG/PNG/WebP, max 2MB)</span></label>
+            <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Photo <span class="text-muted" style="font-weight:400">(optional image, converted to WebP, max 2MB)</span></label>
             <div style="display:flex;align-items:center;gap:12px">
               <label class="btn-secondary" style="cursor:pointer;padding:7px 14px;font-size:13px">
                 <i class="fas fa-upload"></i> Choose Photo
-                <input type="file" name="photo" id="color-photo-input" accept="image/jpeg,image/png,image/webp" style="display:none">
+                <input type="file" name="photo" id="color-photo-input" accept="image/*" style="display:none">
               </label>
               <span id="color-photo-name" class="text-muted" style="font-size:13px">No file chosen</span>
               <img id="color-photo-preview" src="" alt="" style="display:none;width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb">
@@ -656,13 +884,15 @@ $statusBadge = [
           </div>
         </form>
       </div>
+      </section>
 
+      <section id="stock-panel-inventory" class="tab-content stock-tab-panel<?= $activeTab === 'inventory' ? ' active' : '' ?>" data-tab-target="stock-availability">
       <div class="card">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:6px">
+        <div class="stock-panel-tools">
           <div class="card-title" style="margin:0">Yarn Colour Inventory</div>
           <div style="position:relative;width:220px">
             <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#9ca3af;font-size:13px;pointer-events:none"></i>
-            <input type="text" id="colour-inventory-search" placeholder="Enter colour ID or name…"
+            <input type="text" id="colour-inventory-search" placeholder="Search internal ID, code, or colour"
               style="width:100%;padding:7px 10px 7px 30px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;box-sizing:border-box"
               autocomplete="off">
           </div>
@@ -674,8 +904,8 @@ $statusBadge = [
           <thead>
             <tr>
               <th style="width:52px"></th>
-              <th style="width:60px">ID</th>
-              <th>Colour Name</th>
+              <th style="width:90px">Internal ID</th>
+              <th>Colour / Code</th>
               <th>Category</th>
               <th style="width:100px">Stock</th>
               <th style="width:110px">Status</th>
@@ -686,17 +916,22 @@ $statusBadge = [
           <tbody>
             <?php foreach ($colours as $c): ?>
             <?php $swatchHex = preg_match('/^#[0-9a-fA-F]{6}$/', (string)($c['hexCode'] ?? '')) ? $c['hexCode'] : '#ece6f6'; ?>
-            <?php $photoPath = !empty($c['photoPath']) ? htmlspecialchars($c['photoPath']) : null; ?>
+            <?php $photoUrl = !empty($c['photoPath']) ? app_image_asset_url(app_image_prefer_optimized_asset_path((string)$c['photoPath'])) : ''; ?>
             <tr>
               <td style="text-align:center;vertical-align:middle">
-                <?php if ($photoPath): ?>
-                  <img src="/athina-eshop/<?= $photoPath ?>" alt="" style="width:36px;height:36px;object-fit:cover;border-radius:50%">
+                <?php if ($photoUrl !== ''): ?>
+                  <img src="<?= htmlspecialchars($photoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="" style="width:36px;height:36px;object-fit:cover;border-radius:50%">
                 <?php else: ?>
                   <span class="colour-swatch-preview" style="background:<?= htmlspecialchars($swatchHex) ?>"></span>
                 <?php endif; ?>
               </td>
               <td class="text-muted" style="font-size:13px"><?= (int)$c['colorID'] ?></td>
-              <td class="font-600"><?= htmlspecialchars($c['colorName']) ?></td>
+              <td class="font-600">
+                <?= htmlspecialchars($c['displayName'] ?? $c['colorName']) ?>
+                <?php if (!empty($c['displayCode'])): ?>
+                  <div class="text-muted" style="font-size:11px;font-weight:400">Code <?= htmlspecialchars($c['displayCode']) ?></div>
+                <?php endif; ?>
+              </td>
               <td class="text-muted" style="font-size:12px"><?= htmlspecialchars($c['typeNames'] ?? '—') ?></td>
               <td><?= (int)$c['globalInventoryAvailable'] ?></td>
               <td>
@@ -709,6 +944,7 @@ $statusBadge = [
               <td>
                 <form method="POST" style="display:flex;gap:6px;align-items:center" data-ignore-unsaved-warning data-stock-warning>
                   <input type="hidden" name="action"  value="update_color_stock">
+                  <input type="hidden" name="active_tab" value="inventory" data-active-tab-input="stock-availability">
                   <input type="hidden" name="colorID" value="<?= $c['colorID'] ?>">
                   <?php foreach ($c['typeIDsArray'] as $tid): ?>
                   <input type="hidden" name="typeIDs[]" value="<?= (int)$tid ?>">
@@ -730,7 +966,7 @@ $statusBadge = [
                   <button type="button" class="btn-secondary colour-edit-btn"
                     style="padding:5px 10px;font-size:12px"
                     data-color-id="<?= (int)$c['colorID'] ?>"
-                    data-color-name="<?= htmlspecialchars($c['colorName'], ENT_QUOTES) ?>"
+                    data-color-name="<?= htmlspecialchars($c['displayName'] ?? $c['colorName'], ENT_QUOTES) ?>"
                     data-hex="<?= htmlspecialchars($swatchHex, ENT_QUOTES) ?>"
                     data-stock="<?= (int)$c['globalInventoryAvailable'] ?>"
                     data-active="<?= (int)$c['isActive'] ?>"
@@ -740,11 +976,12 @@ $statusBadge = [
                   </button>
                   <form method="POST" class="colour-delete-form" style="margin:0">
                     <input type="hidden" name="action" value="delete_color">
+                    <input type="hidden" name="active_tab" value="inventory" data-active-tab-input="stock-availability">
                     <input type="hidden" name="colorID" value="<?= (int)$c['colorID'] ?>">
                     <button type="submit" class="btn-danger"
                       style="padding:5px 10px;font-size:12px"
                       title="Delete colour"
-                      data-color-name="<?= htmlspecialchars($c['colorName'], ENT_QUOTES) ?>">
+                      data-color-name="<?= htmlspecialchars($c['displayName'] ?? $c['colorName'], ENT_QUOTES) ?>">
                       <i class="fas fa-trash"></i>
                     </button>
                   </form>
@@ -755,6 +992,7 @@ $statusBadge = [
           </tbody>
         </table>
       </div>
+      </section>
 
       <div id="colour-edit-modal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(17,24,39,.45);align-items:center;justify-content:center">
         <div style="background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.2);width:min(480px,95vw);padding:28px 28px 24px">
@@ -769,6 +1007,7 @@ $statusBadge = [
 
           <form method="POST" enctype="multipart/form-data" id="colour-edit-form">
             <input type="hidden" name="action" value="update_color_stock">
+            <input type="hidden" name="active_tab" value="inventory" data-active-tab-input="stock-availability">
             <input type="hidden" name="colorID" id="modal-input-id">
 
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
@@ -787,7 +1026,7 @@ $statusBadge = [
             </div>
 
             <div style="margin-bottom:16px">
-              <label style="display:block;font-size:13px;font-weight:600;margin-bottom:5px">Photo</label>
+              <label style="display:block;font-size:13px;font-weight:600;margin-bottom:5px">Photo <span class="text-muted" style="font-weight:400">(converted to WebP, max 5MB)</span></label>
               <input type="file" name="yarn_photo" accept="image/*" style="width:100%;font-size:13px">
             </div>
 
@@ -816,7 +1055,282 @@ $statusBadge = [
 </div>
 <script src="assets/admin.js?v=<?= (int)filemtime(__DIR__ . '/assets/admin.js') ?>"></script>
 <script>
+function switchStockTab(btn) {
+  switchTab(btn, 'stock-availability');
+  var key = btn.getAttribute('data-tab-key') || 'products';
+  document.querySelectorAll('[data-active-tab-input="stock-availability"]').forEach(function (input) {
+    input.value = key;
+  });
+  if (window.history && window.history.replaceState) {
+    var url = new URL(window.location.href);
+    url.searchParams.set('tab', key);
+    window.history.replaceState({}, '', url.toString());
+  }
+}
+
+var pcpColorMap = <?= json_encode($pcpColorsByProduct, JSON_UNESCAPED_UNICODE) ?>;
+var pcpAjax = 'ajax/product_color_photo.php';
+var stockBasePath = <?= json_encode(stock_build_project_base_path(), JSON_UNESCAPED_UNICODE) ?>;
+
+function pcpLoadColors() {
+  var productEl = document.getElementById('pcp-product');
+  var colorSel = document.getElementById('pcp-color');
+  var uploadArea = document.getElementById('pcp-upload-area');
+  var grid = document.getElementById('pcp-photos-grid');
+  var empty = document.getElementById('pcp-empty');
+  var pid = parseInt(productEl ? productEl.value : '0', 10) || 0;
+  if (!colorSel || !uploadArea || !grid || !empty) return;
+  colorSel.innerHTML = '<option value="">— Select colour —</option>';
+  colorSel.disabled = true;
+  uploadArea.style.display = 'none';
+  grid.innerHTML = '';
+  empty.style.display = 'none';
+  if (!pid || !pcpColorMap[pid]) return;
+  pcpColorMap[pid].forEach(function (color) {
+    var opt = document.createElement('option');
+    opt.value = color.id;
+    opt.textContent = color.id + ' — ' + color.name;
+    colorSel.appendChild(opt);
+  });
+  colorSel.disabled = false;
+}
+
+function pcpLoadPhotos() {
+  var productEl = document.getElementById('pcp-product');
+  var colorEl = document.getElementById('pcp-color');
+  var grid = document.getElementById('pcp-photos-grid');
+  var empty = document.getElementById('pcp-empty');
+  var upload = document.getElementById('pcp-upload-area');
+  var pid = parseInt(productEl ? productEl.value : '0', 10) || 0;
+  var cid = parseInt(colorEl ? colorEl.value : '0', 10) || 0;
+  if (!grid || !empty || !upload) return;
+  grid.innerHTML = '';
+  empty.style.display = 'none';
+  upload.style.display = 'none';
+  if (!pid || !cid) return;
+  upload.style.display = 'block';
+  fetch(pcpAjax + '?action=list&productID=' + encodeURIComponent(pid) + '&colorID=' + encodeURIComponent(cid))
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      if (!data.ok || !data.photos || !data.photos.length) {
+        empty.style.display = 'block';
+        return;
+      }
+      data.photos.forEach(function (photo) { pcpAddThumb(photo); });
+    })
+    .catch(function () { empty.style.display = 'block'; });
+}
+
+function pcpAddThumb(photo) {
+  var grid = document.getElementById('pcp-photos-grid');
+  var empty = document.getElementById('pcp-empty');
+  if (!grid) return;
+  var wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative;width:100px;height:100px';
+  wrap.innerHTML =
+    '<img src="' + stockBasePath + '/' + photo.photoPath + '" style="width:100px;height:100px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb" alt="">' +
+    '<button type="button" onclick="pcpDelete(' + photo.id + ',this)" style="position:absolute;top:4px;right:4px;background:#dc2626;color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:12px;line-height:1" title="Delete"><i class="fas fa-times"></i></button>';
+  grid.appendChild(wrap);
+  if (empty) empty.style.display = 'none';
+}
+
+function pcpUpload() {
+  var productEl = document.getElementById('pcp-product');
+  var colorEl = document.getElementById('pcp-color');
+  var fileEl = document.getElementById('pcp-file');
+  var prog = document.getElementById('pcp-upload-progress');
+  var pid = parseInt(productEl ? productEl.value : '0', 10) || 0;
+  var cid = parseInt(colorEl ? colorEl.value : '0', 10) || 0;
+  var files = fileEl ? fileEl.files : [];
+  if (!pid || !cid || !files.length) return;
+  if (prog) prog.textContent = 'Uploading...';
+  var remaining = files.length;
+  Array.from(files).forEach(function (file) {
+    var fd = new FormData();
+    fd.append('action', 'upload');
+    fd.append('productID', pid);
+    fd.append('colorID', cid);
+    fd.append('photo', file);
+    fd.append('csrf_token', window.APP_CSRF_TOKEN || '');
+    fetch(pcpAjax, { method: 'POST', body: fd })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (data.ok) pcpAddThumb(data);
+        remaining--;
+        if (remaining === 0) {
+          if (prog) prog.textContent = 'Done.';
+          if (fileEl) fileEl.value = '';
+          setTimeout(function () { if (prog) prog.textContent = ''; }, 2000);
+        }
+      });
+  });
+}
+
+function pcpDelete(id, btn) {
+  if (!window.confirm('Delete this photo?')) return;
+  var fd = new FormData();
+  fd.append('action', 'delete');
+  fd.append('id', id);
+  fd.append('csrf_token', window.APP_CSRF_TOKEN || '');
+  fetch(pcpAjax, { method: 'POST', body: fd })
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      if (!data.ok) return;
+      var wrap = btn ? btn.closest('div') : null;
+      if (wrap) wrap.remove();
+      var grid = document.getElementById('pcp-photos-grid');
+      var empty = document.getElementById('pcp-empty');
+      if (grid && empty && !grid.children.length) empty.style.display = 'block';
+    });
+}
+
+var mcsAjax = 'ajax/color_scheme.php';
+
+function mcsLoadConfig() {
+  var productEl = document.getElementById('mcs-product');
+  var area = document.getElementById('mcs-config-area');
+  var opts = document.getElementById('mcs-options');
+  var grid = document.getElementById('mcs-photos-grid');
+  var empty = document.getElementById('mcs-empty');
+  var pid = parseInt(productEl ? productEl.value : '0', 10) || 0;
+  if (!area || !opts || !grid || !empty) return;
+  area.style.display = 'none';
+  opts.style.display = 'none';
+  grid.innerHTML = '';
+  empty.style.display = 'none';
+  if (!pid) return;
+  fetch(mcsAjax + '?action=get_config&productID=' + encodeURIComponent(pid))
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      if (!data.ok) return;
+      area.style.display = 'block';
+      document.getElementById('mcs-enabled').checked = !!data.is_enabled;
+      document.getElementById('mcs-num-colors').value = data.num_colors || 2;
+      if (data.is_enabled) {
+        opts.style.display = 'block';
+        mcsLoadPhotos(pid);
+      }
+    });
+}
+
+function mcsToggle() {
+  var enabledEl = document.getElementById('mcs-enabled');
+  var opts = document.getElementById('mcs-options');
+  if (!enabledEl || !opts) return;
+  opts.style.display = enabledEl.checked ? 'block' : 'none';
+  if (enabledEl.checked) {
+    var pid = parseInt((document.getElementById('mcs-product') || {}).value || '0', 10) || 0;
+    if (pid) mcsLoadPhotos(pid);
+  }
+}
+
+function mcsSaveConfig() {
+  var productEl = document.getElementById('mcs-product');
+  var enabledEl = document.getElementById('mcs-enabled');
+  var colorsEl = document.getElementById('mcs-num-colors');
+  var msg = document.getElementById('mcs-save-msg');
+  var pid = parseInt(productEl ? productEl.value : '0', 10) || 0;
+  if (!pid || !enabledEl || !colorsEl) return;
+  var fd = new FormData();
+  fd.append('action', 'save_config');
+  fd.append('productID', pid);
+  fd.append('is_enabled', enabledEl.checked ? 1 : 0);
+  fd.append('num_colors', parseInt(colorsEl.value, 10) || 2);
+  fd.append('csrf_token', window.APP_CSRF_TOKEN || '');
+  fetch(mcsAjax, { method: 'POST', body: fd })
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      if (!data.ok || !msg) return;
+      msg.style.display = 'inline';
+      setTimeout(function () { msg.style.display = 'none'; }, 2500);
+    });
+}
+
+function mcsLoadPhotos(pid) {
+  var grid = document.getElementById('mcs-photos-grid');
+  var empty = document.getElementById('mcs-empty');
+  if (!grid || !empty) return;
+  grid.innerHTML = '';
+  empty.style.display = 'none';
+  fetch(mcsAjax + '?action=list_photos&productID=' + encodeURIComponent(pid))
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      if (!data.ok || !data.photos || !data.photos.length) {
+        empty.style.display = 'block';
+        return;
+      }
+      data.photos.forEach(function (photo) { mcsAddThumb(photo); });
+    });
+}
+
+function mcsAddThumb(photo) {
+  var grid = document.getElementById('mcs-photos-grid');
+  var empty = document.getElementById('mcs-empty');
+  if (!grid) return;
+  var wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative;width:120px;height:120px';
+  wrap.innerHTML =
+    '<img src="' + stockBasePath + '/' + photo.photoPath + '" style="width:120px;height:120px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb" alt="">' +
+    '<button type="button" onclick="mcsDeletePhoto(' + photo.id + ',this)" style="position:absolute;top:4px;right:4px;background:#dc2626;color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:12px;line-height:1" title="Delete"><i class="fas fa-times"></i></button>';
+  grid.appendChild(wrap);
+  if (empty) empty.style.display = 'none';
+}
+
+function mcsUpload() {
+  var productEl = document.getElementById('mcs-product');
+  var fileEl = document.getElementById('mcs-file');
+  var prog = document.getElementById('mcs-upload-progress');
+  var pid = parseInt(productEl ? productEl.value : '0', 10) || 0;
+  var files = fileEl ? fileEl.files : [];
+  if (!pid || !files.length) return;
+  if (prog) prog.textContent = 'Uploading...';
+  var remaining = files.length;
+  Array.from(files).forEach(function (file) {
+    var fd = new FormData();
+    fd.append('action', 'upload_photo');
+    fd.append('productID', pid);
+    fd.append('photo', file);
+    fd.append('csrf_token', window.APP_CSRF_TOKEN || '');
+    fetch(mcsAjax, { method: 'POST', body: fd })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (data.ok) mcsAddThumb(data);
+        remaining--;
+        if (remaining === 0) {
+          if (prog) prog.textContent = 'Done.';
+          if (fileEl) fileEl.value = '';
+          setTimeout(function () { if (prog) prog.textContent = ''; }, 2000);
+        }
+      });
+  });
+}
+
+function mcsDeletePhoto(id, btn) {
+  if (!window.confirm('Delete this diagram photo?')) return;
+  var fd = new FormData();
+  fd.append('action', 'delete_photo');
+  fd.append('id', id);
+  fd.append('csrf_token', window.APP_CSRF_TOKEN || '');
+  fetch(mcsAjax, { method: 'POST', body: fd })
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      if (!data.ok) return;
+      var wrap = btn ? btn.closest('div') : null;
+      if (wrap) wrap.remove();
+      var grid = document.getElementById('mcs-photos-grid');
+      var empty = document.getElementById('mcs-empty');
+      if (grid && empty && !grid.children.length) empty.style.display = 'block';
+    });
+}
+
 document.addEventListener('DOMContentLoaded', function () {
+  var activeStockTab = document.querySelector('[data-tab-group="stock-availability"] .tab-btn.active');
+  if (activeStockTab) {
+    var activeStockKey = activeStockTab.getAttribute('data-tab-key') || 'products';
+    document.querySelectorAll('[data-active-tab-input="stock-availability"]').forEach(function (input) {
+      input.value = activeStockKey;
+    });
+  }
 
   document.querySelectorAll('.colour-delete-form').forEach(function(form) {
     form.addEventListener('submit', function(e) {
@@ -828,18 +1342,37 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   var productColorMap = <?= json_encode($productColorMap, JSON_FORCE_OBJECT) ?>;
+  var productColorAvailabilityMap = <?= json_encode($productColorAvailabilityMap, JSON_FORCE_OBJECT) ?>;
   var assignSelect = document.getElementById('assign-product-select');
   var colourCards  = document.querySelectorAll('.colour-assign-card');
 
+  function paintAssignCard(card, assigned, available) {
+    if (!assigned) {
+      card.style.borderColor = '#e5e7eb';
+      card.style.opacity = '0.62';
+    } else if (!available) {
+      card.style.borderColor = '#dc2626';
+      card.style.opacity = '1';
+    } else {
+      card.style.borderColor = '#111827';
+      card.style.opacity = '1';
+    }
+  }
+
   function syncCheckboxes(productID) {
     var assigned = productColorMap[productID];
+    var availability = productColorAvailabilityMap[productID] || {};
     var neverAssigned = assigned === undefined;
     colourCards.forEach(function (card) {
       var colorID  = String(card.dataset.colorId);
       var checkbox = card.querySelector('.colour-checkbox');
+      var availableCheckbox = card.querySelector('.colour-available-checkbox');
       var isChecked = neverAssigned ? true : !!assigned[colorID];
+      var isAvailable = isChecked && (availability[colorID] === undefined || Number(availability[colorID]) === 1);
       checkbox.checked = isChecked;
-      card.style.borderColor = isChecked ? '#111827' : '#e5e7eb';
+      availableCheckbox.checked = isAvailable;
+      availableCheckbox.disabled = !isChecked;
+      paintAssignCard(card, isChecked, isAvailable);
     });
   }
 
@@ -851,14 +1384,31 @@ document.addEventListener('DOMContentLoaded', function () {
 
   colourCards.forEach(function (card) {
     card.addEventListener('click', function (e) {
-      if (e.target.tagName === 'INPUT') return;
+      if (e.target.closest('input, label, .assign-switch-row, .toggle-wrap')) return;
       var checkbox = card.querySelector('.colour-checkbox');
+      var availableCheckbox = card.querySelector('.colour-available-checkbox');
       checkbox.checked = !checkbox.checked;
-      card.style.borderColor = checkbox.checked ? '#111827' : '#e5e7eb';
+      if (checkbox.checked && !availableCheckbox.checked) {
+        availableCheckbox.checked = true;
+      }
+      availableCheckbox.disabled = !checkbox.checked;
+      paintAssignCard(card, checkbox.checked, availableCheckbox.checked);
     });
     var checkbox = card.querySelector('.colour-checkbox');
+    var availableCheckbox = card.querySelector('.colour-available-checkbox');
     checkbox.addEventListener('change', function () {
-      card.style.borderColor = checkbox.checked ? '#111827' : '#e5e7eb';
+      if (checkbox.checked && !availableCheckbox.checked) {
+        availableCheckbox.checked = true;
+      }
+      availableCheckbox.disabled = !checkbox.checked;
+      paintAssignCard(card, checkbox.checked, availableCheckbox.checked);
+    });
+    availableCheckbox.addEventListener('change', function () {
+      if (availableCheckbox.checked) {
+        checkbox.checked = true;
+      }
+      availableCheckbox.disabled = !checkbox.checked;
+      paintAssignCard(card, checkbox.checked, availableCheckbox.checked);
     });
   });
 

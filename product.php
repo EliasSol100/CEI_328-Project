@@ -462,19 +462,113 @@ if (!$product) {
     exit;
 }
 
+$globalProductWarnings = app_product_global_warning_texts($conn);
+$product["_globalProductWarningEN"] = $globalProductWarnings['en'] ?? '';
+$product["_globalProductWarningGR"] = $globalProductWarnings['gr'] ?? '';
+
 $publicProductStatuses = ["active", "low_stock", "out_of_stock"];
+$madeToOrderAccessRequired = false;
+$madeToOrderAccessError = '';
 if (!$isAdmin) {
     $productStatus = (string)($product["cartStatus"] ?? "");
     if ($productStatus === 'made_to_order') {
         if (!isMadeToOrderProductAccessible($conn, $productId)) {
-            $_SESSION['shop_mto_flash'] = 'err:You do not have access to this private made-to-order product.';
-            header("Location: shop.php");
-            exit;
+            $accessRow = loadMadeToOrderProductAccessRow($conn, $productId);
+            $targetEmail = normalizeCustomerEmail((string)($accessRow['privateCustomerEmail'] ?? ''));
+            $sessionEmail = currentSessionUserEmail();
+            if ($sessionEmail === '') {
+                if (function_exists('rememberAuthRedirectTarget')) {
+                    rememberAuthRedirectTarget((string)($_SERVER['REQUEST_URI'] ?? ('product.php?id=' . $productId)));
+                }
+                header("Location: authentication/login.php");
+                exit;
+            }
+            if (!$accessRow || $targetEmail === '' || $sessionEmail !== $targetEmail) {
+                $_SESSION['shop_mto_flash'] = 'err:This private product belongs to a different customer email.';
+                header("Location: shop.php");
+                exit;
+            }
+
+            $customAccessCode = '';
+            $codeStmt = $conn->prepare("
+                SELECT accessCode
+                FROM custom_orders
+                WHERE sourceProductID = ?
+                ORDER BY customOrderID DESC
+                LIMIT 1
+            ");
+            if ($codeStmt) {
+                $codeStmt->bind_param("i", $productId);
+                $codeStmt->execute();
+                $codeRes = $codeStmt->get_result();
+                $codeRow = $codeRes ? $codeRes->fetch_assoc() : null;
+                $codeStmt->close();
+                $customAccessCode = normalizeCustomOrderAccessCode((string)($codeRow['accessCode'] ?? ''));
+            }
+
+            if ((string)($_POST['action'] ?? '') === 'verify_mto_access_code') {
+                $submittedCode = normalizeCustomOrderAccessCode((string)($_POST['accessCode'] ?? ''));
+                $token = trim((string)($accessRow['privateAccessToken'] ?? ''));
+                if ($customAccessCode !== '' && $submittedCode !== '' && $token !== '' && hash_equals($customAccessCode, $submittedCode)) {
+                    setMadeToOrderSessionAccess($productId, $token);
+                    header("Location: product.php?id=" . $productId);
+                    exit;
+                }
+                $madeToOrderAccessError = 'Invalid access code.';
+            }
+
+            $madeToOrderAccessRequired = true;
         }
     } elseif (!in_array($productStatus, $publicProductStatuses, true)) {
         header("Location: shop.php");
         exit;
     }
+}
+
+if ($madeToOrderAccessRequired) {
+    $pageTitle = (string)$product["nameEN"] . ' - Private Access';
+    ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?= htmlspecialchars($pageTitle) ?> - <?= htmlspecialchars($systemTitle) ?></title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="assets/styling/styles.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/styles.css') ?>">
+    <link rel="stylesheet" href="assets/styling/header.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/header.css') ?>">
+    <link rel="stylesheet" href="assets/styling/product_details.css?v=<?= (int)@filemtime(__DIR__ . '/assets/styling/product_details.css') ?>">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <?php include __DIR__ . '/include/pwa_head.php'; ?>
+</head>
+<body class="site-page"<?= app_translate_page_title_attrs($pageTitle . ' - ' . $systemTitle, $pageTitle . ' - ' . $systemTitle) ?>>
+<?php
+$activePage = "shop";
+include __DIR__ . "/include/header.php";
+?>
+<main class="product-page">
+    <section class="made-to-order-access-card">
+        <span class="made-to-order-access-kicker">Private Custom Order</span>
+        <h1><?= htmlspecialchars((string)$product["nameEN"]) ?></h1>
+        <p>This private product is ready for your account. Enter the access code from your email to view the product details and complete checkout.</p>
+        <?php if ($madeToOrderAccessError !== ''): ?>
+            <div class="made-to-order-access-error"><?= htmlspecialchars($madeToOrderAccessError) ?></div>
+        <?php endif; ?>
+        <form method="POST" class="made-to-order-access-form">
+            <?= app_csrf_input() ?>
+            <input type="hidden" name="action" value="verify_mto_access_code">
+            <label for="accessCode">Access code</label>
+            <input type="text" id="accessCode" name="accessCode" maxlength="32" required autocomplete="one-time-code" placeholder="Enter access code">
+            <button type="submit"><i class="fas fa-lock-open"></i> Unlock Private Product</button>
+        </form>
+    </section>
+</main>
+<?php include __DIR__ . "/include/footer.php"; ?>
+<?= app_csrf_bootstrap_script() ?>
+</body>
+</html>
+    <?php
+    exit;
 }
 
 $baseProductPrice = (float)($product["basePrice"] ?? 0);
@@ -526,11 +620,26 @@ if (empty($photos)) {
 
 $colorPhotos = [];
 $productColorChoices = [];
+$colorDisplaySql = app_color_display_sql('c');
 $cpStmt = $conn->prepare(
-    "SELECT pcp.colorID, pcp.photoPath, c.colorName, c.hexCode
+    "SELECT pcp.colorID,
+            pcp.photoPath AS productPhotoPath,
+            {$colorDisplaySql} AS colorName,
+            c.hexCode,
+            c.globalInventoryAvailable,
+            c.isActive,
+            COALESCE(pca.isAvailable, 1) AS productColorAvailable,
+            cyt.photoPath AS swatchPhotoPath
      FROM product_color_photos pcp
      JOIN colors c ON c.colorID = pcp.colorID
-     WHERE pcp.productID = ? AND c.isActive = 1
+     LEFT JOIN product_color_availability pca ON pca.productID = pcp.productID AND pca.colorID = pcp.colorID
+     LEFT JOIN (
+         SELECT colorID, MIN(photoPath) AS photoPath
+         FROM color_yarn_types
+         WHERE photoPath IS NOT NULL AND TRIM(photoPath) <> ''
+         GROUP BY colorID
+     ) cyt ON cyt.colorID = pcp.colorID
+     WHERE pcp.productID = ?
      ORDER BY pcp.sortOrder ASC, pcp.id ASC"
 );
 if ($cpStmt) {
@@ -539,19 +648,25 @@ if ($cpStmt) {
     $cpRes = $cpStmt->get_result();
     while ($cpRes && ($row = $cpRes->fetch_assoc())) {
         $colorId = (int)($row['colorID'] ?? 0);
-        $photoPath = trim(app_image_prefer_optimized_asset_path((string)($row['photoPath'] ?? '')));
+        $productPhotoPath = trim(app_image_prefer_optimized_asset_path((string)($row['productPhotoPath'] ?? '')));
+        $swatchPhotoPath = trim(app_image_prefer_optimized_asset_path((string)($row['swatchPhotoPath'] ?? '')));
         $colorName = trim((string)($row['colorName'] ?? ''));
-        if ($colorId <= 0 || $photoPath === '') {
+        if ($colorId <= 0 || ($productPhotoPath === '' && $swatchPhotoPath === '')) {
             continue;
         }
-        $colorPhotos[$colorId][] = $photoPath;
+        if ($productPhotoPath !== '') {
+            $colorPhotos[$colorId][] = $productPhotoPath;
+        }
         if (!isset($productColorChoices[$colorId])) {
             $hexCode = trim((string)($row['hexCode'] ?? ''));
             $productColorChoices[$colorId] = [
                 'id' => $colorId,
                 'name' => $colorName !== '' ? $colorName : ('Color ' . $colorId),
                 'hex' => preg_match('/^#[0-9a-fA-F]{6}$/', $hexCode) ? $hexCode : '#ece6f6',
-                'photoPath' => $photoPath,
+                'photoPath' => $swatchPhotoPath !== '' ? $swatchPhotoPath : $productPhotoPath,
+                'productPhotoPath' => $productPhotoPath,
+                'isActive' => ((int)($row['isActive'] ?? 1) === 1 && (int)($row['productColorAvailable'] ?? 1) === 1) ? 1 : 0,
+                'stock' => (int)($row['globalInventoryAvailable'] ?? 0),
             ];
         }
     }
@@ -561,11 +676,13 @@ if ($cpStmt) {
 $variations = [];
 $variationStmt = $conn->prepare(
     "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, pv.price,
-            c.colorName, c.hexCode, c.isActive,
+            {$colorDisplaySql} AS colorName, c.hexCode, c.isActive, c.globalInventoryAvailable,
+            COALESCE(pca.isAvailable, 1) AS productColorAvailable,
             COALESCE(vs.quantityAvailable, p.inventory, 0) AS stock,
             cyt.photoPath
      FROM product_variations pv
      LEFT JOIN colors c ON c.colorID = pv.colorID
+     LEFT JOIN product_color_availability pca ON pca.productID = pv.productID AND pca.colorID = pv.colorID
      LEFT JOIN variation_stock vs ON vs.variationID = pv.variationID
      JOIN products p ON p.productID = pv.productID
      LEFT JOIN (
@@ -593,7 +710,8 @@ if ($variationStmt) {
             "price" => isset($row["price"]) ? (float)$row["price"] : null,
             "stock" => (int)($row["stock"] ?? 0),
             "photoPath" => app_image_prefer_optimized_asset_path((string)($row["photoPath"] ?? '')),
-            "isActive" => (int)($row["isActive"] ?? 1),
+            "isActive" => ((int)($row["isActive"] ?? 1) === 1 && (int)($row["productColorAvailable"] ?? 1) === 1) ? 1 : 0,
+            "globalStock" => (int)($row["globalInventoryAvailable"] ?? 0),
         ];
     }
     $variationStmt->close();
@@ -647,6 +765,7 @@ foreach ($variations as $variation) {
         "hex"      => $variation["hexCode"] ?? "#ece6f6",
         "photoPath"=> $variation["photoPath"] ?? null,
         "isActive" => (int)($variation["isActive"] ?? 1),
+        "stock"    => (int)($variation["globalStock"] ?? 0),
     ];
 }
 
@@ -665,6 +784,7 @@ $sizesAreInformational = !empty($productInfoSizes) && empty($uniqueSizes);
 if ($sizesAreInformational) {
     $uniqueSizes = $productInfoSizes;
 }
+$sizePriceMap = app_product_size_prices_for_product($conn, $productId);
 
 $variationHasColors = !empty(array_filter($variations, static fn($v) => ($v['colorID'] ?? 0) > 0));
 
@@ -681,8 +801,25 @@ foreach ($productColorChoices as $colorId => $colorChoice) {
         "name" => $colorName !== "" ? $colorName : ("Color " . $colorId),
         "hex" => $colorChoice["hex"] ?? "#ece6f6",
         "photoPath" => $colorChoice["photoPath"] ?? null,
+        "isActive" => (int)($colorChoice["isActive"] ?? 1),
+        "stock" => (int)($colorChoice["stock"] ?? 0),
     ];
 }
+
+foreach ($uniqueColors as $colorId => &$uniqueColor) {
+    $currentPhotoPath = trim((string)($uniqueColor['photoPath'] ?? ''));
+    $productColorPhotoPath = trim((string)($productColorChoices[(int)$colorId]['photoPath'] ?? ''));
+    if ($currentPhotoPath === '' && $productColorPhotoPath !== '') {
+        $uniqueColor['photoPath'] = $productColorPhotoPath;
+    }
+    if (!isset($uniqueColor['isActive']) && isset($productColorChoices[(int)$colorId]['isActive'])) {
+        $uniqueColor['isActive'] = (int)$productColorChoices[(int)$colorId]['isActive'];
+    }
+    if (!isset($uniqueColor['stock']) && isset($productColorChoices[(int)$colorId]['stock'])) {
+        $uniqueColor['stock'] = (int)$productColorChoices[(int)$colorId]['stock'];
+    }
+}
+unset($uniqueColor);
 
 $uniqueColors = array_values($uniqueColors);
 
@@ -746,6 +883,8 @@ foreach ($colorsByYarnType as $typeName => $typeColors) {
         'photoPath' => (string)($c['photoPath'] ?? ''),
         'typeId'    => (int)($c['typeId'] ?? 0),
         'typeName'  => (string)($c['typeName'] ?? ''),
+        'isActive'  => (int)($c['isActive'] ?? 1),
+        'stock'     => (int)($c['stock'] ?? 0),
     ], $typeColors));
 }
 
@@ -758,14 +897,14 @@ $catalogueColorIds = array_values(array_filter($catalogueColorIds, static fn(int
 if (!empty($catalogueColorIds)) {
     $cataloguePlaceholders = implode(',', array_fill(0, count($catalogueColorIds), '?'));
     $catalogStmt = $conn->prepare("
-        SELECT c.colorID, c.colorName, c.hexCode, c.globalInventoryAvailable, c.isActive,
+        SELECT c.colorID, {$colorDisplaySql} AS colorName, c.hexCode, c.globalInventoryAvailable, c.isActive,
                COALESCE(yt.typeName, 'General') AS typeName,
                MIN(cyt.photoPath) AS photoPath
         FROM colors c
         LEFT JOIN color_yarn_types cyt ON cyt.colorID = c.colorID
         LEFT JOIN yarn_types yt ON yt.typeID = cyt.typeID
         WHERE c.colorID IN ($cataloguePlaceholders)
-        GROUP BY c.colorID, c.colorName, c.hexCode, c.globalInventoryAvailable, c.isActive, yt.typeName
+        GROUP BY c.colorID, c.colorName, c.displayCode, c.hexCode, c.globalInventoryAvailable, c.isActive, yt.typeName
         ORDER BY typeName ASC, c.colorName ASC
     ");
     if ($catalogStmt) {
@@ -779,22 +918,30 @@ if (!empty($catalogueColorIds)) {
         $catalogRes = $catalogStmt->get_result();
         while ($catalogRes && ($row = $catalogRes->fetch_assoc())) {
             $catHex = trim((string)($row['hexCode'] ?? ''));
+            $catalogColorId = (int)$row['colorID'];
+            $catalogPhotoPath = trim(app_image_prefer_optimized_asset_path((string)($row['photoPath'] ?? '')));
+            if ($catalogPhotoPath === '') {
+                $catalogPhotoPath = trim((string)($productColorChoices[$catalogColorId]['photoPath'] ?? ''));
+            }
             $colorCatalogue[] = [
-                'id' => (int)$row['colorID'],
+                'id' => $catalogColorId,
                 'name' => (string)$row['colorName'],
                 'hex' => preg_match('/^#[0-9a-fA-F]{6}$/', $catHex) ? $catHex : '#ece6f6',
                 'typeName' => (string)$row['typeName'],
                 'available' => (int)($row['isActive'] ?? 0) === 1 && (int)($row['globalInventoryAvailable'] ?? 0) > 0,
                 'stock' => (int)($row['globalInventoryAvailable'] ?? 0),
-                'photoPath' => trim(app_image_prefer_optimized_asset_path((string)($row['photoPath'] ?? ''))),
+                'photoPath' => $catalogPhotoPath,
             ];
         }
         $catalogStmt->close();
     }
 }
-$hasVariationPriceRange = count(array_unique(array_map(static fn($price): string => number_format((float)$price, 2, '.', ''), $variationPrices))) > 1;
-$variationMinPrice = !empty($variationPrices) ? min($variationPrices) : $baseProductPrice;
-$variationMaxPrice = !empty($variationPrices) ? max($variationPrices) : $baseProductPrice;
+$displayPriceCandidates = !empty($variationPrices)
+    ? $variationPrices
+    : ($sizesAreInformational ? array_values($sizePriceMap) : []);
+$hasVariationPriceRange = count(array_unique(array_map(static fn($price): string => number_format((float)$price, 2, '.', ''), $displayPriceCandidates))) > 1;
+$variationMinPrice = !empty($displayPriceCandidates) ? min($displayPriceCandidates) : $baseProductPrice;
+$variationMaxPrice = !empty($displayPriceCandidates) ? max($displayPriceCandidates) : $baseProductPrice;
 $customColorFields = (int)($product["customColorFields"] ?? 0);
 $customColorLabel1 = trim((string)($product["customColorLabel1"] ?? ""));
 $customColorLabel2 = trim((string)($product["customColorLabel2"] ?? ""));
@@ -845,11 +992,35 @@ if ($csRow) {
         $csPhotoStmt->close();
     }
 
-    $csColorsRes = $conn->query("SELECT colorID, colorName FROM colors WHERE isActive = 1 ORDER BY colorName ASC");
-    if ($csColorsRes) {
-        while ($csColorRow = $csColorsRes->fetch_assoc()) {
+    $csColorsStmt = $conn->prepare(
+        "SELECT DISTINCT c.colorID, {$colorDisplaySql} AS colorName
+         FROM (
+            SELECT productID, colorID
+            FROM product_variations
+            WHERE colorID IS NOT NULL
+              AND (size IS NULL OR size = '')
+              AND (yarnType IS NULL OR yarnType = '')
+            UNION
+            SELECT productID, colorID
+            FROM product_color_photos
+            WHERE colorID IS NOT NULL
+         ) product_colours
+         JOIN colors c ON c.colorID = product_colours.colorID
+         LEFT JOIN product_color_availability pca ON pca.productID = product_colours.productID AND pca.colorID = product_colours.colorID
+         WHERE product_colours.productID = ?
+           AND c.isActive = 1
+           AND c.globalInventoryAvailable > 0
+           AND COALESCE(pca.isAvailable, 1) = 1
+         ORDER BY colorName ASC"
+    );
+    if ($csColorsStmt) {
+        $csColorsStmt->bind_param('i', $productId);
+        $csColorsStmt->execute();
+        $csColorsRes = $csColorsStmt->get_result();
+        while ($csColorsRes && ($csColorRow = $csColorsRes->fetch_assoc())) {
             $colorSchemeColors[] = $csColorRow;
         }
+        $csColorsStmt->close();
     }
 }
 
@@ -1088,10 +1259,12 @@ include __DIR__ . "/include/header.php";
                 <div class="option-label" data-translate="productSizeLabel">Size</div>
                 <div class="size-row" id="size-row">
                     <?php foreach ($uniqueSizes as $sizeLabel): ?>
+                        <?php $sizeSpecificPrice = $sizePriceMap[$sizeLabel] ?? app_product_size_price_for_product_size($conn, $productId, (string)$sizeLabel); ?>
                         <button
                             type="button"
                             class="size-chip"
-                            data-size="<?= htmlspecialchars($sizeLabel) ?>">
+                            data-size="<?= htmlspecialchars($sizeLabel) ?>"
+                            <?= $sizeSpecificPrice !== null ? 'data-size-price="' . htmlspecialchars(number_format((float)$sizeSpecificPrice, 2, '.', '')) . '"' : '' ?>>
                             <?= htmlspecialchars($sizeLabel) ?>
                         </button>
                     <?php endforeach; ?>
@@ -1099,7 +1272,7 @@ include __DIR__ . "/include/header.php";
             <?php endif; ?>
 
             <?php if (!empty($colorsByYarnType)): ?>
-                <?php $hasMultipleYarnTypes = count($colorsByYarnType) > 1 || (count($colorsByYarnType) === 1 && key($colorsByYarnType) !== ''); ?>
+                <?php $hasMultipleYarnTypes = count($colorsByYarnType) > 1; ?>
 
                 <?php if ($hasMultipleYarnTypes): ?>
                     <div class="option-label">Yarn Type</div>
@@ -1116,20 +1289,21 @@ include __DIR__ . "/include/header.php";
                     <?php foreach ($colorsByYarnType as $typeName => $typeColors): ?>
                         <?php foreach ($typeColors as $color):
                             $chipPhoto    = app_image_prefer_optimized_asset_path((string)($color['photoPath'] ?? ''));
-                            $chipIsActive = (int)($color['isActive'] ?? 1);
+                            $chipStock    = (int)($color['stock'] ?? 0);
+                            $chipIsAvailable = (int)($color['isActive'] ?? 1) === 1 && $chipStock > 0;
                         ?>
+                        <?php $chipPhotoUrl = $chipPhoto !== '' ? app_image_asset_url($chipPhoto) : ''; ?>
                         <button type="button"
-                            class="colour-chip color-chip-btn<?= $chipIsActive === 0 ? ' colour-chip--oos' : '' ?>"
+                            class="colour-chip color-chip-btn<?= !$chipIsAvailable ? ' colour-chip--oos' : '' ?>"
                             data-color-id="<?= (int)$color['id'] ?>"
                             data-color-name="<?= htmlspecialchars((string)($color['name'] ?? ''), ENT_QUOTES) ?>"
                             data-yarn-type-id="<?= (int)($color['typeId'] ?? 0) ?>"
                             data-yarn-type-name="<?= htmlspecialchars((string)($color['typeName'] ?? ''), ENT_QUOTES) ?>"
                             data-hex="<?= htmlspecialchars((string)($color['hex'] ?? '#ece6f6')) ?>"
-                            data-available="<?= $chipIsActive ?>"
-                            <?= $chipIsActive === 0 ? 'disabled' : '' ?>
-                            <?= ($hasMultipleYarnTypes) ? 'style="display:none"' : '' ?>>
-                            <?php if ($chipPhoto !== ''): ?>
-                                <img src="/athina-eshop/<?= htmlspecialchars($chipPhoto) ?>" alt="<?= htmlspecialchars((string)($color['name'] ?? '')) ?>">
+                            data-available="<?= $chipIsAvailable ? 1 : 0 ?>"
+                            <?= !$chipIsAvailable ? 'disabled' : '' ?>>
+                            <?php if ($chipPhotoUrl !== ''): ?>
+                                <img src="<?= htmlspecialchars($chipPhotoUrl, ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars((string)($color['name'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" loading="lazy" decoding="async">
                             <?php else: ?>
                                 <span class="colour-chip-swatch" style="background:<?= htmlspecialchars((string)($color['hex'] ?? '#ece6f6')) ?>"></span>
                             <?php endif; ?>
@@ -1298,7 +1472,7 @@ include __DIR__ . "/include/header.php";
                 <?php foreach ($colorCatalogue as $catalogueColor): ?>
                 <div class="color-catalogue-item <?= $catalogueColor['available'] ? '' : 'is-out' ?>">
                     <?php if ($catalogueColor['photoPath'] !== ''): ?>
-                        <img src="<?= htmlspecialchars($catalogueColor['photoPath']) ?>" alt="<?= htmlspecialchars($catalogueColor['name']) ?>" loading="lazy">
+                        <img src="<?= htmlspecialchars(app_image_asset_url($catalogueColor['photoPath']), ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($catalogueColor['name']) ?>" loading="lazy">
                     <?php else: ?>
                         <span class="color-catalogue-swatch" style="background: <?= htmlspecialchars($catalogueColor['hex'] ?? '#ece6f6') ?>;"></span>
                     <?php endif; ?>
@@ -1460,6 +1634,8 @@ include __DIR__ . "/include/header.php";
     var variations = <?= json_encode($variations, JSON_UNESCAPED_UNICODE) ?>;
     var hasSelectableVariations = hasVariants && Array.isArray(variations) && variations.length > 0;
     var sizesAreInformational = <?= $sizesAreInformational ? 'true' : 'false' ?>;
+    var sizePriceMap = <?= json_encode($sizePriceMap, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
+    var sizeSelectionRequired = sizesAreInformational && sizePriceMap && Object.keys(sizePriceMap).length > 0;
     var cartStatus = <?= json_encode((string)$product["cartStatus"], JSON_UNESCAPED_UNICODE) ?>;
     var productInventory = <?= (int)$product["inventory"] ?>;
 
@@ -1626,17 +1802,35 @@ include __DIR__ . "/include/header.php";
         return "\u20AC" + Number(value || 0).toFixed(2);
     }
 
+    function selectedSizePrice() {
+        if (!selectedSize || !sizePriceMap) {
+            return null;
+        }
+        if (Object.prototype.hasOwnProperty.call(sizePriceMap, selectedSize)) {
+            return Number(sizePriceMap[selectedSize]);
+        }
+        var target = normalize(selectedSize);
+        var found = null;
+        Object.keys(sizePriceMap).forEach(function(key) {
+            if (normalize(key) === target) {
+                found = Number(sizePriceMap[key]);
+            }
+        });
+        return found;
+    }
+
     hasPresetColorChoices = colorChips.length > 0;
 
     function updateColorChips() {
         colorChips.forEach(function (chip) {
             var colorId = parseInt(chip.getAttribute("data-color-id") || "0", 10) || 0;
-            var isUnavailable = false;
+            var isUnavailable = chip.getAttribute("data-available") !== "1";
             if (variationUsesColor && cartStatus !== "made_to_order") {
-                isUnavailable = Number(colorStockMap[colorId] || 0) <= 0;
+                isUnavailable = isUnavailable || Number(colorStockMap[colorId] || 0) <= 0;
             }
             chip.disabled = isUnavailable;
             chip.classList.toggle("is-unavailable", isUnavailable);
+            chip.classList.toggle("colour-chip--oos", isUnavailable);
             chip.classList.toggle("active", Number(selectedColorId || 0) === colorId);
         });
     }
@@ -1808,6 +2002,8 @@ include __DIR__ . "/include/header.php";
     function refreshDisplayedPrice(selectedVariation) {
         if (selectedVariation && selectedVariation.price !== null && selectedVariation.price !== undefined && selectedVariation.price !== "") {
             currentBasePrice = Number(selectedVariation.price || 0);
+        } else if (sizeSelectionRequired && selectedSizePrice() !== null) {
+            currentBasePrice = Number(selectedSizePrice() || 0);
         } else if (hasPriceRange) {
             currentBasePrice = rangeMinPrice;
             renderRangePrice(rangeMinPrice, rangeMaxPrice);
@@ -1873,7 +2069,10 @@ include __DIR__ . "/include/header.php";
                 }
             }
         } else {
-            if (cartStatus !== "made_to_order" && Number(productInventory) <= 0) {
+            if (sizeSelectionRequired && !selectedSize) {
+                available = false;
+                missingSelectionMessage = t("productSelectSizeFirst");
+            } else if (cartStatus !== "made_to_order" && Number(productInventory) <= 0) {
                 available = false;
                 statusText = t("outOfStock");
                 statusIsError = true;
@@ -2157,6 +2356,7 @@ include __DIR__ . "/include/header.php";
                 customization: {
                     field1: customizationField1,
                     field2: customField2Input ? String(customField2Input.value || "").trim() : "",
+                    selectedSize: selectedSize || "",
                     colorSchemeA: csColorSchemeEnabled && csSelectA ? csSelectA.options[csSelectA.selectedIndex]?.text || "" : "",
                     colorSchemeB: csColorSchemeEnabled && csSelectB ? csSelectB.options[csSelectB.selectedIndex]?.text || "" : "",
                     colorSchemeC: (csColorSchemeEnabled && csNumColors >= 3 && csSelectC) ? csSelectC.options[csSelectC.selectedIndex]?.text || "" : ""
@@ -2179,6 +2379,7 @@ include __DIR__ . "/include/header.php";
             }
             if (sizesAreInformational && selectedSize) {
                 payload.customizationNote = 'Size: ' + selectedSize;
+                payload.selected_size = selectedSize;
             }
 
             fetch("cart_api.php", {

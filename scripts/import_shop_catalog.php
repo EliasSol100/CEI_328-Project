@@ -63,81 +63,8 @@ function catalogReadPhotoBlob(string $path): string
         throw new RuntimeException("Could not read image bytes: {$path}");
     }
 
-    if (!extension_loaded('gd')) {
-        return $rawData;
-    }
-
-    $imageInfo = @getimagesize($path);
-    if (!$imageInfo || empty($imageInfo[0]) || empty($imageInfo[1])) {
-        return $rawData;
-    }
-
-    $width = (int)$imageInfo[0];
-    $height = (int)$imageInfo[1];
-    $imageType = (int)($imageInfo[2] ?? IMAGETYPE_JPEG);
-
-    switch ($imageType) {
-        case IMAGETYPE_JPEG:
-            $source = @imagecreatefromjpeg($path);
-            break;
-        case IMAGETYPE_PNG:
-            $source = @imagecreatefrompng($path);
-            break;
-        case IMAGETYPE_WEBP:
-            $source = function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($path) : false;
-            break;
-        default:
-            $source = false;
-            break;
-    }
-
-    if (!$source) {
-        return $rawData;
-    }
-
-    $targets = [
-        ['max' => 1600, 'quality' => 82],
-        ['max' => 1400, 'quality' => 78],
-        ['max' => 1200, 'quality' => 74],
-        ['max' => 1000, 'quality' => 70],
-    ];
-
-    $finalData = '';
-    foreach ($targets as $target) {
-        $maxEdge = (int)$target['max'];
-        $quality = (int)$target['quality'];
-        $scale = min(1, $maxEdge / max($width, $height));
-        $targetWidth = max(1, (int)round($width * $scale));
-        $targetHeight = max(1, (int)round($height * $scale));
-
-        $canvas = imagecreatetruecolor($targetWidth, $targetHeight);
-        if ($imageType === IMAGETYPE_PNG || $imageType === IMAGETYPE_WEBP) {
-            $white = imagecolorallocate($canvas, 255, 255, 255);
-            imagefilledrectangle($canvas, 0, 0, $targetWidth, $targetHeight, $white);
-        }
-
-        imagecopyresampled($canvas, $source, 0, 0, 0, 0, $targetWidth, $targetHeight, $width, $height);
-
-        ob_start();
-        imagejpeg($canvas, null, $quality);
-        $candidate = (string)ob_get_clean();
-        imagedestroy($canvas);
-
-        if ($candidate !== '') {
-            $finalData = $candidate;
-            if (strlen($candidate) <= 900000) {
-                break;
-            }
-        }
-    }
-
-    imagedestroy($source);
-
-    if ($finalData !== '') {
-        return $finalData;
-    }
-
-    return $rawData;
+    $optimizedData = app_image_optimize_photo_blob_for_storage($rawData, 1400, 1400, 78);
+    return $optimizedData !== '' ? $optimizedData : $rawData;
 }
 
 function catalogInsertPhoto(mysqli $conn, int $productId, string $photoData): void
@@ -263,46 +190,19 @@ function catalogResolveSourcePath(string $sku, string $folderRoot, string $relat
     return (string)$matches[0]['path'];
 }
 
-function catalogCopyAsset(string $sourcePath, string $relativeTargetPath): string
-{
-    if (!is_file($sourcePath)) {
-        throw new RuntimeException("Asset not found: {$sourcePath}");
-    }
-
-    $relativeTargetPath = ltrim(str_replace('\\', '/', $relativeTargetPath), '/');
-    $destinationPath = dirname(__DIR__) . '/' . $relativeTargetPath;
-    catalogEnsureDirectory(dirname($destinationPath));
-
-    $sourceRealPath = realpath($sourcePath);
-    $destinationRealPath = realpath($destinationPath);
-    if (
-        $sourceRealPath !== false &&
-        $destinationRealPath !== false &&
-        strcasecmp($sourceRealPath, $destinationRealPath) === 0
-    ) {
-        return $relativeTargetPath;
-    }
-
-    if (!copy($sourcePath, $destinationPath)) {
-        throw new RuntimeException("Could not copy asset to {$relativeTargetPath}");
-    }
-
-    return $relativeTargetPath;
-}
-
-function catalogCopyAssetAsJpeg(string $sourcePath, string $relativeTargetPath, int $maxWidth = 1600, int $maxHeight = 1600, int $quality = 82): string
+function catalogCopyAssetAsWebp(string $sourcePath, string $relativeTargetPath, int $maxWidth = 1600, int $maxHeight = 1600, int $quality = 82): string
 {
     if (!is_file($sourcePath)) {
         throw new RuntimeException("Asset not found: {$sourcePath}");
     }
 
     $normalizedTarget = ltrim(str_replace('\\', '/', $relativeTargetPath), '/');
-    $normalizedTarget = (string)preg_replace('/\.(png|gif|webp|jpe?g)$/i', '.jpg', $normalizedTarget);
+    $normalizedTarget = (string)preg_replace('/\.(png|gif|webp|jpe?g)$/i', '.webp', $normalizedTarget);
     $destinationPath = dirname(__DIR__) . '/' . $normalizedTarget;
     catalogEnsureDirectory(dirname($destinationPath));
 
-    if (!app_image_convert_file_to_jpeg($sourcePath, $destinationPath, $maxWidth, $maxHeight, $quality)) {
-        throw new RuntimeException("Could not convert asset to JPG: {$normalizedTarget}");
+    if (!app_image_convert_file_to_webp($sourcePath, $destinationPath, $maxWidth, $maxHeight, $quality)) {
+        throw new RuntimeException("Could not convert asset to WebP: {$normalizedTarget}");
     }
 
     return $normalizedTarget;
@@ -1315,9 +1215,9 @@ try {
                     continue;
                 }
                 $fileBaseName = catalogSlugify((string)pathinfo((string)$colorImageRelativePath, PATHINFO_FILENAME));
-                $fileName = sprintf('%02d-%s.jpg', $imageIndex + 1, $fileBaseName);
+                $fileName = sprintf('%02d-%s.webp', $imageIndex + 1, $fileBaseName);
                 $relativeTarget = 'uploads/assets/images/products/' . $skuSlug . '/colors/' . catalogSlugify($colorName) . '/' . $fileName;
-                $storedPath = catalogCopyAssetAsJpeg($sourcePath, $relativeTarget, 1600, 1600, 82);
+                $storedPath = catalogCopyAssetAsWebp($sourcePath, $relativeTarget, 1600, 1600, 82);
                 catalogInsertProductColorPhoto($conn, $productId, $colorId, $storedPath, ($colorIndex * 100) + $imageIndex);
             }
         }
@@ -1340,9 +1240,9 @@ try {
                         continue;
                     }
                     $fileBaseName = catalogSlugify((string)pathinfo((string)$variationImageRelativePath, PATHINFO_FILENAME));
-                    $fileName = sprintf('%02d-%s.jpg', $imageIndex + 1, $fileBaseName);
+                    $fileName = sprintf('%02d-%s.webp', $imageIndex + 1, $fileBaseName);
                     $relativeTarget = 'uploads/assets/images/products/' . $skuSlug . '/' . $variationSlug . '/' . $fileName;
-                    $storedPath = catalogCopyAssetAsJpeg($sourcePath, $relativeTarget, 1600, 1600, 82);
+                    $storedPath = catalogCopyAssetAsWebp($sourcePath, $relativeTarget, 1600, 1600, 82);
                     catalogInsertVariationPhoto($conn, $variationId, $storedPath, $imageIndex);
                     $variationPhotoCount++;
                 }
