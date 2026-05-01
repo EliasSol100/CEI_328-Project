@@ -256,24 +256,24 @@
     flex-direction: column;
     align-items: center;
     border: none;
-    padding: 4px;
+    padding: 2px;
     cursor: pointer;
     background: none;
     border-radius: 10px;
     transition: background .15s;
-    width: 64px;
+    width: 72px;
 }
 
 .colour-chip img,
 .colour-chip-swatch {
-    width: 48px;
-    height: 48px;
+    width: 90px;
+    height: 90px;
     display: block;
     object-fit: cover;
-    border-radius: 50%;
+    border-radius: 10px;
     margin: 0 auto;
-    border: 2px solid #e5e7eb;
-    transition: border-color .15s, outline .15s;
+    border: none;
+    transition: outline .15s;
 }
 
 .colour-chip-swatch {
@@ -281,24 +281,24 @@
 }
 
 .colour-chip-label {
-    font-size: 10px;
+    font-size: 11px;
     color: #374151;
     text-align: center;
-    margin-top: 4px;
+    margin-top: 5px;
     line-height: 1.2;
-    max-width: 60px;
+    max-width: 72px;
     word-break: break-word;
 }
 
 .colour-chip:hover img,
 .colour-chip:hover .colour-chip-swatch {
-    border-color: #bf9bec;
+    outline: 2px solid #bf9bec;
+    outline-offset: 2px;
 }
 
 .colour-chip.active img,
 .colour-chip.active .colour-chip-swatch {
-    border-color: #9227f5;
-    outline: 2px solid #9227f5;
+    outline: 3px solid #9227f5;
     outline-offset: 2px;
 }
 
