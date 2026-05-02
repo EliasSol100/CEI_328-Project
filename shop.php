@@ -5,6 +5,7 @@ require_once "authentication/get_config.php";
 require_once "include/security.php";
 require_once "include/image_storage.php";
 require_once "include/product_option_helpers.php";
+require_once "include/shop_filter_settings.php";
 require_once "include/translation_helpers.php";
 require_once __DIR__ . '/include/made_to_order_access.php';
 
@@ -134,6 +135,18 @@ function ensureProductSalesOverridesSchema(mysqli $conn): void {
 
 ensureProductSalesOverridesSchema($conn);
 
+function shopImageAssetUsable(string $path): bool
+{
+    $path = trim($path);
+    if ($path === '') {
+        return false;
+    }
+    if (app_image_is_public_asset_url($path)) {
+        return true;
+    }
+    return is_file(app_image_local_asset_path($path));
+}
+
 function shopCategoryLabels(): array
 {
     return [
@@ -217,6 +230,7 @@ $sellingFastColumn = $conn->query("SHOW COLUMNS FROM products LIKE 'isSellingFas
 if ($sellingFastColumn && $sellingFastColumn->num_rows === 0) {
     $conn->query("ALTER TABLE products ADD COLUMN isSellingFast TINYINT(1) NOT NULL DEFAULT 0");
 }
+$shopFilterSettings = app_shop_filter_settings($conn);
 
 function getOrCreateWishlistID($conn, $uid) {
     $uid = (int)$uid;
@@ -374,55 +388,48 @@ if (!empty($accessibleMadeToOrderIds)) {
     $categoryVisibilityWhere .= " OR (cartStatus = 'made_to_order' AND productID IN (" . implode(',', array_map('intval', $accessibleMadeToOrderIds)) . "))";
 }
 
-$categories = [];
-$categoryLabels = shopCategoryLabels();
-$catRes = $conn->query("
-    SELECT DISTINCT category
-    FROM products
-    WHERE category IS NOT NULL AND category != ''
-      AND ({$categoryVisibilityWhere})
-    ORDER BY category ASC
-");
-if ($catRes) {
-    while ($row = $catRes->fetch_assoc()) {
-        $categories[] = $row['category'];
-    }
+$visibleShopProductIds = [];
+$visibleProductRes = $conn->query("SELECT p.productID FROM products p WHERE ({$catalogVisibilityWhere})");
+while ($visibleProductRes && ($visibleRow = $visibleProductRes->fetch_assoc())) {
+    $visibleShopProductIds[] = (int)$visibleRow['productID'];
 }
-usort($categories, static function (string $left, string $right) use ($categoryLabels): int {
-    $order = array_flip(array_keys($categoryLabels));
-    $leftOrder = $order[$left] ?? 999;
-    $rightOrder = $order[$right] ?? 999;
-    if ($leftOrder !== $rightOrder) {
-        return $leftOrder <=> $rightOrder;
-    }
-    return strcasecmp($left, $right);
-});
-
-$materialOptions = [];
-$materialRes = $conn->query("
-    SELECT typeName AS material
-    FROM yarn_types
-    WHERE typeName IS NOT NULL AND TRIM(typeName) <> ''
-    UNION
-    SELECT DISTINCT materialType AS material
-    FROM products
-    WHERE materialType IS NOT NULL AND TRIM(materialType) <> ''
-      AND ({$categoryVisibilityWhere})
-    ORDER BY material ASC
-");
-if ($materialRes) {
-    while ($row = $materialRes->fetch_assoc()) {
-        $material = trim((string)($row['material'] ?? ''));
-        if ($material !== '') {
-            $materialOptions[] = $material;
+$visibleShopProductLookup = array_fill_keys($visibleShopProductIds, true);
+$visibleAssignedOptions = static function (array $rows) use ($visibleShopProductLookup): array {
+    return array_values(array_filter($rows, static function (array $row) use ($visibleShopProductLookup): bool {
+        if (empty($row['active'])) {
+            return false;
         }
+        foreach ((array)($row['product_ids'] ?? []) as $productId) {
+            if (isset($visibleShopProductLookup[(int)$productId])) {
+                return true;
+            }
+        }
+        return false;
+    }));
+};
+
+$categoryOptions = $visibleAssignedOptions(app_shop_filter_active_options($shopFilterSettings, 'categories'));
+$categories = [];
+$categoryLabels = [];
+foreach ($categoryOptions as $categoryOption) {
+    $categoryId = (string)($categoryOption['id'] ?? '');
+    if ($categoryId === '') {
+        continue;
     }
+    $categories[] = $categoryId;
+    $categoryLabels[$categoryId] = [
+        'en' => (string)($categoryOption['label_en'] ?? $categoryId),
+        'el' => (string)($categoryOption['label_gr'] ?? ($categoryOption['label_en'] ?? $categoryId)),
+    ];
 }
+
+$materialOptions = $visibleAssignedOptions(app_shop_filter_active_options($shopFilterSettings, 'materials'));
 
 $colorFilterOptions = [];
+$colorDisplaySql = app_color_display_sql('c');
 $colorRes = $conn->query("
-    SELECT colorID, colorName, globalInventoryAvailable
-    FROM colors
+    SELECT c.colorID, {$colorDisplaySql} AS colorName, c.globalInventoryAvailable
+    FROM colors c
     WHERE isActive = 1
     ORDER BY colorName ASC
 ");
@@ -436,32 +443,18 @@ if ($colorRes) {
     }
 }
 
-$minPrice = 0;
-$maxPrice = 100;
-$priceBoundsRes = $conn->query("
-    SELECT
-        MIN(COALESCE(vstats.min_price, p.basePrice)) AS min_price,
-        MAX(COALESCE(vstats.max_price, p.basePrice)) AS max_price
-    FROM products p
-    LEFT JOIN (
-        SELECT
-            productID,
-            MIN(CASE WHEN price IS NOT NULL AND price > 0 THEN price END) AS min_price,
-            MAX(CASE WHEN price IS NOT NULL AND price > 0 THEN price END) AS max_price
-        FROM product_variations
-        GROUP BY productID
-    ) vstats ON vstats.productID = p.productID
-    WHERE ({$categoryVisibilityWhere})
-");
-if ($priceBoundsRes && ($bounds = $priceBoundsRes->fetch_assoc())) {
-    if ($bounds['min_price'] !== null && $bounds['max_price'] !== null) {
-        $minPrice = (int)floor((float)$bounds['min_price']);
-        $maxPrice = (int)ceil((float)$bounds['max_price']);
-    }
-}
-if ($minPrice > $maxPrice) {
+$priceSettings = is_array($shopFilterSettings['price'] ?? null) ? $shopFilterSettings['price'] : ['min' => 0, 'max' => 100, 'step' => 1];
+$minPrice = (float)($priceSettings['min'] ?? 0);
+$maxPrice = (float)($priceSettings['max'] ?? 100);
+$priceStep = (float)($priceSettings['step'] ?? 1);
+if ($minPrice < 0) {
     $minPrice = 0;
-    $maxPrice = 100;
+}
+if ($maxPrice < $minPrice) {
+    $maxPrice = $minPrice;
+}
+if ($priceStep <= 0) {
+    $priceStep = 1;
 }
 
 $searchQuery = trim((string)($_GET['q'] ?? ''));
@@ -479,7 +472,18 @@ if (isset($_GET['price_max']) && $_GET['price_max'] !== '') {
 }
 $selectedPriceMax = max((float)$minPrice, min((float)$maxPrice, (float)$selectedPriceMax));
 
-$tagDefinitions = shopTagDefinitions();
+$tagOptions = $visibleAssignedOptions(app_shop_filter_active_options($shopFilterSettings, 'tags'));
+$tagDefinitions = [];
+foreach ($tagOptions as $tagOption) {
+    $tagId = (string)($tagOption['id'] ?? '');
+    if ($tagId === '') {
+        continue;
+    }
+    $tagDefinitions[$tagId] = [
+        'en' => (string)($tagOption['label_en'] ?? $tagId),
+        'el' => (string)($tagOption['label_gr'] ?? ($tagOption['label_en'] ?? $tagId)),
+    ];
+}
 $selectedTags = $_GET['tags'] ?? [];
 if (!is_array($selectedTags)) {
     $selectedTags = [$selectedTags];
@@ -494,7 +498,7 @@ if (!is_array($selectedMaterials)) {
     $selectedMaterials = [$selectedMaterials];
 }
 $selectedMaterials = array_values(array_unique(array_intersect(
-    $materialOptions,
+    app_shop_filter_valid_ids($shopFilterSettings, 'materials'),
     array_map('strval', $selectedMaterials)
 )));
 
@@ -510,8 +514,15 @@ $products = [];
 $sql = "
     SELECT p.productID, p.sku, p.nameEN, p.nameGR, p.basePrice, p.inventory,
            p.cartStatus, p.category, p.materialType, p.hasVariants,
-           COALESCE(vstats.min_price, p.basePrice) AS displayMinPrice,
-           COALESCE(vstats.max_price, p.basePrice) AS displayMaxPrice,
+           CASE
+               WHEN vstats.min_price IS NOT NULL AND sizestats.min_price IS NOT NULL THEN LEAST(vstats.min_price, sizestats.min_price)
+               ELSE COALESCE(vstats.min_price, sizestats.min_price, p.basePrice)
+           END AS displayMinPrice,
+           CASE
+               WHEN vstats.max_price IS NOT NULL AND sizestats.max_price IS NOT NULL THEN GREATEST(vstats.max_price, sizestats.max_price)
+               ELSE COALESCE(vstats.max_price, sizestats.max_price, p.basePrice)
+           END AS displayMaxPrice,
+           COALESCE(sizestats.price_count, 0) AS sizePriceCount,
            CASE
                WHEN pso.productID IS NULL THEN COALESCE(os.total_qty, 0)
                ELSE pso.manual_total_sales + GREATEST(
@@ -532,11 +543,20 @@ $sql = "
     LEFT JOIN (
         SELECT
             productID,
-            MIN(CASE WHEN price IS NOT NULL AND price > 0 THEN price END) AS min_price,
-            MAX(CASE WHEN price IS NOT NULL AND price > 0 THEN price END) AS max_price
+            MIN(CASE WHEN price IS NOT NULL AND price >= 0 THEN price END) AS min_price,
+            MAX(CASE WHEN price IS NOT NULL AND price >= 0 THEN price END) AS max_price
         FROM product_variations
         GROUP BY productID
     ) vstats ON vstats.productID = p.productID
+    LEFT JOIN (
+        SELECT
+            productID,
+            MIN(CASE WHEN price IS NOT NULL AND price >= 0 THEN price END) AS min_price,
+            MAX(CASE WHEN price IS NOT NULL AND price >= 0 THEN price END) AS max_price,
+            COUNT(CASE WHEN price IS NOT NULL AND price >= 0 THEN 1 END) AS price_count
+        FROM product_size_prices
+        GROUP BY productID
+    ) sizestats ON sizestats.productID = p.productID
     LEFT JOIN product_sales_overrides pso ON pso.productID = p.productID
     WHERE ({$catalogVisibilityWhere})
 ";
@@ -545,9 +565,17 @@ $bindTypes = '';
 $bindValues = [];
 
 if ($selectedCategory !== 'all') {
-    $sql .= " AND p.category = ?";
-    $bindTypes .= 's';
-    $bindValues[] = $selectedCategory;
+    $categoryProductIds = app_shop_filter_product_ids_for($shopFilterSettings, 'categories', [$selectedCategory]);
+    if (empty($categoryProductIds)) {
+        $sql .= " AND 1 = 0";
+    } else {
+        $placeholders = implode(',', array_fill(0, count($categoryProductIds), '?'));
+        $sql .= " AND p.productID IN ({$placeholders})";
+        $bindTypes .= str_repeat('i', count($categoryProductIds));
+        foreach ($categoryProductIds as $productId) {
+            $bindValues[] = (int)$productId;
+        }
+    }
 }
 
 if ($searchQuery !== '') {
@@ -568,11 +596,30 @@ if ($searchQuery !== '') {
 }
 
 if (!empty($selectedMaterials)) {
-    $placeholders = implode(',', array_fill(0, count($selectedMaterials), '?'));
-    $sql .= " AND p.materialType IN ({$placeholders})";
-    $bindTypes .= str_repeat('s', count($selectedMaterials));
-    foreach ($selectedMaterials as $material) {
-        $bindValues[] = $material;
+    $materialProductIds = app_shop_filter_product_ids_for($shopFilterSettings, 'materials', $selectedMaterials);
+    if (empty($materialProductIds)) {
+        $sql .= " AND 1 = 0";
+    } else {
+        $placeholders = implode(',', array_fill(0, count($materialProductIds), '?'));
+        $sql .= " AND p.productID IN ({$placeholders})";
+        $bindTypes .= str_repeat('i', count($materialProductIds));
+        foreach ($materialProductIds as $productId) {
+            $bindValues[] = (int)$productId;
+        }
+    }
+}
+
+if (!empty($selectedTags)) {
+    $tagProductIds = app_shop_filter_product_ids_for($shopFilterSettings, 'tags', $selectedTags);
+    if (empty($tagProductIds)) {
+        $sql .= " AND 1 = 0";
+    } else {
+        $placeholders = implode(',', array_fill(0, count($tagProductIds), '?'));
+        $sql .= " AND p.productID IN ({$placeholders})";
+        $bindTypes .= str_repeat('i', count($tagProductIds));
+        foreach ($tagProductIds as $productId) {
+            $bindValues[] = (int)$productId;
+        }
     }
 }
 
@@ -607,7 +654,10 @@ if (!empty($selectedColors)) {
     }
 }
 
-$sql .= " AND COALESCE(vstats.min_price, p.basePrice) <= ?";
+$sql .= " AND (CASE
+    WHEN vstats.min_price IS NOT NULL AND sizestats.min_price IS NOT NULL THEN LEAST(vstats.min_price, sizestats.min_price)
+    ELSE COALESCE(vstats.min_price, sizestats.min_price, p.basePrice)
+END) <= ?";
 $bindTypes .= 'd';
 $bindValues[] = (float)$selectedPriceMax;
 
@@ -633,21 +683,16 @@ if ($stmtProducts) {
 }
 
 foreach ($products as &$productRow) {
-    $productRow['derivedTags'] = shopProductTags($productRow);
+    $productRow['derivedTags'] = app_shop_filter_product_option_ids($shopFilterSettings, 'tags', (int)$productRow['productID']);
+    $productRow['filterCategories'] = app_shop_filter_product_option_ids($shopFilterSettings, 'categories', (int)$productRow['productID']);
 }
 unset($productRow);
-
-if (!empty($selectedTags)) {
-    $products = array_values(array_filter($products, static function (array $productRow) use ($selectedTags): bool {
-        $productTags = $productRow['derivedTags'] ?? [];
-        return !empty(array_intersect($selectedTags, $productTags));
-    }));
-}
 
 $reviewData = [];
 $revRes = $conn->query("
     SELECT productID, COUNT(*) AS cnt, ROUND(AVG(rating), 1) AS avg_rating
     FROM reviews
+    WHERE isVisible = 1
     GROUP BY productID
 ");
 if ($revRes) {
@@ -664,7 +709,7 @@ $cpRes = $conn->query("SELECT productID, photoPath FROM product_color_photos ORD
 if ($cpRes) {
     while ($row = $cpRes->fetch_assoc()) {
         $path = app_image_prefer_optimized_asset_path((string)($row['photoPath'] ?? ''));
-        if ($path !== '') {
+        if ($path !== '' && shopImageAssetUsable($path)) {
             $colorPhotosByProduct[(int)$row['productID']][] = $path;
         }
     }
@@ -680,7 +725,7 @@ $vpRes = $conn->query("
 if ($vpRes) {
     while ($row = $vpRes->fetch_assoc()) {
         $path = app_image_prefer_optimized_asset_path((string)($row['photoPath'] ?? ''));
-        if ($path !== '') {
+        if ($path !== '' && shopImageAssetUsable($path)) {
             $variationPhotosByProduct[(int)$row['productID']][] = $path;
         }
     }
@@ -946,6 +991,7 @@ foreach ($products as $p) {
                                type="range"
                                min="<?= $minPrice ?>"
                                max="<?= $maxPrice ?>"
+                               step="<?= htmlspecialchars((string)$priceStep) ?>"
                                value="<?= (float)$selectedPriceMax ?>">
                         <div class="price-range-labels">
                             <span>&euro;<?= $minPrice ?></span>
@@ -958,35 +1004,23 @@ foreach ($products as $p) {
                         <h4 data-translate="material">Material</h4>
                         <div class="chip-row">
                             <?php foreach ($materialOptions as $material): ?>
+                            <?php
+                                $materialId = (string)($material['id'] ?? '');
+                                $materialLabelEn = (string)($material['label_en'] ?? $materialId);
+                                $materialLabelGr = (string)($material['label_gr'] ?? $materialLabelEn);
+                            ?>
                             <label class="tag-chip">
                                 <input type="checkbox"
                                        name="materials[]"
-                                       value="<?= htmlspecialchars($material) ?>"
-                                       <?= in_array($material, $selectedMaterials, true) ? 'checked' : '' ?>>
-                                <span><?= htmlspecialchars($material) ?></span>
+                                       value="<?= htmlspecialchars($materialId) ?>"
+                                       <?= in_array($materialId, $selectedMaterials, true) ? 'checked' : '' ?>>
+                                <span<?= app_translate_text_attrs($materialLabelEn, $materialLabelGr) ?>><?= htmlspecialchars($materialLabelEn) ?></span>
                             </label>
                             <?php endforeach; ?>
                         </div>
                     </div>
                     <?php endif; ?>
 
-                    <?php if (!empty($colorFilterOptions)): ?>
-                    <div class="filter-group">
-                        <h4 data-translate="yarnColour">Yarn Colour</h4>
-                        <?php foreach ($colorFilterOptions as $colorOption): ?>
-                        <?php $colorAvailable = (int)$colorOption['available'] > 0; ?>
-                        <label class="filter-option <?= $colorAvailable ? '' : 'is-unavailable' ?>">
-                            <input type="checkbox"
-                                   name="colors[]"
-                                   value="<?= (int)$colorOption['id'] ?>"
-                                   <?= in_array((int)$colorOption['id'], $selectedColors, true) ? 'checked' : '' ?>
-                                   <?= $colorAvailable ? '' : 'disabled' ?>>
-                            <span class="filter-color-dot" style="background:<?= htmlspecialchars(shopColorSwatchHex((string)$colorOption['name'])) ?>;"></span>
-                            <span><?= htmlspecialchars((string)$colorOption['name']) ?></span>
-                        </label>
-                        <?php endforeach; ?>
-                    </div>
-                    <?php endif; ?>
 
                     <div class="filter-group">
                         <h4 data-translate="tags">Tags</h4>
@@ -1037,16 +1071,19 @@ foreach ($products as $p) {
                             $inWishlist = in_array($pid, $wishlistedIDs, true);
                             $isOutStock = ((string)$p['cartStatus'] === 'out_of_stock') || ((int)$p['inventory'] <= 0 && (string)$p['cartStatus'] !== 'made_to_order');
                             $isLowStock = ((string)$p['cartStatus'] === 'low_stock') || (!$isOutStock && (int)$p['inventory'] > 0 && (int)$p['inventory'] <= 3);
-                            $catName   = $p['category'] ?? '';
                             $imageIDs   = !empty($p['imageIDs']) ? array_map('intval', explode(',', $p['imageIDs'])) : [];
                             $colorPaths = $colorPhotosByProduct[$pid] ?? [];
                             $variationPaths = $variationPhotosByProduct[$pid] ?? [];
                             $productTags = $p['derivedTags'] ?? [];
+                            $productFilterCategories = $p['filterCategories'] ?? [];
                             $rev    = $reviewData[$pid] ?? ['cnt' => 0, 'avg' => 0.0];
                             $stars  = '';
                             $displayMinPrice = (float)($p['displayMinPrice'] ?? $p['basePrice'] ?? 0);
                             $displayMaxPrice = (float)($p['displayMaxPrice'] ?? $p['basePrice'] ?? 0);
-                            $requiresOptionSelection = ((int)($p['hasVariants'] ?? 0) === 1) || !empty($variationPaths) || !empty($colorPaths);
+                            $requiresOptionSelection = ((int)($p['hasVariants'] ?? 0) === 1)
+                                || !empty($variationPaths)
+                                || !empty($colorPaths)
+                                || (int)($p['sizePriceCount'] ?? 0) > 0;
                             $filled = (int)round($rev['avg']);
                             for ($i = 1; $i <= 5; $i++) {
                                 $stars .= $i <= $filled ? '&#9733;' : '&#9734;';
@@ -1054,7 +1091,7 @@ foreach ($products as $p) {
                         ?>
                         <article id="product-<?= $pid ?>"
                                  class="shop-product-card is-clickable"
-                                 data-category="<?= htmlspecialchars($catName) ?>"
+                                 data-category="<?= htmlspecialchars(implode(',', $productFilterCategories)) ?>"
                                  data-price="<?= $displayMinPrice ?>"
                                  data-tags="<?= htmlspecialchars(implode(',', $productTags)) ?>"
                                  data-product-url="product.php?id=<?= $pid ?>"
@@ -1072,10 +1109,10 @@ foreach ($products as $p) {
                                         $allSlides[] = ['type' => 'blob', 'src' => 'modules/admin/ajax/product_image.php?id=' . $imgID];
                                     }
                                     foreach ($variationPaths as $vp) {
-                                        $allSlides[] = ['type' => 'path', 'src' => $vp];
+                                        $allSlides[] = ['type' => 'path', 'src' => app_image_asset_url((string)$vp)];
                                     }
                                     foreach ($colorPaths as $cp) {
-                                        $allSlides[] = ['type' => 'path', 'src' => $cp];
+                                        $allSlides[] = ['type' => 'path', 'src' => app_image_asset_url((string)$cp)];
                                     }
                                     $seenSlideSources = [];
                                     $allSlides = array_values(array_filter($allSlides, static function (array $slide) use (&$seenSlideSources): bool {
@@ -1099,6 +1136,7 @@ foreach ($products as $p) {
                                         <div class="carousel-item <?= $cidx === 0 ? 'active' : '' ?>">
                                             <img src="<?= htmlspecialchars($slide['src']) ?>"
                                                  alt="<?= htmlspecialchars($p['nameEN']) ?>"
+                                                 data-product-placeholder="<?= htmlspecialchars($p['nameEN']) ?>"
                                                  loading="<?= $loadingMode ?>"
                                                  decoding="async"
                                                  fetchpriority="<?= $fetchPriority ?>">
@@ -1112,6 +1150,10 @@ foreach ($products as $p) {
                                         <?php endfor; ?>
                                     </div>
                                     <?php endif; ?>
+                                </div>
+                                <?php else: ?>
+                                <div class="shop-image-fallback" aria-label="<?= htmlspecialchars($p['nameEN']) ?>">
+                                    <i class="fas fa-image"></i>
                                 </div>
                                 <?php endif; ?>
                                 <form method="post" action="shop.php" style="position:absolute;top:8px;right:8px;z-index:10;">
@@ -1128,9 +1170,9 @@ foreach ($products as $p) {
                                 <div class="shop-price-row">
                                     <span class="shop-price">
                                         <?php if ($displayMaxPrice > $displayMinPrice): ?>
-                                            &euro;<?= number_format($displayMinPrice, 0) ?> - &euro;<?= number_format($displayMaxPrice, 0) ?>
+                                            &euro;<?= number_format($displayMinPrice, 2) ?> - &euro;<?= number_format($displayMaxPrice, 2) ?>
                                         <?php else: ?>
-                                            &euro;<?= number_format($displayMinPrice, 0) ?>
+                                            &euro;<?= number_format($displayMinPrice, 2) ?>
                                         <?php endif; ?>
                                     </span>
                                     <?php if ($p['cartStatus'] === 'made_to_order'): ?>
@@ -1161,13 +1203,9 @@ foreach ($products as $p) {
                                 <button class="shop-atc-btn"
                                         data-product-id="<?= $pid ?>"
                                         data-has-variants="<?= (int)$p['hasVariants'] ?>"
-                                        data-requires-options="<?= $requiresOptionSelection ? 1 : 0 ?>"
+                                        data-requires-options="1"
                                         data-product-url="product.php?id=<?= $pid ?>">
-                                    <?php if ($requiresOptionSelection): ?>
-                                        <i class="fas fa-sliders-h"></i> <span data-translate="selectOptions">Select Options</span>
-                                    <?php else: ?>
-                                        <i class="fas fa-cart-plus"></i> <span data-translate="addToCart">Add to Cart</span>
-                                    <?php endif; ?>
+                                    <i class="fas fa-sliders-h"></i> <span data-translate="selectOptions">Select Options</span>
                                 </button>
                             </div>
                         </article>
@@ -1262,6 +1300,45 @@ foreach ($products as $p) {
     <script src="assets/js/instant-carousel.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/instant-carousel.js') ?>"></script>
     <script src="assets/js/wishlist-live.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/wishlist-live.js') ?>" defer></script>
     <script>
+    function syncCarouselDots(carouselEl) {
+        const dots = carouselEl.querySelectorAll('.shop-carousel-dot');
+        if (!dots.length) return;
+        const activeIndex = Array.from(carouselEl.querySelectorAll('.carousel-item')).findIndex(item => item.classList.contains('active'));
+        dots.forEach((dot, index) => dot.classList.toggle('is-active', index === Math.max(0, activeIndex)));
+    }
+
+    function showShopImageFallback(carouselEl) {
+        const imageWrap = carouselEl.closest('.shop-product-image');
+        if (!imageWrap) return;
+        carouselEl.remove();
+        if (!imageWrap.querySelector('.shop-image-fallback')) {
+            const fallback = document.createElement('div');
+            fallback.className = 'shop-image-fallback';
+            fallback.innerHTML = '<i class="fas fa-image"></i>';
+            imageWrap.insertBefore(fallback, imageWrap.firstChild);
+        }
+    }
+
+    document.querySelectorAll('.shop-product-image img').forEach(img => {
+        img.addEventListener('error', () => {
+            const item = img.closest('.carousel-item');
+            const carouselEl = img.closest('.shop-carousel');
+            if (!item || !carouselEl) return;
+
+            const wasActive = item.classList.contains('active');
+            item.remove();
+            const remaining = carouselEl.querySelectorAll('.carousel-item');
+            if (!remaining.length) {
+                showShopImageFallback(carouselEl);
+                return;
+            }
+            if (wasActive && !carouselEl.querySelector('.carousel-item.active')) {
+                remaining[0].classList.add('active');
+            }
+            syncCarouselDots(carouselEl);
+        }, { once: true });
+    });
+
     document.querySelectorAll('.shop-carousel').forEach(carouselEl => {
         const slideCount = carouselEl.querySelectorAll('.carousel-item').length;
         if (slideCount < 2) return;
@@ -1371,13 +1448,8 @@ foreach ($products as $p) {
         btn.addEventListener('click', function (e) {
             e.stopPropagation();
             const pid = parseInt(this.dataset.productId);
-            const requiresOptions = this.dataset.requiresOptions === '1';
             const productUrl = this.dataset.productUrl || ('product.php?id=' + pid);
-            if (requiresOptions) {
-                window.location.href = productUrl;
-                return;
-            }
-            addToCart(pid);
+            window.location.href = productUrl;
         });
     });
     </script>

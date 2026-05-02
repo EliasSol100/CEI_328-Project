@@ -4,7 +4,12 @@ if (!defined('INCLUDE_CHECK') && !defined('ORDER_DETAILS_DIRECT')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/../include/order_tracking_helpers.php';
+
 function getOrderDetails($conn, $orderId) {
+    if ($conn instanceof mysqli) {
+        app_order_tracking_ensure_schema($conn);
+    }
 
     $stmt = $conn->prepare("
         SELECT
@@ -80,7 +85,7 @@ function getOrderDetails($conn, $orderId) {
     ];
 
     $stmt = $conn->prepare("
-        SELECT courierName, totalWeightKG, shippingCost, trackingCode
+        SELECT courierName, totalWeightKG, shippingCost, " . app_order_tracking_value_sql('shipments') . " AS trackingCode
         FROM shipments
         WHERE orderID = ?
     ");

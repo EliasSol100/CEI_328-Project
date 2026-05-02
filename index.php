@@ -4,6 +4,7 @@ require_once "authentication/database.php";
 require_once "authentication/get_config.php";
 require_once __DIR__ . "/include/homepage_customization.php";
 require_once __DIR__ . "/include/translation_helpers.php";
+require_once __DIR__ . "/include/website_content_settings.php";
 
 $system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
 $logo_path    = getSystemConfig("logo_path") ?: "assets/images/athina-eshop-logo.png";
@@ -218,6 +219,9 @@ if ($bestSellerRes) {
 }
 
 $homepageSettings = app_homepage_load_settings($conn);
+$websiteContent = app_website_content_settings($conn);
+$homeHero = $websiteContent['home']['hero'] ?? app_website_content_defaults()['home']['hero'];
+$homeHeroButtonUrl = app_website_content_safe_href((string)($homeHero['button_url'] ?? 'shop.php'), 'shop.php');
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -241,14 +245,14 @@ $homepageSettings = app_homepage_load_settings($conn);
         <div class="hero-overlay"></div>
         <div class="hero-content">
             <div class="hero-copy hero-copy-desktop">
-                <h1 class="hero-title" data-translate="heroTitle">
-                    Soft Handmade Crochet Treasures
+                <h1 class="hero-title"<?= app_translate_text_attrs((string)$homeHero['title_en'], (string)$homeHero['title_gr']) ?>>
+                    <?= app_h((string)$homeHero['title_en']) ?>
                 </h1>
-                <p class="hero-subtitle" data-translate="heroSubtitle">
-                    Discover cozy plushies, thoughtful gifts, and charming crochet creations made with love by Athina.
+                <p class="hero-subtitle"<?= app_translate_text_attrs((string)$homeHero['subtitle_en'], (string)$homeHero['subtitle_gr']) ?>>
+                    <?= app_h((string)$homeHero['subtitle_en']) ?>
                 </p>
-                <a href="shop.php" class="cta-button hero-cta-button">
-                    <span data-translate="shopNow">Shop Now</span>
+                <a href="<?= app_h($homeHeroButtonUrl) ?>" class="cta-button hero-cta-button">
+                    <span<?= app_translate_text_attrs((string)$homeHero['button_en'], (string)$homeHero['button_gr']) ?>><?= app_h((string)$homeHero['button_en']) ?></span>
                 </a>
             </div>
         </div>
@@ -257,14 +261,14 @@ $homepageSettings = app_homepage_load_settings($conn);
     <section class="hero-mobile-copy-section" aria-label="Homepage introduction">
         <div class="container">
             <div class="hero-copy hero-copy-mobile">
-                <h1 class="hero-title" data-translate="heroTitle">
-                    Soft Handmade Crochet Treasures
+                <h1 class="hero-title"<?= app_translate_text_attrs((string)$homeHero['title_en'], (string)$homeHero['title_gr']) ?>>
+                    <?= app_h((string)$homeHero['title_en']) ?>
                 </h1>
-                <p class="hero-subtitle" data-translate="heroSubtitle">
-                    Discover cozy plushies, thoughtful gifts, and charming crochet creations made with love by Athina.
+                <p class="hero-subtitle"<?= app_translate_text_attrs((string)$homeHero['subtitle_en'], (string)$homeHero['subtitle_gr']) ?>>
+                    <?= app_h((string)$homeHero['subtitle_en']) ?>
                 </p>
-                <a href="shop.php" class="cta-button hero-cta-button">
-                    <span data-translate="shopNow">Shop Now</span>
+                <a href="<?= app_h($homeHeroButtonUrl) ?>" class="cta-button hero-cta-button">
+                    <span<?= app_translate_text_attrs((string)$homeHero['button_en'], (string)$homeHero['button_gr']) ?>><?= app_h((string)$homeHero['button_en']) ?></span>
                 </a>
             </div>
         </div>

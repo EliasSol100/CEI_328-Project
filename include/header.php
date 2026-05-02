@@ -6,10 +6,34 @@ if (session_status() === PHP_SESSION_NONE) {
 require_once __DIR__ . '/security.php';
 require_once __DIR__ . '/homepage_customization.php';
 require_once __DIR__ . '/translation_helpers.php';
+require_once __DIR__ . '/cart_persistence.php';
 
 $isLoggedIn = isset($_SESSION["user"]);
+if ($isLoggedIn && isset($conn) && $conn instanceof mysqli) {
+    app_cart_restore_for_current_user($conn);
+}
 $wishlistCount = 0;
-if (isset($_SESSION["wishlist_count"])) {
+if ($isLoggedIn && isset($conn) && $conn instanceof mysqli) {
+    $sessionUser = $_SESSION['user'] ?? [];
+    $headerUserId = is_array($sessionUser) ? (int)($sessionUser['id'] ?? $sessionUser['userID'] ?? 0) : (int)($_SESSION['user_id'] ?? 0);
+    if ($headerUserId > 0) {
+        $wishlistStmt = $conn->prepare("
+            SELECT COUNT(*) AS c
+            FROM wishlist_items wi
+            JOIN wishlists w ON w.wishlistID = wi.wishlistID
+            WHERE w.userID = ?
+        ");
+        if ($wishlistStmt) {
+            $wishlistStmt->bind_param('i', $headerUserId);
+            $wishlistStmt->execute();
+            $wishlistRes = $wishlistStmt->get_result();
+            $wishlistRow = $wishlistRes ? $wishlistRes->fetch_assoc() : null;
+            $wishlistCount = (int)($wishlistRow['c'] ?? 0);
+            $_SESSION['wishlist_count'] = $wishlistCount;
+            $wishlistStmt->close();
+        }
+    }
+} elseif (isset($_SESSION["wishlist_count"])) {
     $wishlistCount = (int)$_SESSION["wishlist_count"];
 } elseif (isset($_SESSION["wishlist"]) && is_array($_SESSION["wishlist"])) {
     $wishlistCount = count($_SESSION["wishlist"]);

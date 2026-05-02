@@ -4,8 +4,10 @@ require_once "authentication/database.php";
 require_once "include/security.php";
 require_once "include/translation_helpers.php";
 require_once "include/coupon_helpers.php";
+require_once "include/cart_persistence.php";
 
 app_coupon_ensure_schema($conn);
+app_cart_restore_for_current_user($conn);
 
 function getCartLineAvailableStock(mysqli $conn, array $item): int {
     $productId = (int)($item['product']['id'] ?? $item['productID'] ?? 0);
@@ -78,6 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ];
             }
         }
+        app_cart_persist_for_current_user($conn);
         header('Location: cart.php');
         exit();
     }
@@ -88,6 +91,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'type' => 'success',
             'message' => 'Coupon removed.'
         ];
+        app_cart_persist_for_current_user($conn);
         header('Location: cart.php');
         exit();
     }
@@ -96,6 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         array_splice($_SESSION['cart']['items'], $idx, 1);
         $_SESSION['cart']['totals']     = cartRecalc($_SESSION['cart']['items']);
         $_SESSION['cart']['updated_at'] = gmdate('c');
+        app_cart_persist_for_current_user($conn);
     }
 
     if ($action === 'update_qty' && $idx >= 0 && isset($_SESSION['cart']['items'][$idx])) {
@@ -125,6 +130,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['cart']['items'][$idx]['pricing']['lineTotal'] = round($unit * $qty, 2);
         $_SESSION['cart']['totals']     = cartRecalc($_SESSION['cart']['items']);
         $_SESSION['cart']['updated_at'] = gmdate('c');
+        app_cart_persist_for_current_user($conn);
     }
 
     header('Location: cart.php');

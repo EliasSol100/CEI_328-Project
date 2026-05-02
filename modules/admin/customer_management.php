@@ -6,72 +6,236 @@ require_once __DIR__ . '/../../include/security.php';
 $current_page = 'customer_management';
 $flash = '';
 
+function cm_clean_text(string $value): string
+{
+    return trim(preg_replace('/\s+/', ' ', $value) ?? '');
+}
+
+function cm_valid_letters(string $value): bool
+{
+    return $value !== '' && (bool)preg_match('/^[\p{L} ]+$/u', $value);
+}
+
+function cm_valid_address(string $value): bool
+{
+    return $value !== '' && (bool)preg_match('/^[\p{L}\p{N} ]+$/u', $value);
+}
+
+function cm_valid_postcode(string $value): bool
+{
+    return $value !== '' && (bool)preg_match('/^\d{3,10}$/', $value);
+}
+
+function cm_valid_phone(string $value): bool
+{
+    if ($value === '') {
+        return true;
+    }
+    return (bool)preg_match('/^\+?\d{7,15}$/', $value);
+}
+
+function cm_valid_dob(string $value): bool
+{
+    $date = DateTime::createFromFormat('!Y-m-d', $value);
+    $errors = DateTime::getLastErrors();
+    $hasErrors = is_array($errors) && (($errors['warning_count'] ?? 0) > 0 || ($errors['error_count'] ?? 0) > 0);
+    if (!$date || $hasErrors || $date->format('Y-m-d') !== $value) {
+        return false;
+    }
+    $today = new DateTime('today');
+    return $date <= $today && (int)$date->format('Y') >= 1900;
+}
+
+function cm_split_name(string $fullName): array
+{
+    $parts = preg_split('/\s+/', cm_clean_text($fullName), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    return [
+        $parts[0] ?? '',
+        count($parts) > 2 ? $parts[1] : null,
+        $parts[count($parts) - 1] ?? '',
+        count($parts),
+    ];
+}
+
+function cm_sync_default_address(mysqli $conn, int $userId, string $country, string $city, string $address, string $postcode): void
+{
+    if ($userId <= 0 || $country === '' || $city === '' || $address === '' || $postcode === '') {
+        return;
+    }
+
+    $check = mysqli_prepare($conn, "SELECT id FROM user_addresses WHERE user_id = ? AND is_default = 1 LIMIT 1");
+    $addressId = 0;
+    if ($check) {
+        mysqli_stmt_bind_param($check, 'i', $userId);
+        mysqli_stmt_execute($check);
+        $res = mysqli_stmt_get_result($check);
+        $row = $res ? mysqli_fetch_assoc($res) : null;
+        $addressId = (int)($row['id'] ?? 0);
+        mysqli_stmt_close($check);
+    }
+
+    if ($addressId > 0) {
+        $stmt = mysqli_prepare($conn, "UPDATE user_addresses SET label = 'Home', country = ?, city = ?, address = ?, postcode = ?, is_default = 1 WHERE id = ?");
+        if ($stmt) {
+            mysqli_stmt_bind_param($stmt, 'ssssi', $country, $city, $address, $postcode, $addressId);
+            mysqli_stmt_execute($stmt);
+            mysqli_stmt_close($stmt);
+        }
+        return;
+    }
+
+    $stmt = mysqli_prepare($conn, "INSERT INTO user_addresses (user_id, label, country, city, address, postcode, is_default) VALUES (?, 'Home', ?, ?, ?, ?, 1)");
+    if ($stmt) {
+        mysqli_stmt_bind_param($stmt, 'issss', $userId, $country, $city, $address, $postcode);
+        mysqli_stmt_execute($stmt);
+        mysqli_stmt_close($stmt);
+    }
+}
+
+function cm_email_or_username_exists(mysqli $conn, string $email, string $username, int $ignoreUserId = 0): bool
+{
+    $stmt = mysqli_prepare($conn, "SELECT userID FROM users WHERE (LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?)) AND userID <> ? LIMIT 1");
+    if (!$stmt) {
+        return false;
+    }
+    mysqli_stmt_bind_param($stmt, 'ssi', $email, $username, $ignoreUserId);
+    mysqli_stmt_execute($stmt);
+    $res = mysqli_stmt_get_result($stmt);
+    $exists = $res && mysqli_num_rows($res) > 0;
+    mysqli_stmt_close($stmt);
+    return $exists;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $action = $_POST['action'] ?? '';
 
     if ($action === 'add_user') {
-        $fullName    = trim($_POST['full_name'] ?? '');
-        $email       = trim($_POST['email'] ?? '');
+        $fullName    = cm_clean_text((string)($_POST['full_name'] ?? ''));
+        $username    = cm_clean_text((string)($_POST['username'] ?? ''));
+        $email       = trim((string)($_POST['email'] ?? ''));
         $passwordRaw = $_POST['password'] ?? '';
         $role        = $_POST['role'] ?? 'user';
         $isVerified  = isset($_POST['is_verified']) ? (int)$_POST['is_verified'] : 0;
-        $phone       = trim($_POST['phone'] ?? '');
-        $country     = trim($_POST['country'] ?? '');
-        $city        = trim($_POST['city'] ?? '');
+        $phone       = cm_clean_text((string)($_POST['phone'] ?? ''));
+        $country     = cm_clean_text((string)($_POST['country'] ?? ''));
+        $city        = cm_clean_text((string)($_POST['city'] ?? ''));
+        $address     = cm_clean_text((string)($_POST['address'] ?? ''));
+        $postcode    = cm_clean_text((string)($_POST['postcode'] ?? ''));
+        $dob         = trim((string)($_POST['dob'] ?? ''));
+        [$firstName, $middleName, $lastName, $nameParts] = cm_split_name($fullName);
 
-        if ($fullName !== '' && $email !== '' && $passwordRaw !== '') {
+        if ($fullName === '' || $email === '' || $passwordRaw === '' || $username === '' || $country === '' || $city === '' || $address === '' || $postcode === '' || $dob === '') {
+            $flash = 'err:Full profile, address and password fields are required.';
+        } elseif ($nameParts < 2 || $nameParts > 3 || !cm_valid_letters($fullName)) {
+            $flash = 'err:Full name must contain 2 or 3 words and letters only.';
+        } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $flash = 'err:Enter a valid email address.';
+        } elseif (!function_exists('app_is_valid_username') || !app_is_valid_username($username)) {
+            $flash = 'err:Username can only contain letters, numbers, underscores, dots or dashes.';
+        } elseif (cm_email_or_username_exists($conn, $email, $username)) {
+            $flash = 'err:Email or username already exists.';
+        } elseif (!cm_valid_phone($phone)) {
+            $flash = 'err:Phone must contain only digits and an optional leading plus.';
+        } elseif (!cm_valid_letters($city)) {
+            $flash = 'err:City must contain letters only.';
+        } elseif (!cm_valid_address($address)) {
+            $flash = 'err:Address must contain letters, numbers and spaces only.';
+        } elseif (!cm_valid_postcode($postcode)) {
+            $flash = 'err:Postal code must contain numbers only.';
+        } elseif (!cm_valid_dob($dob)) {
+            $flash = 'err:Date of birth is required.';
+        } else {
             $passwordHash = password_hash($passwordRaw, PASSWORD_DEFAULT);
 
             $stmt = mysqli_prepare(
                 $conn,
-                "INSERT INTO users (full_name, email, password, role, is_verified, phone, country, city)
-                 VALUES (?,?,?,?,?,?,?,?)"
+                "INSERT INTO users (full_name, first_name, middle_name, last_name, username, email, password, role, is_verified, phone, country, city, address, postcode, dob, profile_complete, status)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'active')"
             );
             mysqli_stmt_bind_param(
                 $stmt,
-                'sssissss',
+                'ssssssssissssss',
                 $fullName,
+                $firstName,
+                $middleName,
+                $lastName,
+                $username,
                 $email,
                 $passwordHash,
                 $role,
                 $isVerified,
                 $phone,
                 $country,
-                $city
+                $city,
+                $address,
+                $postcode,
+                $dob
             );
-            mysqli_stmt_execute($stmt);
-            $flash = 'ok:Customer account created.';
-        } else {
-            $flash = 'err:Full name, email and password are required.';
+            if (mysqli_stmt_execute($stmt)) {
+                $newUserId = (int)mysqli_insert_id($conn);
+                cm_sync_default_address($conn, $newUserId, $country, $city, $address, $postcode);
+                $flash = 'ok:Customer account created.';
+            } else {
+                $flash = 'err:Could not create the customer account.';
+            }
         }
     }
 
     if ($action === 'edit_user') {
         $userID      = (int)($_POST['userID'] ?? 0);
-        $fullName    = trim($_POST['full_name'] ?? '');
-        $email       = trim($_POST['email'] ?? '');
+        $fullName    = cm_clean_text((string)($_POST['full_name'] ?? ''));
+        $username    = cm_clean_text((string)($_POST['username'] ?? ''));
+        $email       = trim((string)($_POST['email'] ?? ''));
         $passwordRaw = $_POST['password'] ?? '';
         $role        = $_POST['role'] ?? 'user';
         $isVerified  = isset($_POST['is_verified']) ? (int)$_POST['is_verified'] : 0;
-        $phone       = trim($_POST['phone'] ?? '');
-        $country     = trim($_POST['country'] ?? '');
-        $city        = trim($_POST['city'] ?? '');
+        $phone       = cm_clean_text((string)($_POST['phone'] ?? ''));
+        $country     = cm_clean_text((string)($_POST['country'] ?? ''));
+        $city        = cm_clean_text((string)($_POST['city'] ?? ''));
+        $address     = cm_clean_text((string)($_POST['address'] ?? ''));
+        $postcode    = cm_clean_text((string)($_POST['postcode'] ?? ''));
+        $dob         = trim((string)($_POST['dob'] ?? ''));
+        [$firstName, $middleName, $lastName, $nameParts] = cm_split_name($fullName);
 
-        if ($userID && $fullName !== '' && $email !== '') {
+        if (!$userID || $fullName === '' || $email === '' || $username === '' || $country === '' || $city === '' || $address === '' || $postcode === '' || $dob === '') {
+            $flash = 'err:Full profile and address fields are required.';
+        } elseif ($nameParts < 2 || $nameParts > 3 || !cm_valid_letters($fullName)) {
+            $flash = 'err:Full name must contain 2 or 3 words and letters only.';
+        } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $flash = 'err:Enter a valid email address.';
+        } elseif (!function_exists('app_is_valid_username') || !app_is_valid_username($username)) {
+            $flash = 'err:Username can only contain letters, numbers, underscores, dots or dashes.';
+        } elseif (cm_email_or_username_exists($conn, $email, $username, $userID)) {
+            $flash = 'err:Email or username already exists.';
+        } elseif (!cm_valid_phone($phone)) {
+            $flash = 'err:Phone must contain only digits and an optional leading plus.';
+        } elseif (!cm_valid_letters($city)) {
+            $flash = 'err:City must contain letters only.';
+        } elseif (!cm_valid_address($address)) {
+            $flash = 'err:Address must contain letters, numbers and spaces only.';
+        } elseif (!cm_valid_postcode($postcode)) {
+            $flash = 'err:Postal code must contain numbers only.';
+        } elseif (!cm_valid_dob($dob)) {
+            $flash = 'err:Date of birth is required.';
+        } else {
             if ($passwordRaw !== '') {
 
                 $passwordHash = password_hash($passwordRaw, PASSWORD_DEFAULT);
                 $stmt = mysqli_prepare(
                     $conn,
                     "UPDATE users
-                     SET full_name=?, email=?, password=?, role=?, is_verified=?, phone=?, country=?, city=?
+                     SET full_name=?, first_name=?, middle_name=?, last_name=?, username=?, email=?, password=?, role=?, is_verified=?, phone=?, country=?, city=?, address=?, postcode=?, dob=?, profile_complete=1, status='active'
                      WHERE userID=?"
                 );
                 mysqli_stmt_bind_param(
                     $stmt,
-                    'sssissssi',
+                    'ssssssssissssssi',
                     $fullName,
+                    $firstName,
+                    $middleName,
+                    $lastName,
+                    $username,
                     $email,
                     $passwordHash,
                     $role,
@@ -79,6 +243,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $phone,
                     $country,
                     $city,
+                    $address,
+                    $postcode,
+                    $dob,
                     $userID
                 );
             } else {
@@ -86,27 +253,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt = mysqli_prepare(
                     $conn,
                     "UPDATE users
-                     SET full_name=?, email=?, role=?, is_verified=?, phone=?, country=?, city=?
+                     SET full_name=?, first_name=?, middle_name=?, last_name=?, username=?, email=?, role=?, is_verified=?, phone=?, country=?, city=?, address=?, postcode=?, dob=?, profile_complete=1, status='active'
                      WHERE userID=?"
                 );
                 mysqli_stmt_bind_param(
                     $stmt,
-                    'sssisssi',
+                    'sssssssissssssi',
                     $fullName,
+                    $firstName,
+                    $middleName,
+                    $lastName,
+                    $username,
                     $email,
                     $role,
                     $isVerified,
                     $phone,
                     $country,
                     $city,
+                    $address,
+                    $postcode,
+                    $dob,
                     $userID
                 );
             }
 
-            mysqli_stmt_execute($stmt);
-            $flash = 'ok:Customer account updated.';
-        } else {
-            $flash = 'err:Full name and email are required.';
+            if (mysqli_stmt_execute($stmt)) {
+                cm_sync_default_address($conn, $userID, $country, $city, $address, $postcode);
+                $flash = 'ok:Customer account updated.';
+            } else {
+                $flash = 'err:Could not update the customer account.';
+            }
         }
     }
 
@@ -181,7 +357,7 @@ if (!in_array($roleFilter, $allowedRoleFilters, true)) {
 
 $customers = [];
 $customersSql = "
-    SELECT userID, full_name, email, username, role, is_verified, phone, country, city
+    SELECT userID, full_name, email, username, role, is_verified, phone, country, city, address, postcode, dob, profile_complete
     FROM users
 ";
 $conditions = [];
@@ -387,6 +563,7 @@ if (isset($_GET['edit'])) {
                       </a>
                       <form method="POST"
                             onsubmit="return confirmDelete('Delete this customer account?')">
+                        <?= app_csrf_input() ?>
                         <input type="hidden" name="action" value="delete_user">
                         <input type="hidden" name="userID" value="<?= (int)$c['userID'] ?>">
                         <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
@@ -416,6 +593,7 @@ if (isset($_GET['edit'])) {
     <p class="modal-sub">Create a new customer login for the storefront.</p>
 
     <form method="POST" data-ignore-unsaved-warning>
+      <?= app_csrf_input() ?>
       <input type="hidden" name="action" value="add_user">
       <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
       <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
@@ -424,11 +602,22 @@ if (isset($_GET['edit'])) {
       <div class="form-grid-2">
         <div class="form-group">
           <label class="form-label">Full Name *</label>
-          <input type="text" name="full_name" class="form-input" required>
+          <input type="text" name="full_name" class="form-input" required pattern="[\p{L} ]+" title="Use letters and spaces only">
         </div>
         <div class="form-group">
           <label class="form-label">Email *</label>
           <input type="email" name="email" class="form-input" required>
+        </div>
+      </div>
+
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label class="form-label">Username *</label>
+          <input type="text" name="username" class="form-input" required pattern="[A-Za-z0-9._-]{3,50}" title="Use English letters, numbers, dots, dashes or underscores">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Date of Birth *</label>
+          <input type="date" name="dob" class="form-input" required>
         </div>
       </div>
 
@@ -450,15 +639,26 @@ if (isset($_GET['edit'])) {
       <div class="form-grid-3">
         <div class="form-group">
           <label class="form-label">Phone</label>
-          <input type="text" name="phone" class="form-input">
+          <input type="tel" name="phone" class="form-input" inputmode="tel" pattern="\+?\d{7,15}" title="Use digits only, with an optional leading plus">
         </div>
         <div class="form-group">
-          <label class="form-label">Country</label>
-          <input type="text" name="country" class="form-input">
+          <label class="form-label">Country *</label>
+          <input type="text" name="country" class="form-input" required>
         </div>
         <div class="form-group">
-          <label class="form-label">City</label>
-          <input type="text" name="city" class="form-input">
+          <label class="form-label">City *</label>
+          <input type="text" name="city" class="form-input" required pattern="[\p{L} ]+" title="Use letters and spaces only">
+        </div>
+      </div>
+
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label class="form-label">Address *</label>
+          <input type="text" name="address" class="form-input" required pattern="[\p{L}\p{N} ]+" title="Use letters, numbers and spaces only">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Postal Code *</label>
+          <input type="text" name="postcode" class="form-input" required inputmode="numeric" pattern="\d{3,10}" title="Use numbers only">
         </div>
       </div>
 
@@ -485,6 +685,7 @@ if (isset($_GET['edit'])) {
     <p class="modal-sub">Update the details for this customer.</p>
 
     <form method="POST" data-ignore-unsaved-warning>
+      <?= app_csrf_input() ?>
       <input type="hidden" name="action" value="edit_user">
       <input type="hidden" name="userID" value="<?= (int)$editUser['userID'] ?>">
       <input type="hidden" name="q" value="<?= htmlspecialchars($searchTerm) ?>">
@@ -494,13 +695,25 @@ if (isset($_GET['edit'])) {
       <div class="form-grid-2">
         <div class="form-group">
           <label class="form-label">Full Name *</label>
-          <input type="text" name="full_name" class="form-input" required
+          <input type="text" name="full_name" class="form-input" required pattern="[\p{L} ]+" title="Use letters and spaces only"
                  value="<?= htmlspecialchars($editUser['full_name'] ?? '') ?>">
         </div>
         <div class="form-group">
           <label class="form-label">Email *</label>
           <input type="email" name="email" class="form-input" required
                  value="<?= htmlspecialchars($editUser['email'] ?? '') ?>">
+        </div>
+      </div>
+
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label class="form-label">Username *</label>
+          <input type="text" name="username" class="form-input" required pattern="[A-Za-z0-9._-]{3,50}" title="Use English letters, numbers, dots, dashes or underscores"
+                 value="<?= htmlspecialchars($editUser['username'] ?? '') ?>">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Date of Birth *</label>
+          <input type="date" name="dob" class="form-input" required value="<?= htmlspecialchars((string)($editUser['dob'] ?? '')) ?>">
         </div>
       </div>
 
@@ -522,18 +735,31 @@ if (isset($_GET['edit'])) {
       <div class="form-grid-3">
         <div class="form-group">
           <label class="form-label">Phone</label>
-          <input type="text" name="phone" class="form-input"
+          <input type="tel" name="phone" class="form-input" inputmode="tel" pattern="\+?\d{7,15}" title="Use digits only, with an optional leading plus"
                  value="<?= htmlspecialchars($editUser['phone'] ?? '') ?>">
         </div>
         <div class="form-group">
-          <label class="form-label">Country</label>
-          <input type="text" name="country" class="form-input"
+          <label class="form-label">Country *</label>
+          <input type="text" name="country" class="form-input" required
                  value="<?= htmlspecialchars($editUser['country'] ?? '') ?>">
         </div>
         <div class="form-group">
-          <label class="form-label">City</label>
-          <input type="text" name="city" class="form-input"
+          <label class="form-label">City *</label>
+          <input type="text" name="city" class="form-input" required pattern="[\p{L} ]+" title="Use letters and spaces only"
                  value="<?= htmlspecialchars($editUser['city'] ?? '') ?>">
+        </div>
+      </div>
+
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label class="form-label">Address *</label>
+          <input type="text" name="address" class="form-input" required pattern="[\p{L}\p{N} ]+" title="Use letters, numbers and spaces only"
+                 value="<?= htmlspecialchars($editUser['address'] ?? '') ?>">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Postal Code *</label>
+          <input type="text" name="postcode" class="form-input" required inputmode="numeric" pattern="\d{3,10}" title="Use numbers only"
+                 value="<?= htmlspecialchars($editUser['postcode'] ?? '') ?>">
         </div>
       </div>
 
@@ -650,4 +876,3 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 </body>
 </html>
-

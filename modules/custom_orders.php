@@ -33,6 +33,130 @@ function getCustomOrderStatusLabels(): array
     ];
 }
 
+function normalizeCustomOrderAccessCode(string $code): string
+{
+    $code = strtoupper(trim($code));
+    $code = preg_replace('/[^A-Z0-9]/', '', $code);
+    return $code !== '' ? $code : '';
+}
+
+function generateCustomOrderAccessCode(): string
+{
+    return 'CO' . strtoupper(substr(bin2hex(random_bytes(4)), 0, 8));
+}
+
+function customOrderNormalizeMoneyInput(string $value): array
+{
+    $value = trim(str_replace(',', '.', $value));
+    preg_match_all('/\d+(?:\.\d{1,2})?/', $value, $matches);
+    $numbers = array_map('floatval', $matches[0] ?? []);
+    $numbers = array_values(array_filter($numbers, static fn(float $n): bool => $n > 0));
+    if (empty($numbers)) {
+        return [0.0, null];
+    }
+
+    $min = round(min($numbers), 2);
+    $max = count($numbers) > 1 ? round(max($numbers), 2) : null;
+    if ($max !== null && abs($max - $min) < 0.009) {
+        $max = null;
+    }
+    return [$min, $max];
+}
+
+function customOrderPriceLabel(array $order): string
+{
+    $min = (float)($order['agreedPrice'] ?? 0);
+    $max = isset($order['agreedPriceMax']) ? (float)$order['agreedPriceMax'] : 0.0;
+    if ($min <= 0) {
+        return '-';
+    }
+    if ($max > $min) {
+        return 'EUR ' . number_format($min, 2) . ' - EUR ' . number_format($max, 2);
+    }
+    return 'EUR ' . number_format($min, 2);
+}
+
+function customOrderTextLinesFromStructuredFields(array $order): array
+{
+    $map = [
+        'ideaTitle' => 'Idea title',
+        'productType' => 'Product type',
+        'preferredSize' => 'Preferred size',
+        'preferredColours' => 'Preferred colours',
+    ];
+    $lines = [];
+    foreach ($map as $field => $label) {
+        $value = trim((string)($order[$field] ?? ''));
+        if ($value !== '') {
+            $lines[] = $label . ': ' . $value;
+        }
+    }
+
+    $price = customOrderPriceLabel($order);
+    if ($price !== '-') {
+        $lines[] = 'Agreed price: ' . $price;
+    }
+
+    $deadline = trim((string)($order['deadline'] ?? ''));
+    if ($deadline !== '') {
+        $lines[] = 'Needed by: ' . $deadline;
+    }
+
+    $sizePriceOptions = trim((string)($order['sizePriceOptions'] ?? ''));
+    if ($sizePriceOptions !== '') {
+        $lines[] = "Size price options:\n" . $sizePriceOptions;
+    }
+
+    return $lines;
+}
+
+function customOrderBuildProductDescription(array $order): string
+{
+    $lines = customOrderTextLinesFromStructuredFields($order);
+    $description = trim((string)($order['requestDescription'] ?? ''));
+    if ($description !== '') {
+        $lines[] = "Request details:\n" . $description;
+    }
+    return trim(implode("\n\n", $lines));
+}
+
+function customOrderParseSizePriceOptions(string $value): array
+{
+    $prices = [];
+    $sizes = [];
+    $chunks = preg_split('/\r\n|\r|\n|;/', $value);
+    foreach ($chunks ?: [] as $chunk) {
+        $chunk = trim((string)$chunk);
+        if ($chunk === '') {
+            continue;
+        }
+        if (!preg_match('/^(.+?)(?:=|:|-)\s*(?:EUR|€)?\s*(\d+(?:[.,]\d{1,2})?)$/i', $chunk, $match)) {
+            continue;
+        }
+        $size = trim((string)$match[1]);
+        $price = round((float)str_replace(',', '.', (string)$match[2]), 2);
+        if ($size === '' || $price <= 0) {
+            continue;
+        }
+        $sizes[] = $size;
+        $prices[$size] = $price;
+    }
+    return ['sizes' => array_values(array_unique($sizes)), 'prices' => $prices];
+}
+
+function customOrderSplitPreferredSizes(string $value): array
+{
+    $parts = preg_split('/,|;|\r\n|\r|\n/', $value);
+    $sizes = [];
+    foreach ($parts ?: [] as $part) {
+        $part = trim((string)$part);
+        if ($part !== '') {
+            $sizes[] = $part;
+        }
+    }
+    return array_values(array_unique($sizes));
+}
+
 function createCustomOrderRequest($conn, $userId, $email, $requestDescription, $options = [])
 {
     if (!$userId || $userId <= 0) {
@@ -53,8 +177,9 @@ function createCustomOrderRequest($conn, $userId, $email, $requestDescription, $
     $stmt = $conn->prepare("
         INSERT INTO custom_orders (
             userID, email, requestDescription, status, expertNotes, aiWritingAcknowledgeFlag,
-            customerName, photoReferencePath, access_token, token_expires_at, created_at
-        ) VALUES (?, ?, ?, 'pending', ?, 0, ?, ?, ?, ?, NOW())
+            customerName, ideaTitle, productType, preferredSize, preferredColours,
+            deadline, photoReferencePath, sourceChannel, access_token, token_expires_at, created_at
+        ) VALUES (?, ?, ?, 'pending', ?, 0, ?, ?, ?, ?, ?, ?, ?, 'website', ?, ?, NOW())
     ");
     if (!$stmt) {
         throw new Exception('Failed to prepare insert: ' . $conn->error);
@@ -63,16 +188,31 @@ function createCustomOrderRequest($conn, $userId, $email, $requestDescription, $
     $expertNotes = $options['special_instructions'] ?? null;
     $customerName = trim((string)($options['customer_name'] ?? ''));
     $customerName = $customerName !== '' ? $customerName : null;
+    $ideaTitle = trim((string)($options['idea_title'] ?? ''));
+    $ideaTitle = $ideaTitle !== '' ? $ideaTitle : null;
+    $productType = trim((string)($options['product_type'] ?? ''));
+    $productType = $productType !== '' ? $productType : null;
+    $preferredSize = trim((string)($options['preferred_size'] ?? ''));
+    $preferredSize = $preferredSize !== '' ? $preferredSize : null;
+    $preferredColours = trim((string)($options['preferred_colours'] ?? ''));
+    $preferredColours = $preferredColours !== '' ? $preferredColours : null;
+    $deadline = trim((string)($options['deadline'] ?? ''));
+    $deadline = $deadline !== '' ? $deadline : null;
     $photoReferencePath = trim((string)($options['photo_reference_path'] ?? ''));
     $photoReferencePath = $photoReferencePath !== '' ? $photoReferencePath : null;
 
     $stmt->bind_param(
-        'isssssss',
+        'issssssssssss',
         $userId,
         $email,
         $requestDescription,
         $expertNotes,
         $customerName,
+        $ideaTitle,
+        $productType,
+        $preferredSize,
+        $preferredColours,
+        $deadline,
         $photoReferencePath,
         $accessToken,
         $tokenExpiry
@@ -119,7 +259,26 @@ function updateCustomOrder($conn, $customOrderId, $updates)
     }
     $stmt->close();
 
-    $allowedFields = ['status', 'expertNotes', 'agreedPrice', 'deadline', 'customerName', 'email', 'requestDescription', 'accessCode'];
+    $allowedFields = [
+        'status',
+        'expertNotes',
+        'agreedPrice',
+        'agreedPriceMax',
+        'deadline',
+        'customerName',
+        'email',
+        'requestDescription',
+        'accessCode',
+        'ideaTitle',
+        'productType',
+        'preferredSize',
+        'preferredColours',
+        'sizePriceOptions',
+        'sourceOrderID',
+        'sourceOrderNumber',
+        'sourceProductID',
+        'linkedProductName',
+    ];
     $setParts = [];
     $params = [];
     $types = '';
@@ -134,9 +293,14 @@ function updateCustomOrder($conn, $customOrderId, $updates)
 
         $setParts[] = $field . ' = ?';
 
-        if ($field === 'agreedPrice') {
+        if (in_array($field, ['agreedPrice', 'agreedPriceMax'], true)) {
             $params[] = (float)$value;
             $types .= 'd';
+            continue;
+        }
+        if (in_array($field, ['sourceOrderID', 'sourceProductID'], true)) {
+            $params[] = (int)$value;
+            $types .= 'i';
             continue;
         }
 
@@ -513,7 +677,7 @@ function createCustomOrderOffer($conn, $customOrderId, $adminUserId, $price, $de
 
         $updateStmt = $conn->prepare("
             UPDATE custom_orders
-            SET agreedPrice = ?, deadline = ?, status = 'in_discussion'
+            SET agreedPrice = ?, deadline = ?, status = 'pending'
             WHERE customOrderID = ?
         ");
         if (!$updateStmt) {
@@ -582,7 +746,7 @@ function respondToCustomOrderOffer($conn, $customOrderId, $offerId, $customerUse
     }
 
     $newOfferStatus = $decision === 'accept' ? 'accepted' : 'declined';
-    $newOrderStatus = $decision === 'accept' ? 'accepted' : 'in_discussion';
+    $newOrderStatus = 'pending';
     $systemMessage = $decision === 'accept'
         ? 'Customer accepted the latest price offer.'
         : 'Customer declined the latest price offer.';
@@ -685,14 +849,21 @@ function ensureCustomOrdersTable($conn)
                 access_token VARCHAR(255) NULL,
                 token_expires_at DATETIME NULL,
                 customerName VARCHAR(255) NULL,
+                ideaTitle VARCHAR(255) NULL,
+                productType VARCHAR(120) NULL,
+                preferredSize VARCHAR(255) NULL,
+                preferredColours VARCHAR(255) NULL,
                 agreedPrice DOUBLE NULL,
+                agreedPriceMax DOUBLE NULL,
                 deadline DATE NULL,
                 accessCode VARCHAR(50) NULL,
+                sizePriceOptions TEXT NULL,
                 sourceOrderID INT NULL,
                 sourceOrderNumber VARCHAR(64) NULL,
                 sourceProductID INT NULL,
                 linkedProductName VARCHAR(255) NULL,
                 photoReferencePath VARCHAR(255) NULL,
+                sourceChannel VARCHAR(30) NOT NULL DEFAULT 'website',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 INDEX idx_custom_orders_userID (userID),
                 INDEX idx_custom_orders_status (status)
@@ -711,10 +882,17 @@ function ensureCustomOrdersTable($conn)
         'token_expires_at' => "ALTER TABLE custom_orders ADD COLUMN token_expires_at DATETIME NULL AFTER access_token",
         'created_at' => "ALTER TABLE custom_orders ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
         'customerName' => "ALTER TABLE custom_orders ADD COLUMN customerName VARCHAR(255) NULL AFTER aiWritingAcknowledgeFlag",
+        'ideaTitle' => "ALTER TABLE custom_orders ADD COLUMN ideaTitle VARCHAR(255) NULL AFTER customerName",
+        'productType' => "ALTER TABLE custom_orders ADD COLUMN productType VARCHAR(120) NULL AFTER ideaTitle",
+        'preferredSize' => "ALTER TABLE custom_orders ADD COLUMN preferredSize VARCHAR(255) NULL AFTER productType",
+        'preferredColours' => "ALTER TABLE custom_orders ADD COLUMN preferredColours VARCHAR(255) NULL AFTER preferredSize",
+        'agreedPriceMax' => "ALTER TABLE custom_orders ADD COLUMN agreedPriceMax DOUBLE NULL AFTER agreedPrice",
+        'sizePriceOptions' => "ALTER TABLE custom_orders ADD COLUMN sizePriceOptions TEXT NULL AFTER accessCode",
         'sourceOrderID' => "ALTER TABLE custom_orders ADD COLUMN sourceOrderID INT NULL AFTER accessCode",
         'sourceOrderNumber' => "ALTER TABLE custom_orders ADD COLUMN sourceOrderNumber VARCHAR(64) NULL AFTER sourceOrderID",
         'sourceProductID' => "ALTER TABLE custom_orders ADD COLUMN sourceProductID INT NULL AFTER sourceOrderNumber",
         'linkedProductName' => "ALTER TABLE custom_orders ADD COLUMN linkedProductName VARCHAR(255) NULL AFTER sourceProductID",
+        'sourceChannel' => "ALTER TABLE custom_orders ADD COLUMN sourceChannel VARCHAR(30) NOT NULL DEFAULT 'website' AFTER photoReferencePath",
     ];
 
     foreach ($columnChecks as $column => $sql) {
@@ -768,15 +946,9 @@ function storeCustomOrderReferencePhoto(array $file): string
         throw new InvalidArgumentException('Uploaded photo could not be verified.');
     }
 
-    $mimeType = (string)(mime_content_type($tmpPath) ?: '');
-    $allowed = [
-        'image/jpeg' => 'jpg',
-        'image/png' => 'jpg',
-        'image/webp' => 'jpg',
-        'image/gif' => 'jpg',
-    ];
-    if (!isset($allowed[$mimeType])) {
-        throw new InvalidArgumentException('Photo must be a JPG, PNG, WEBP, or GIF image.');
+    $mimeType = strtolower((string)(mime_content_type($tmpPath) ?: ''));
+    if ($mimeType === '' || strpos($mimeType, 'image/') !== 0) {
+        throw new InvalidArgumentException('Photo must be an image file.');
     }
 
     $maxBytes = 4 * 1024 * 1024;
@@ -791,10 +963,10 @@ function storeCustomOrderReferencePhoto(array $file): string
         throw new RuntimeException('Could not create the custom order upload folder.');
     }
 
-    $filename = 'custom_order_' . date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.jpg';
+    $filename = 'custom_order_' . date('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.webp';
     $targetPath = $targetDir . DIRECTORY_SEPARATOR . $filename;
-    if (!app_image_convert_file_to_jpeg($tmpPath, $targetPath, 1600, 1600, 84)) {
-        throw new RuntimeException('Could not convert the uploaded photo to JPG.');
+    if (!app_image_convert_file_to_webp($tmpPath, $targetPath, 1600, 1600, 84)) {
+        throw new RuntimeException('Could not convert the uploaded photo to WebP.');
     }
 
     return $relativeDir . $filename;
@@ -816,6 +988,53 @@ function deleteCustomOrderReferencePhoto(string $relativePath): void
     if (is_file($fullPath)) {
         @unlink($fullPath);
     }
+}
+
+function customOrderMarkCompletedForProduct(mysqli $conn, int $productId, int $orderId, string $orderNumber, ?int $userId, string $email, string $customerName, string $productName): int
+{
+    if ($productId <= 0 || $orderId <= 0) {
+        return 0;
+    }
+
+    ensureCustomOrdersTable($conn);
+
+    $email = normalizeCustomerEmail($email);
+    $customerName = trim($customerName);
+    $productName = trim($productName);
+    $hasUserId = $userId !== null && $userId > 0;
+
+    $sql = "
+        UPDATE custom_orders
+        SET
+            status = 'completed',
+            email = CASE WHEN TRIM(COALESCE(email, '')) = '' THEN ? ELSE email END,
+            customerName = CASE WHEN TRIM(COALESCE(customerName, '')) = '' THEN ? ELSE customerName END,
+            sourceOrderID = ?,
+            sourceOrderNumber = ?,
+            linkedProductName = CASE WHEN TRIM(COALESCE(linkedProductName, '')) = '' THEN ? ELSE linkedProductName END";
+    if ($hasUserId) {
+        $sql .= ",
+            userID = CASE WHEN userID IS NULL OR userID = 0 THEN ? ELSE userID END";
+    }
+    $sql .= "
+        WHERE sourceProductID = ?
+    ";
+
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        return 0;
+    }
+
+    if ($hasUserId) {
+        $stmt->bind_param('ssissii', $email, $customerName, $orderId, $orderNumber, $productName, $userId, $productId);
+    } else {
+        $stmt->bind_param('ssissi', $email, $customerName, $orderId, $orderNumber, $productName, $productId);
+    }
+    $stmt->execute();
+    $affected = max(0, (int)$stmt->affected_rows);
+    $stmt->close();
+
+    return $affected;
 }
 
 function logCustomOrderAction($conn, $customOrderId, $actionType, $message)
@@ -848,6 +1067,36 @@ function notifyAdminNewCustomOrder($conn, $customOrderId, $customerEmail, $descr
     );
 }
 
+function sendCustomOrderAcceptedEmail(mysqli $conn, int $customOrderId, string $accessLink, string $accessCode): bool
+{
+    $accessCode = normalizeCustomOrderAccessCode($accessCode);
+    $body =
+        "Hello,\n\n" .
+        "Athina accepted your custom order request and prepared a private checkout product for you.\n\n" .
+        "Open your private product here:\n" . $accessLink . "\n\n" .
+        ($accessCode !== '' ? "Access code: {$accessCode}\n\n" : '') .
+        "Enter the access code on the product page, review the private product, add it to cart, and complete checkout.\n\n" .
+        "Thank you,\nAthina E-Shop";
+
+    return sendCustomOrderCustomerEmail($conn, $customOrderId, 'Your custom order request was accepted', $body);
+}
+
+function sendCustomOrderDeclinedEmail(mysqli $conn, int $customOrderId, string $message): bool
+{
+    $message = trim($message);
+    if ($message === '') {
+        $message = 'Thank you for your idea. Unfortunately, Athina cannot accept this custom order request at this time.';
+    }
+
+    $body =
+        "Hello,\n\n" .
+        $message . "\n\n" .
+        "You can view the request here:\n" . customOrderCustomerUrl($customOrderId) . "\n\n" .
+        "Thank you,\nAthina E-Shop";
+
+    return sendCustomOrderCustomerEmail($conn, $customOrderId, "Custom order #{$customOrderId} update", $body);
+}
+
 function createAdminNotification($conn, $message)
 {
     static $tableChecked = false;
@@ -873,22 +1122,36 @@ function createAdminNotification($conn, $message)
     }
 }
 
-function customOrderCustomerUrl(int $customOrderId): string
+function customOrderFrontendUrl(string $path): string
 {
-    $path = 'custom_order.php?view=' . max(0, $customOrderId) . '#discussion';
-    if (function_exists('app_url')) {
-        return app_url($path);
+    $path = ltrim(str_replace('\\', '/', $path), '/');
+    $scheme = (!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off') ? 'https' : 'http';
+    $host = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
+    $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
+    if (strpos($script, '/modules/admin/') !== false) {
+        $projectBase = rtrim(str_replace('\\', '/', dirname(dirname(dirname($script)))), '/');
+    } elseif (strpos($script, '/modules/') !== false) {
+        $projectBase = rtrim(str_replace('\\', '/', dirname(dirname($script))), '/');
+    } else {
+        $projectBase = rtrim(str_replace('\\', '/', dirname($script)), '/');
     }
-    return '/' . ltrim($path, '/');
+    $projectBase = ($projectBase === '.' || $projectBase === '/') ? '' : $projectBase;
+    $urlPath = $projectBase . '/' . $path;
+
+    return $host !== '' ? ($scheme . '://' . $host . $urlPath) : $urlPath;
+}
+
+function customOrderCustomerUrl(int $customOrderId, string $fragment = 'discussion'): string
+{
+    $fragment = trim(preg_replace('/[^a-zA-Z0-9_-]/', '', $fragment));
+    $path = 'custom_order.php?view=' . max(0, $customOrderId) . ($fragment !== '' ? '#' . $fragment : '');
+    return customOrderFrontendUrl($path);
 }
 
 function customOrderAdminUrl(int $customOrderId): string
 {
     $path = 'modules/admin/custom_orders.php?view=' . max(0, $customOrderId);
-    if (function_exists('app_url')) {
-        return app_url($path);
-    }
-    return '/' . ltrim($path, '/');
+    return customOrderFrontendUrl($path);
 }
 
 function sendCustomOrderPlainEmail(string $toEmail, string $toName, string $subject, string $body): bool

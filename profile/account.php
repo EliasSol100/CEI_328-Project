@@ -3,8 +3,10 @@ session_start();
 
 require_once "../authentication/database.php";
 require_once "../include/security.php";
+require_once "../include/image_storage.php";
 require_once "../include/loyalty_program.php";
 require_once "../include/translation_helpers.php";
+require_once "../include/cart_persistence.php";
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
@@ -95,6 +97,38 @@ function formatLoyaltyRuleLabel(?string $rule): string {
         return "Loyalty activity";
     }
     return ucwords(str_replace("_", " ", $rule));
+}
+
+function accountCleanText(string $value): string {
+    return trim(preg_replace('/\s+/', ' ', $value) ?? '');
+}
+
+function accountValidLetters(string $value): bool {
+    return $value !== '' && (bool)preg_match('/^[\p{L} ]+$/u', $value);
+}
+
+function accountValidAddress(string $value): bool {
+    return $value !== '' && (bool)preg_match('/^[\p{L}\p{N} ]+$/u', $value);
+}
+
+function accountValidPostcode(string $value): bool {
+    return $value !== '' && (bool)preg_match('/^\d{3,10}$/', $value);
+}
+
+function accountValidateAddressFields(string $country, string $city, string $address, string $postcode): string {
+    if ($country === '' || $city === '' || $address === '' || $postcode === '') {
+        return 'Please fill in all address fields.';
+    }
+    if (!accountValidLetters($city)) {
+        return 'City must contain letters only.';
+    }
+    if (!accountValidAddress($address)) {
+        return 'Address must contain letters, numbers and spaces only.';
+    }
+    if (!accountValidPostcode($postcode)) {
+        return 'Postal code must contain numbers only.';
+    }
+    return '';
 }
 
 function &accountGetOrInitCart(): array {
@@ -223,7 +257,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                             pv.yarnType,
                             pv.colorID,
                             c.colorName,
-                            vs.quantityAvailable
+                            COALESCE(vs.quantityAvailable, p.inventory, 0) AS quantityAvailable
                         FROM order_items oi
                         INNER JOIN orders o ON o.orderID = oi.orderID
                         LEFT JOIN products p ON p.productID = oi.productID
@@ -361,6 +395,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                             if ($addedLineCount > 0) {
                                 $cart["totals"] = accountRecalcCartTotals($cart["items"]);
                                 $cart["updated_at"] = gmdate("c");
+                                app_cart_persist_for_current_user($conn);
                                 $successMessage = "Reorder added to your cart.";
                                 if ($skippedCount > 0) {
                                     $successMessage .= " {$skippedCount} item(s) were skipped due to availability changes.";
@@ -387,13 +422,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             } else {
                 $finfo = new finfo(FILEINFO_MIME_TYPE);
                 $mimeType = (string)($finfo->file((string)$file["tmp_name"]) ?: "");
-                $extensions = [
-                    "image/jpeg" => "jpg",
-                    "image/png" => "png",
-                    "image/gif" => "gif",
-                    "image/webp" => "webp",
-                ];
-                if (!isset($extensions[$mimeType]) || !app_allowed_image_mime($mimeType)) {
+                if (!app_allowed_image_mime($mimeType)) {
                     $errorMessage = "Only JPG, JPEG, PNG, GIF or WEBP files are allowed.";
                 } else {
                     $uploadDir = __DIR__ . "/../uploads/avatars";
@@ -401,10 +430,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         mkdir($uploadDir, 0775, true);
                     }
 
-                    $filename   = "user_" . $userId . "_" . time() . "." . $extensions[$mimeType];
+                    $filename   = "user_" . $userId . "_" . time() . ".webp";
                     $targetPath = $uploadDir . "/" . $filename;
 
-                    if (move_uploaded_file($file["tmp_name"], $targetPath)) {
+                    if (app_image_convert_file_to_webp((string)$file["tmp_name"], $targetPath, 800, 800, 82)) {
 
                         if (!empty($user["profile_image"])) {
                             $oldPath = $uploadDir . "/" . $user["profile_image"];
@@ -421,7 +450,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         $successMessage = "Profile picture updated.";
                         $user["profile_image"] = $filename;
                     } else {
-                        $errorMessage = "Could not save uploaded file.";
+                        $errorMessage = "Could not convert and save uploaded file.";
                     }
                 }
             }
@@ -431,14 +460,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     }
 
     if ($action === "add_address") {
-        $label       = trim($_POST["address_label"] ?? "");
-        $country     = trim($_POST["country"]  ?? "");
-        $city        = trim($_POST["city"]     ?? "");
-        $address     = trim($_POST["address"]  ?? "");
-        $postcode    = trim($_POST["postcode"] ?? "");
+        $label       = accountCleanText((string)($_POST["address_label"] ?? ""));
+        $country     = accountCleanText((string)($_POST["country"]  ?? ""));
+        $city        = accountCleanText((string)($_POST["city"]     ?? ""));
+        $address     = accountCleanText((string)($_POST["address"]  ?? ""));
+        $postcode    = accountCleanText((string)($_POST["postcode"] ?? ""));
         $makeDefault = isset($_POST["make_default"]) ? 1 : 0;
+        $addressError = accountValidateAddressFields($country, $city, $address, $postcode);
 
-        if ($country && $city && $address && $postcode) {
+        if ($addressError === '') {
             if ($makeDefault) {
                 accountResetDefaultAddresses($conn, $userId);
             }
@@ -469,7 +499,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             $successMessage = "Address added successfully.";
         } else {
-            $errorMessage = "Please fill in all address fields.";
+            $errorMessage = $addressError;
         }
 
         $activeTab = "addresses";
@@ -533,14 +563,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $stmt->close();
 
         if ($addressRow) {
-            $label       = trim($_POST["address_label"] ?? "");
-            $country     = trim($_POST["country"]  ?? "");
-            $city        = trim($_POST["city"]     ?? "");
-            $address     = trim($_POST["address"]  ?? "");
-            $postcode    = trim($_POST["postcode"] ?? "");
+            $label       = accountCleanText((string)($_POST["address_label"] ?? ""));
+            $country     = accountCleanText((string)($_POST["country"]  ?? ""));
+            $city        = accountCleanText((string)($_POST["city"]     ?? ""));
+            $address     = accountCleanText((string)($_POST["address"]  ?? ""));
+            $postcode    = accountCleanText((string)($_POST["postcode"] ?? ""));
             $makeDefault = isset($_POST["make_default"]) ? 1 : 0;
+            $addressError = accountValidateAddressFields($country, $city, $address, $postcode);
 
-            if ($country && $city && $address && $postcode) {
+            if ($addressError === '') {
                 $existingDefault = (int)$addressRow["is_default"];
                 $isDefaultNew    = $makeDefault ? 1 : $existingDefault;
 
@@ -585,7 +616,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                 $successMessage = "Address updated successfully.";
             } else {
-                $errorMessage = "Please fill in all address fields.";
+                $errorMessage = $addressError;
             }
         } else {
             $errorMessage = "Address not found.";
@@ -735,6 +766,21 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             }
 
             if (!$errorMessage && ($emailChanged || $phoneChanged)) {
+                $stmt = $conn->prepare("
+                    UPDATE users
+                    SET first_name = ?, last_name = ?, full_name = ?, username = ?
+                    WHERE userID = ?
+                ");
+                $stmt->bind_param("ssssi", $firstName, $lastName, $fullNameNew, $username, $userId);
+                $stmt->execute();
+                $stmt->close();
+
+                $user["first_name"] = $firstName;
+                $user["last_name"]  = $lastName;
+                $user["full_name"]  = $fullNameNew;
+                $user["username"]   = $username;
+                $_SESSION["user"]["full_name"] = $fullNameNew;
+
                 $code    = random_int(100000, 999999);
                 $expires = date("Y-m-d H:i:s", time() + 10 * 60);
 
@@ -800,6 +846,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
     }
 }
+
+$fullName = $user["full_name"] ?? "User";
+$parts = preg_split('/\s+/', trim($fullName));
+$first = !empty($parts[0]) ? strtoupper(substr($parts[0], 0, 1)) : '';
+$last = (count($parts) > 1) ? strtoupper(substr((string)end($parts), 0, 1)) : "";
+$initials = $first . $last;
+$GLOBALS['header_user_full_name'] = $fullName;
+$GLOBALS['header_user_role'] = $role;
+$GLOBALS['header_user_initials'] = $initials;
 
 $addresses = [];
 $addrStmt = $conn->prepare("SELECT * FROM user_addresses WHERE user_id = ? ORDER BY is_default DESC, created_at ASC");
@@ -1128,6 +1183,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                                     <?php endif; ?>
 
                                                     <form method="post" class="d-inline">
+                                                        <?= app_csrf_input() ?>
                                                         <input type="hidden" name="action" value="reorder_order">
                                                         <input type="hidden" name="order_id" value="<?= $orderId ?>">
                                                         <input type="hidden" name="reorder_token" value="<?= htmlspecialchars($_SESSION["account_reorder_token"]) ?>">
@@ -1270,6 +1326,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                                     This is the address you provided during registration.
                                                 </p>
                                                 <form method="post" class="mt-auto">
+                                                    <?= app_csrf_input() ?>
                                                     <input type="hidden" name="action" value="delete_home_address">
                                                     <button type="submit"
                                                             class="btn btn-outline-danger btn-sm">
@@ -1321,6 +1378,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                                         </button>
 
                                                         <form method="post">
+                                                            <?= app_csrf_input() ?>
                                                             <input type="hidden" name="action" value="set_default_address">
                                                             <input type="hidden" name="address_id" value="<?= (int)$addr["id"] ?>">
                                                             <?php if (!$addr["is_default"]): ?>
@@ -1340,6 +1398,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                                                         </form>
 
                                                         <form method="post">
+                                                            <?= app_csrf_input() ?>
                                                             <input type="hidden" name="action" value="delete_address">
                                                             <input type="hidden" name="address_id" value="<?= (int)$addr["id"] ?>">
                                                             <button type="submit"
@@ -1368,6 +1427,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                             <h4 class="mb-4" data-translate="settingsTitle">Account Settings</h4>
 
                             <form method="post" class="row g-3">
+                                <?= app_csrf_input() ?>
                                 <input type="hidden" name="action" value="update_settings">
 
                                 <div class="col-md-6">
@@ -1425,6 +1485,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
 <div class="modal fade" id="avatarModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <form class="modal-content" method="post" enctype="multipart/form-data">
+            <?= app_csrf_input() ?>
             <input type="hidden" name="action" value="update_avatar">
             <div class="modal-header">
                 <h5 class="modal-title" data-translate="avatarModalTitle">Change Profile Picture</h5>
@@ -1439,7 +1500,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                     <input type="file" name="profile_image" id="profile_image"
                            class="form-control" accept="image/*" required>
                     <small class="text-muted" data-translate="avatarModalNote">
-                        JPG, PNG, GIF or WEBP. Max size 2MB.
+                        JPG, PNG, GIF or WEBP. Uploaded images are converted to WebP automatically. Max size 2MB.
                     </small>
                 </div>
             </div>
@@ -1463,6 +1524,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
 <div class="modal fade" id="addressModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <form class="modal-content" method="post">
+            <?= app_csrf_input() ?>
             <input type="hidden" name="action" value="add_address">
             <div class="modal-header">
                 <h5 class="modal-title" data-translate="addressModalTitle">Add New Address</h5>
@@ -1485,15 +1547,15 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                 </div>
                 <div class="mb-3">
                     <label class="form-label" data-translate="addressCityLabel">City</label>
-                    <input type="text" name="city" class="form-control" required>
+                    <input type="text" name="city" class="form-control" required pattern="[\p{L} ]+" title="Use letters and spaces only">
                 </div>
                 <div class="mb-3">
                     <label class="form-label" data-translate="addressAddressLabel">Address</label>
-                    <input type="text" name="address" class="form-control" required>
+                    <input type="text" name="address" class="form-control" required pattern="[\p{L}\p{N} ]+" title="Use letters, numbers and spaces only">
                 </div>
                 <div class="mb-3">
                     <label class="form-label" data-translate="addressPostcodeLabel">Postal Code</label>
-                    <input type="text" name="postcode" class="form-control" required>
+                    <input type="text" name="postcode" class="form-control" required inputmode="numeric" pattern="\d{3,10}" title="Use numbers only">
                 </div>
                 <div class="mb-3">
                     <label class="form-label" data-translate="accountAddressLabelOptional">Address label (optional)</label>
@@ -1534,6 +1596,7 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
 <div class="modal fade" id="editAddressModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <form class="modal-content" method="post">
+            <?= app_csrf_input() ?>
             <input type="hidden" name="action" value="edit_address">
             <input type="hidden" name="address_id" id="edit_address_id">
             <div class="modal-header">
@@ -1552,15 +1615,15 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                 </div>
                 <div class="mb-3">
                     <label class="form-label" for="edit_address_city" data-translate="addressCityLabel">City</label>
-                    <input type="text" name="city" id="edit_address_city" class="form-control" required>
+                    <input type="text" name="city" id="edit_address_city" class="form-control" required pattern="[\p{L} ]+" title="Use letters and spaces only">
                 </div>
                 <div class="mb-3">
                     <label class="form-label" for="edit_address_address" data-translate="addressAddressLabel">Address</label>
-                    <input type="text" name="address" id="edit_address_address" class="form-control" required>
+                    <input type="text" name="address" id="edit_address_address" class="form-control" required pattern="[\p{L}\p{N} ]+" title="Use letters, numbers and spaces only">
                 </div>
                 <div class="mb-3">
                     <label class="form-label" for="edit_address_postcode" data-translate="addressPostcodeLabel">Postal Code</label>
-                    <input type="text" name="postcode" id="edit_address_postcode" class="form-control" required>
+                    <input type="text" name="postcode" id="edit_address_postcode" class="form-control" required inputmode="numeric" pattern="\d{3,10}" title="Use numbers only">
                 </div>
                 <div class="mb-3">
                     <label class="form-label" for="edit_address_label" data-translate="accountAddressLabelOptional">Address label (optional)</label>
@@ -1637,4 +1700,3 @@ document.addEventListener('DOMContentLoaded', function () {
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
-

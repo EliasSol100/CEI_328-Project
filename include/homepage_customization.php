@@ -446,7 +446,9 @@ if (!function_exists('app_homepage_expand_hero_asset')) {
             $writePath = $targetPath . '.tmp';
         }
 
-        app_homepage_write_gd_image_resource($canvas, $writePath, 'image/jpeg');
+        $targetExtension = strtolower((string)pathinfo($targetPath, PATHINFO_EXTENSION));
+        $outputMime = $targetExtension === 'webp' ? 'image/webp' : 'image/jpeg';
+        app_homepage_write_gd_image_resource($canvas, $writePath, $outputMime);
 
         if ($replaceOriginal) {
             @unlink($targetPath);
@@ -631,7 +633,7 @@ if (!function_exists('app_homepage_save_uploaded_asset')) {
             }
         }
 
-        $fileName = $baseName . '.jpg';
+        $fileName = $baseName . '.webp';
         $targetPath = $uploadDir . DIRECTORY_SEPARATOR . $fileName;
 
         $maxWidth = (int)$spec['width'];
@@ -641,12 +643,12 @@ if (!function_exists('app_homepage_save_uploaded_asset')) {
             $maxHeight = app_homepage_hero_canvas_height();
         }
 
-        if (!app_image_convert_file_to_jpeg($tmpName, $targetPath, $maxWidth, $maxHeight, 84)) {
-            throw new RuntimeException('Could not convert ' . $spec['label'] . ' to JPG.');
+        if (!app_image_convert_file_to_webp($tmpName, $targetPath, $maxWidth, $maxHeight, 84)) {
+            throw new RuntimeException('Could not convert ' . $spec['label'] . ' to WebP.');
         }
 
         if ($configKey === 'homepage_hero_image' && $width === app_homepage_hero_safe_width() && $height === app_homepage_hero_canvas_height()) {
-            app_homepage_expand_hero_asset($targetPath, $targetPath, 'image/jpeg', $width, $height);
+            app_homepage_expand_hero_asset($targetPath, $targetPath, 'image/webp', $width, $height);
         }
 
         return 'uploads/assets/images/homepage/' . $fileName;

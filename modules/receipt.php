@@ -1,7 +1,9 @@
 <?php
 session_start();
 require_once __DIR__ . "/../authentication/database.php";
+require_once __DIR__ . "/../include/security.php";
 require_once __DIR__ . "/../include/product_option_helpers.php";
+require_once __DIR__ . "/../include/order_tracking_helpers.php";
 
 if (!isset($conn) || !($conn instanceof mysqli)) {
     http_response_code(500);
@@ -10,6 +12,7 @@ if (!isset($conn) || !($conn instanceof mysqli)) {
 }
 
 app_product_options_ensure_schema($conn);
+app_order_tracking_ensure_schema($conn);
 
 function ensureOrderShippingSchema(mysqli $conn): void {
     static $checked = false;
@@ -156,7 +159,7 @@ $orderSql = "
         u.email AS customerEmail,
         u.phone AS customerPhone,
         COALESCE(s.courierName, '') AS shipmentCourierName,
-        COALESCE(s.trackingCode, '') AS trackingCode
+        " . app_order_tracking_value_sql('s') . " AS trackingCode
     FROM orders o
     LEFT JOIN users u ON u.userID = o.userID
     LEFT JOIN shipments s ON s.orderID = o.orderID
@@ -228,6 +231,7 @@ if ($paidPayment === null) {
 }
 
 $items = [];
+$colorDisplaySql = app_color_display_sql('c');
 $itemsSql = "
     SELECT
         oi.quantity,
@@ -241,7 +245,7 @@ $itemsSql = "
         p.nameGR,
         pv.size,
         pv.yarnType,
-        c.colorName
+        {$colorDisplaySql} AS colorName
     FROM order_items oi
     LEFT JOIN products p ON p.productID = oi.productID
     LEFT JOIN product_variations pv ON pv.variationID = oi.variationID
@@ -283,6 +287,9 @@ if ($shippingLabel === '') {
     $shippingLabel = fallbackShippingLabelForUser($conn, (int)($order["userID"] ?? 0));
 }
 $trackingCode = trim((string)($order["trackingCode"] ?? ""));
+$trackingUpdated = isset($_GET['tracking_updated']);
+$trackingError = isset($_GET['tracking_error']);
+$trackingEmailState = (string)($_GET['tracking_email'] ?? '');
 $shippingAddressParts = array_filter([
     trim((string)($order["shippingAddress"] ?? "")),
     trim((string)($order["shippingCity"] ?? "")),
@@ -337,6 +344,35 @@ $shippingAddressText = !empty($shippingAddressParts) ? implode(", ", $shippingAd
             cursor: pointer;
         }
         .btn:hover { border-color: #cbd5e1; }
+        .receipt-alert {
+            border: 1px solid #bbf7d0;
+            background: #f0fdf4;
+            color: #166534;
+            padding: 10px 12px;
+            border-radius: 10px;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+        .receipt-alert-error {
+            border-color: #fecaca;
+            background: #fef2f2;
+            color: #991b1b;
+        }
+        .tracking-form {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .tracking-form input {
+            flex: 1;
+            min-width: 220px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 14px;
+        }
         .card {
             background: var(--card);
             border: 1px solid var(--line);
@@ -433,7 +469,7 @@ $shippingAddressText = !empty($shippingAddressParts) ? implode(", ", $shippingAd
         }
         @media print {
             body { background: #fff; padding: 0; }
-            .toolbar { display: none; }
+            .toolbar, .receipt-alert, .tracking-form { display: none; }
             .card { border: none; border-radius: 0; padding: 0; }
         }
     </style>
@@ -444,6 +480,20 @@ $shippingAddressText = !empty($shippingAddressParts) ? implode(", ", $shippingAd
         <a href="<?= htmlspecialchars($backLink) ?>" class="btn">Back</a>
         <button type="button" class="btn" onclick="window.print()">Print</button>
     </div>
+    <?php if ($trackingUpdated): ?>
+        <?php
+            $trackingNotice = 'Tracking number updated.';
+            if ($trackingEmailState === '1') {
+                $trackingNotice = 'Tracking number updated, order marked as shipped, and the customer was emailed the updated receipt.';
+            } elseif ($trackingEmailState === '0') {
+                $trackingNotice = 'Tracking number updated and order marked as shipped, but the customer email could not be sent.';
+            }
+        ?>
+        <div class="receipt-alert"><?= htmlspecialchars($trackingNotice) ?></div>
+    <?php endif; ?>
+    <?php if ($trackingError): ?>
+        <div class="receipt-alert receipt-alert-error">Tracking number could not be saved. Please try again.</div>
+    <?php endif; ?>
 
     <section class="card">
         <header class="head">

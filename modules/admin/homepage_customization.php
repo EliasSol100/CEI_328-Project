@@ -4,7 +4,7 @@ require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/../../include/security.php';
 require_once __DIR__ . '/../../include/homepage_customization.php';
 
-$current_page = 'homepage_customization';
+$current_page = 'content_management';
 $flash = '';
 $homepageTabs = [
     'hero' => [
@@ -188,7 +188,7 @@ function homepageCustomizationValue(string $value): string
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Homepage Editor - Athena Admin</title>
+  <title>Homepage Image Editor - Athena Admin</title>
   <link rel="stylesheet" href="assets/admin.css?v=<?= (int)@filemtime(__DIR__ . '/assets/admin.css') ?>">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -199,7 +199,7 @@ function homepageCustomizationValue(string $value): string
   <main class="admin-main">
     <div class="content-header">
       <div class="content-header-left">
-        <h1>Homepage Editor</h1>
+        <h1>Homepage Image Editor</h1>
         <p>Work section by section, save only what you need, or batch multiple updates together with one save.</p>
       </div>
     </div>
@@ -246,7 +246,7 @@ function homepageCustomizationValue(string $value): string
         <div class="card mb-6">
           <div class="homepage-size-header">
             <div class="card-title" style="margin-bottom:6px;">Required Image Sizes</div>
-            <p class="text-sm text-muted">Uploads still follow the same exact sizes, and every homepage image is auto-converted to JPG in the background.</p>
+            <p class="text-sm text-muted">Uploads still follow the same exact sizes, and every homepage image is auto-converted to WebP in the background.</p>
           </div>
           <div class="homepage-size-grid">
             <div class="homepage-size-card">
@@ -307,7 +307,7 @@ function homepageCustomizationValue(string $value): string
                 <div class="form-group">
                   <label class="form-label" for="homepage_hero_image">Upload hero image</label>
                   <input id="homepage_hero_image" name="homepage_hero_image" type="file" class="form-input" accept="image/*">
-                  <div class="form-hint">Best fit: 1920x600 px. Keep important text/logo inside the centered 1172x600 safe area. Legacy 1172x600 banners are expanded automatically, and uploads are saved as JPG.</div>
+                  <div class="form-hint">Best fit: 1920x600 px. Keep important text/logo inside the centered 1172x600 safe area. Legacy 1172x600 banners are expanded automatically, and uploads are saved as WebP.</div>
                 </div>
               </div>
             </div>
@@ -360,7 +360,7 @@ function homepageCustomizationValue(string $value): string
                            type="file"
                            class="form-input"
                            accept="image/*">
-                    <div class="form-hint">Exact size required: 261x260 px. Uploaded files are saved as JPG.</div>
+                    <div class="form-hint">Exact size required: 261x260 px. Uploaded files are saved as WebP.</div>
                   </div>
                 </section>
               <?php endforeach; ?>
@@ -397,7 +397,7 @@ function homepageCustomizationValue(string $value): string
                            type="file"
                            class="form-input"
                            accept="image/*">
-                    <div class="form-hint">Exact size required: 361x260 px. Uploaded files are saved as JPG.</div>
+                    <div class="form-hint">Exact size required: 361x260 px. Uploaded files are saved as WebP.</div>
                   </div>
                 </section>
               <?php endforeach; ?>
@@ -434,7 +434,7 @@ function homepageCustomizationValue(string $value): string
                 <div class="form-group">
                   <label class="form-label" for="homepage_header_logo_path">Upload header logo</label>
                   <input id="homepage_header_logo_path" name="homepage_header_logo_path" type="file" class="form-input" accept="image/*">
-                  <div class="form-hint">Exact size required: 50x50 px. Uploaded files are saved as JPG.</div>
+                  <div class="form-hint">Exact size required: 50x50 px. Uploaded files are saved as WebP.</div>
                 </div>
               </div>
             </div>

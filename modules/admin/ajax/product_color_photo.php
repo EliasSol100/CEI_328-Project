@@ -43,10 +43,10 @@ if ($action === 'upload' && $productID > 0 && $colorID > 0) {
         exit;
     }
 
-    $filename = 'pcp_' . $productID . '_' . $colorID . '_' . uniqid('', true) . '.jpg';
+    $filename = 'pcp_' . $productID . '_' . $colorID . '_' . uniqid('', true) . '.webp';
     $dest = $dir . $filename;
-    if (!app_image_convert_file_to_jpeg($tmpName, $dest, 800, 800, 84)) {
-        echo json_encode(['ok' => false, 'error' => 'Could not convert image to JPG']);
+    if (!app_image_convert_file_to_webp($tmpName, $dest, 800, 800, 84)) {
+        echo json_encode(['ok' => false, 'error' => 'Could not convert image to WebP']);
         exit;
     }
 

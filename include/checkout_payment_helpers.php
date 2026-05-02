@@ -417,6 +417,12 @@ if (!function_exists('checkout_payment_clear_cart_state')) {
     function checkout_payment_clear_cart_state(): void
     {
         unset($_SESSION['cart'], $_SESSION['cart_coupon_code'], $_SESSION['cart_loyalty_points_redeem'], $_SESSION['cart_loyalty_user_id']);
+        if (isset($GLOBALS['conn']) && $GLOBALS['conn'] instanceof mysqli) {
+            require_once __DIR__ . '/cart_persistence.php';
+            $_SESSION['cart'] = app_cart_default_state();
+            app_cart_persist_for_current_user($GLOBALS['conn']);
+            unset($_SESSION['cart']);
+        }
     }
 }
 

@@ -19,23 +19,31 @@ function ensureCustomOrderAdminSchema(mysqli $conn): void {
 }
 
 function adminGenerateCustomOrderCode(): string {
-    return 'CO-' . strtoupper(substr(bin2hex(random_bytes(4)), 0, 8));
+    return generateCustomOrderAccessCode();
 }
 
 function adminLoadPrivateLinkForOrder(mysqli $conn, array $order): array {
+    $customOrderId = (int)($order['customOrderID'] ?? 0);
     $productId = (int)($order['sourceProductID'] ?? 0);
-    if ($productId <= 0) return ['product_id' => 0, 'private_link' => ''];
+    if ($productId <= 0) return ['product_id' => 0, 'private_link' => '', 'customer_link' => ''];
     $stmt = mysqli_prepare($conn, "SELECT productID, cartStatus, privateAccessToken FROM products WHERE productID=? LIMIT 1");
-    if (!$stmt) return ['product_id' => 0, 'private_link' => ''];
+    if (!$stmt) return ['product_id' => 0, 'private_link' => '', 'customer_link' => ''];
     mysqli_stmt_bind_param($stmt, 'i', $productId);
     mysqli_stmt_execute($stmt);
     $res = mysqli_stmt_get_result($stmt);
     $row = $res ? mysqli_fetch_assoc($res) : null;
     mysqli_stmt_close($stmt);
-    if (!$row || trim((string)($row['cartStatus'] ?? '')) !== 'made_to_order') return ['product_id' => 0, 'private_link' => ''];
+    if (!$row || trim((string)($row['cartStatus'] ?? '')) !== 'made_to_order') return ['product_id' => 0, 'private_link' => '', 'customer_link' => ''];
     $token = trim((string)($row['privateAccessToken'] ?? ''));
-    if ($token === '') return ['product_id' => 0, 'private_link' => ''];
-    return ['product_id' => (int)$row['productID'], 'private_link' => generateAccessLink((int)$row['productID'], 'token', $token, null)];
+    if ($token === '') return ['product_id' => 0, 'private_link' => '', 'customer_link' => ''];
+    $customerProductUrl = function_exists('customOrderFrontendUrl')
+        ? customOrderFrontendUrl('product.php?id=' . (int)$row['productID'])
+        : ('../../product.php?id=' . (int)$row['productID']);
+    return [
+        'product_id' => (int)$row['productID'],
+        'private_link' => generateAccessLink((int)$row['productID'], 'token', $token, null),
+        'customer_link' => $customerProductUrl,
+    ];
 }
 
 function adminFormatDescriptionForTable(string $description): string {
@@ -62,6 +70,63 @@ function adminFormatDescriptionForTable(string $description): string {
     return ltrim($description);
 }
 
+function adminFindCustomerByEmail(mysqli $conn, string $email): ?array {
+    $email = normalizeCustomerEmail($email);
+    if ($email === '') return null;
+    $stmt = mysqli_prepare($conn, "
+        SELECT userID, email, full_name
+        FROM users
+        WHERE LOWER(TRIM(email)) = ?
+        LIMIT 1
+    ");
+    if (!$stmt) return null;
+    mysqli_stmt_bind_param($stmt, 's', $email);
+    mysqli_stmt_execute($stmt);
+    $res = mysqli_stmt_get_result($stmt);
+    $row = $res ? mysqli_fetch_assoc($res) : null;
+    mysqli_stmt_close($stmt);
+    return $row ?: null;
+}
+
+function adminPriceInputFromOrder(array $order): string {
+    $min = (float)($order['agreedPrice'] ?? 0);
+    $max = isset($order['agreedPriceMax']) ? (float)$order['agreedPriceMax'] : 0.0;
+    if ($min <= 0) return '';
+    if ($max > $min) return number_format($min, 2, '.', '') . ' - ' . number_format($max, 2, '.', '');
+    return number_format($min, 2, '.', '');
+}
+
+function adminStructuredRequestPreview(array $order): string {
+    return customOrderBuildProductDescription($order);
+}
+
+function adminPrepareAndEmailCheckout(mysqli $conn, int $customOrderId): array {
+    $orderBefore = getCustomOrderById($conn, $customOrderId);
+    $existingCode = normalizeCustomOrderAccessCode((string)($orderBefore['accessCode'] ?? ''));
+    if ($existingCode === '') {
+        $existingCode = adminGenerateCustomOrderCode();
+        updateCustomOrder($conn, $customOrderId, ['accessCode' => $existingCode]);
+    }
+    $result = createCustomProductFromRequest($conn, $customOrderId);
+    $order = getCustomOrderById($conn, $customOrderId);
+    $accessCode = normalizeCustomOrderAccessCode((string)($order['accessCode'] ?? $result['access_code'] ?? ''));
+    $customerLink = trim((string)($result['customer_link'] ?? ''));
+    if ($customerLink === '') {
+        $customerLink = customOrderCustomerUrl($customOrderId, 'private-checkout');
+    }
+    $emailSent = sendCustomOrderAcceptedEmail($conn, $customOrderId, $customerLink, $accessCode);
+    addCustomOrderMessage(
+        $conn,
+        $customOrderId,
+        'system',
+        null,
+        $emailSent
+            ? 'Custom order accepted. Access-code checkout link was emailed to the customer.'
+            : 'Custom order accepted and private product prepared, but the customer email could not be sent.'
+    );
+    return ['result' => $result, 'email_sent' => $emailSent, 'customer_link' => $customerLink, 'access_code' => $accessCode];
+}
+
 ensureCustomOrderAdminSchema($conn);
 ensureCustomOrdersTable($conn);
 $statusOptions = getCustomOrderStatusLabels();
@@ -69,26 +134,40 @@ $statusOptions = getCustomOrderStatusLabels();
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
     $action = (string)($_POST['action'] ?? '');
+    $redirectViewId = 0;
 
     if ($action === 'add' || $action === 'edit') {
         $id = (int)($_POST['customOrderID'] ?? 0);
-        $adminUserId = $ADMIN_USER_ID ?? null;
-        $name = trim((string)($_POST['customerName'] ?? ''));
+        $ideaTitle = trim((string)($_POST['ideaTitle'] ?? ''));
+        $productType = trim((string)($_POST['productType'] ?? ''));
+        $preferredSize = trim((string)($_POST['preferredSize'] ?? ''));
+        $preferredColours = trim((string)($_POST['preferredColours'] ?? ''));
         $desc = trim((string)($_POST['requestDescription'] ?? ''));
-        $price = round((float)($_POST['agreedPrice'] ?? 0), 2);
+        $priceInput = trim((string)($_POST['agreedPriceInput'] ?? $_POST['agreedPrice'] ?? ''));
+        [$price, $priceMax] = customOrderNormalizeMoneyInput($priceInput);
+        $sizePriceOptions = trim((string)($_POST['sizePriceOptions'] ?? ''));
+        $parsedSizePrices = customOrderParseSizePriceOptions($sizePriceOptions);
         $deadline = trim((string)($_POST['deadline'] ?? ''));
-        $code = strtoupper(trim((string)($_POST['accessCode'] ?? '')));
+        $code = normalizeCustomOrderAccessCode((string)($_POST['accessCode'] ?? ''));
         $email = normalizeCustomerEmail((string)($_POST['email'] ?? ''));
-        $status = trim((string)($_POST['status'] ?? 'pending'));
         $existingPhotoPath = '';
         $photoPathToSave = '';
+        $customer = adminFindCustomerByEmail($conn, $email);
 
         if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $flash = 'err:A valid customer email is required.';
+        } elseif (!$customer) {
+            $flash = 'err:This customer email does not belong to a registered account. Ask the customer to register first.';
+        } elseif ($ideaTitle === '') {
+            $flash = 'err:Add an idea title before saving the custom order.';
         } elseif ($desc === '') {
             $flash = 'err:Add a request description before saving the custom order.';
-        } elseif (!in_array($status, CUSTOM_ORDER_STATUSES, true)) {
-            $flash = 'err:Invalid status.';
+        } elseif ($price <= 0) {
+            $flash = 'err:Add a valid agreed price before creating the private product.';
+        } elseif ($priceMax !== null && empty($parsedSizePrices['prices'])) {
+            $flash = 'err:Add exact size prices when the agreed price is a range.';
+        } elseif ($sizePriceOptions !== '' && empty($parsedSizePrices['prices'])) {
+            $flash = 'err:Use one size price per line, for example Small=20.';
         } else {
             if ($code === '') $code = adminGenerateCustomOrderCode();
             if ($action === 'edit') {
@@ -111,20 +190,84 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
             if ($flash === '') {
+                $customerUserId = (int)($customer['userID'] ?? 0);
+                $customerName = trim((string)($customer['full_name'] ?? ''));
+                $priceMaxValue = $priceMax !== null ? $priceMax : null;
                 if ($action === 'add') {
-                    $stmt = mysqli_prepare($conn, "INSERT INTO custom_orders (userID,email,requestDescription,status,customerName,agreedPrice,deadline,accessCode,photoReferencePath) VALUES (?,?,?,?,?,?,?,?,?)");
+                    $stmt = mysqli_prepare($conn, "
+                        INSERT INTO custom_orders (
+                            userID, email, requestDescription, status, customerName,
+                            ideaTitle, productType, preferredSize, preferredColours,
+                            agreedPrice, agreedPriceMax, deadline, accessCode, sizePriceOptions, photoReferencePath, sourceChannel
+                        ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admin')
+                    ");
                     if ($stmt) {
-                        mysqli_stmt_bind_param($stmt, 'issssdsss', $adminUserId, $email, $desc, $status, $name, $price, $deadline, $code, $photoPathToSave);
+                        mysqli_stmt_bind_param(
+                            $stmt,
+                            'isssssssddssss',
+                            $customerUserId,
+                            $email,
+                            $desc,
+                            $customerName,
+                            $ideaTitle,
+                            $productType,
+                            $preferredSize,
+                            $preferredColours,
+                            $price,
+                            $priceMaxValue,
+                            $deadline,
+                            $code,
+                            $sizePriceOptions,
+                            $photoPathToSave
+                        );
                         $ok = mysqli_stmt_execute($stmt);
+                        $newId = $ok ? (int)mysqli_insert_id($conn) : 0;
                         mysqli_stmt_close($stmt);
-                        $flash = $ok ? 'ok:Custom order created.' : 'err:Could not create the custom order.';
+                        if ($ok && $newId > 0) {
+                            $redirectViewId = $newId;
+                            try {
+                                $checkout = adminPrepareAndEmailCheckout($conn, $newId);
+                                $flash = !empty($checkout['email_sent'])
+                                    ? 'ok:Custom order created, private product prepared, and customer emailed with the access code.'
+                                    : 'warn:Custom order created and private product prepared, but the customer email could not be sent.';
+                            } catch (Throwable $e) {
+                                $flash = 'warn:Custom order created, but the private product/email could not be prepared: ' . ($e->getMessage() !== '' ? $e->getMessage() : 'Unknown error.');
+                            }
+                        } else {
+                            $flash = 'err:Could not create the custom order.';
+                        }
                     } else {
                         $flash = 'err:Could not prepare the custom order insert.';
                     }
                 } else {
-                    $stmt = mysqli_prepare($conn, "UPDATE custom_orders SET customerName=?,requestDescription=?,agreedPrice=?,deadline=?,accessCode=?,email=?,status=?,photoReferencePath=? WHERE customOrderID=?");
+                    $redirectViewId = $id;
+                    $stmt = mysqli_prepare($conn, "
+                        UPDATE custom_orders
+                        SET userID=?, customerName=?, requestDescription=?, ideaTitle=?, productType=?,
+                            preferredSize=?, preferredColours=?, agreedPrice=?, agreedPriceMax=?,
+                            deadline=?, accessCode=?, email=?, sizePriceOptions=?, photoReferencePath=?
+                        WHERE customOrderID=?
+                    ");
                     if ($stmt) {
-                        mysqli_stmt_bind_param($stmt, 'ssdsssssi', $name, $desc, $price, $deadline, $code, $email, $status, $photoPathToSave, $id);
+                        mysqli_stmt_bind_param(
+                            $stmt,
+                            'issssssddsssssi',
+                            $customerUserId,
+                            $customerName,
+                            $desc,
+                            $ideaTitle,
+                            $productType,
+                            $preferredSize,
+                            $preferredColours,
+                            $price,
+                            $priceMaxValue,
+                            $deadline,
+                            $code,
+                            $email,
+                            $sizePriceOptions,
+                            $photoPathToSave,
+                            $id
+                        );
                         $ok = mysqli_stmt_execute($stmt);
                         mysqli_stmt_close($stmt);
                         $flash = $ok ? 'ok:Custom order updated.' : 'err:Could not update the custom order.';
@@ -166,11 +309,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flash = 'err:Write a message before sending.';
         } else {
             try {
-                $messageOrder = getCustomOrderById($conn, $id);
                 addCustomOrderMessage($conn, $id, 'admin', $ADMIN_USER_ID ?? null, $message);
-                if (in_array((string)($messageOrder['status'] ?? 'pending'), ['pending', 'declined'], true)) {
-                    updateCustomOrder($conn, $id, ['status' => 'in_discussion']);
-                }
                 $emailSent = sendCustomOrderCustomerEmail(
                     $conn,
                     $id,
@@ -189,21 +328,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    if ($action === 'send_offer') {
-        $id = (int)($_POST['customOrderID'] ?? 0);
-        $price = round((float)($_POST['offeredPrice'] ?? 0), 2);
-        $deadline = trim((string)($_POST['proposedDeadline'] ?? ''));
-        $note = trim((string)($_POST['offerNote'] ?? ''));
-        try {
-            createCustomOrderOffer($conn, $id, $ADMIN_USER_ID ?? null, $price, $deadline, $note);
-            $flash = 'ok:Offer sent to the customer.';
-        } catch (Throwable $e) {
-            $flash = 'err:' . ($e->getMessage() !== '' ? $e->getMessage() : 'Could not send the offer.');
-        }
-        header('Location: custom_orders.php?view=' . $id . '&flash=' . urlencode($flash));
-        exit;
-    }
-
     if ($action === 'decline_request') {
         $id = (int)($_POST['customOrderID'] ?? 0);
         $message = trim((string)($_POST['declineMessage'] ?? ''));
@@ -213,14 +337,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             updateCustomOrder($conn, $id, ['status' => 'declined']);
             addCustomOrderMessage($conn, $id, 'admin', $ADMIN_USER_ID ?? null, $message);
-            $emailSent = sendCustomOrderCustomerEmail(
-                $conn,
-                $id,
-                "Custom order #{$id} update",
-                "Hello,\n\n{$message}\n\n" .
-                "You can view the request here:\n" . customOrderCustomerUrl($id) . "\n\n" .
-                "Thank you,\nAthina E-Shop"
-            );
+            $emailSent = sendCustomOrderDeclinedEmail($conn, $id, $message);
             $flash = $emailSent ? 'ok:Request declined and customer notified.' : 'warn:Request declined, but the customer email could not be sent.';
         } catch (Throwable $e) {
             $flash = 'err:' . ($e->getMessage() !== '' ? $e->getMessage() : 'Could not decline the request.');
@@ -229,46 +346,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    if ($action === 'status') {
-        $id = (int)($_POST['customOrderID'] ?? 0);
-        $status = trim((string)($_POST['status'] ?? ''));
-        if (in_array($status, CUSTOM_ORDER_STATUSES, true)) {
-            $stmt = mysqli_prepare($conn, "UPDATE custom_orders SET status=? WHERE customOrderID=?");
-            if ($stmt) {
-                mysqli_stmt_bind_param($stmt, 'si', $status, $id);
-                mysqli_stmt_execute($stmt);
-                mysqli_stmt_close($stmt);
-            }
-            try {
-                addCustomOrderMessage($conn, $id, 'system', null, 'Status updated to ' . ($statusOptions[$status] ?? ucwords(str_replace('_', ' ', $status))) . '.');
-                sendCustomOrderStatusEmail($conn, $id, $status);
-            } catch (Throwable $e) {
-                error_log('Custom order status notification failed: ' . $e->getMessage());
-            }
-            $flash = 'ok:Status updated.';
-        } else {
-            $flash = 'err:Invalid status.';
-        }
-    }
-
     if ($action === 'create_checkout_link') {
         $id = (int)($_POST['customOrderID'] ?? 0);
         try {
-            $result = createCustomProductFromRequest($conn, $id);
-            $emailSent = sendCustomProductAccessEmail(
-                (string)($result['customer_email'] ?? ''),
-                (int)($result['product_id'] ?? 0),
-                (string)($result['private_link'] ?? ''),
-                'token'
-            );
-            addCustomOrderMessage($conn, $id, 'system', null, $emailSent ? 'Private checkout link was emailed to the customer.' : 'Private checkout link was created, but the customer email could not be sent.');
-            if ($emailSent) {
-                $flash = !empty($result['was_updated'])
-                    ? 'ok:Private checkout link refreshed and emailed to the customer.'
-                    : 'ok:Private checkout link created and emailed to the customer.';
-            } else {
-                $flash = 'warn:Private checkout link is ready, but the customer email could not be sent. Copy the URL manually.';
-            }
+            $checkout = adminPrepareAndEmailCheckout($conn, $id);
+            $emailSent = !empty($checkout['email_sent']);
+            $flash = $emailSent
+                ? 'ok:Custom order accepted. Private product prepared and customer emailed with the access code.'
+                : 'warn:Private product is ready, but the customer email could not be sent. Copy the private product URL manually.';
         } catch (Throwable $e) {
             $flash = 'err:' . ($e->getMessage() !== '' ? $e->getMessage() : 'Could not create the checkout link.');
         }
@@ -276,7 +361,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    header('Location: custom_orders.php?flash=' . urlencode($flash));
+    $target = $redirectViewId > 0 ? ('custom_orders.php?view=' . $redirectViewId) : 'custom_orders.php';
+    $target .= (strpos($target, '?') === false ? '?' : '&') . 'flash=' . urlencode($flash);
+    header('Location: ' . $target);
     exit;
 }
 
@@ -293,18 +380,14 @@ if (isset($_GET['edit'])) {
 }
 
 $viewOrder = null;
-$viewPrivateCheckout = ['product_id' => 0, 'private_link' => ''];
+$viewPrivateCheckout = ['product_id' => 0, 'private_link' => '', 'customer_link' => ''];
 $viewMessages = [];
-$viewActiveOffer = null;
-$viewLatestOffer = null;
 if (isset($_GET['view'])) {
     $viewId = (int)$_GET['view'];
     foreach ($orders as $orderRow) if ((int)$orderRow['customOrderID'] === $viewId) { $viewOrder = $orderRow; break; }
     if ($viewOrder) {
         $viewPrivateCheckout = adminLoadPrivateLinkForOrder($conn, $viewOrder);
         $viewMessages = getCustomOrderMessages($conn, (int)$viewOrder['customOrderID']);
-        $viewActiveOffer = getActiveCustomOrderOffer($conn, (int)$viewOrder['customOrderID']);
-        $viewLatestOffer = getLatestCustomOrderOffer($conn, (int)$viewOrder['customOrderID']);
     }
 }
 
@@ -327,7 +410,7 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
     <div class="content-header">
       <div class="content-header-left">
         <h1>Custom Orders</h1>
-        <p>Manage Instagram custom orders and prepare each customer's private checkout link.</p>
+        <p>Manage website and Instagram custom requests, then prepare each customer's private checkout access.</p>
       </div>
       <button class="btn-primary" type="button" onclick="openModal('modalAdd')"><i class="fas fa-plus"></i> New Custom Order</button>
     </div>
@@ -345,6 +428,8 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
         $viewStatusClass = $statusBadge[$viewStatus] ?? 'badge-muted';
         $viewPhotoPath = trim((string)($viewOrder['photoReferencePath'] ?? ''));
         $viewPhotoUrl = $viewPhotoPath !== '' ? '../../' . ltrim(str_replace('\\', '/', $viewPhotoPath), '/') : '';
+        $viewSourceChannel = strtolower(trim((string)($viewOrder['sourceChannel'] ?? 'website')));
+        $showCustomerDiscussion = $viewSourceChannel !== 'admin';
         ?>
         <div class="card mb-6">
           <div class="custom-order-detail-header">
@@ -364,6 +449,11 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
             </div>
             <div class="order-detail-block">
               <h4>Checkout Setup</h4>
+              <p class="text-sm mb-1"><strong>Idea Title:</strong> <?= htmlspecialchars(trim((string)($viewOrder['ideaTitle'] ?? '')) !== '' ? (string)$viewOrder['ideaTitle'] : '-') ?></p>
+              <p class="text-sm mb-1"><strong>Product Type:</strong> <?= htmlspecialchars(trim((string)($viewOrder['productType'] ?? '')) !== '' ? (string)$viewOrder['productType'] : '-') ?></p>
+              <p class="text-sm mb-1"><strong>Preferred Size:</strong> <?= htmlspecialchars(trim((string)($viewOrder['preferredSize'] ?? '')) !== '' ? (string)$viewOrder['preferredSize'] : '-') ?></p>
+              <p class="text-sm mb-1"><strong>Preferred Colours:</strong> <?= htmlspecialchars(trim((string)($viewOrder['preferredColours'] ?? '')) !== '' ? (string)$viewOrder['preferredColours'] : '-') ?></p>
+              <p class="text-sm mb-1"><strong>Price Range:</strong> <?= htmlspecialchars(customOrderPriceLabel($viewOrder)) ?></p>
               <p class="text-sm mb-1"><strong>Agreed Price:</strong> €<?= number_format((float)($viewOrder['agreedPrice'] ?? 0), 2) ?></p>
               <p class="text-sm mb-1"><strong>Deadline:</strong> <?= !empty($viewOrder['deadline']) ? htmlspecialchars(date('n/j/Y', strtotime((string)$viewOrder['deadline']))) : '—' ?></p>
               <p class="text-sm mb-1"><strong>Linked Product:</strong> <?= htmlspecialchars(trim((string)($viewOrder['linkedProductName'] ?? '')) !== '' ? (string)$viewOrder['linkedProductName'] : '—') ?></p>
@@ -379,7 +469,12 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
           </div>
           <div class="custom-order-description-section">
             <h4 class="custom-order-section-title">Request Description</h4>
+            <?php $viewRequestPreview = adminStructuredRequestPreview($viewOrder); ?>
+            <?php if ($viewRequestPreview !== ''): ?>
+              <div class="text-sm text-muted custom-order-description-body"><?= htmlspecialchars($viewRequestPreview) ?></div>
+            <?php else: ?>
             <div class="text-sm text-muted custom-order-description-body"><?= htmlspecialchars((string)($viewOrder['requestDescription'] ?? '—')) ?></div>
+            <?php endif; ?>
           </div>
           <?php if ($viewPhotoUrl !== ''): ?>
             <div class="custom-order-photo-section">
@@ -389,6 +484,7 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
               </a>
             </div>
           <?php endif; ?>
+          <?php if ($showCustomerDiscussion): ?>
           <div class="custom-order-admin-grid">
             <div class="card custom-order-admin-panel">
               <div class="card-title custom-order-checkout-title">Reply / Request More Info</div>
@@ -401,47 +497,7 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
                 <button type="submit" class="btn-primary"><i class="fas fa-paper-plane"></i> Send Reply</button>
               </form>
             </div>
-            <div class="card custom-order-admin-panel">
-              <div class="card-title custom-order-checkout-title">Send Offer</div>
-              <p class="text-sm text-muted custom-order-checkout-copy">Send a price/date proposal for the customer to accept or decline.</p>
-              <form method="POST" class="custom-order-admin-form">
-                <?= app_csrf_input() ?>
-                <input type="hidden" name="action" value="send_offer">
-                <input type="hidden" name="customOrderID" value="<?= (int)$viewOrder['customOrderID'] ?>">
-                <div class="form-grid-2">
-                  <div class="form-group">
-                    <label class="form-label">Offered Price (EUR)</label>
-                    <input type="number" step="0.01" min="0.01" name="offeredPrice" class="form-input" value="<?= htmlspecialchars((string)($viewOrder['agreedPrice'] ?? '')) ?>" required>
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label">Target Date</label>
-                    <input type="date" name="proposedDeadline" class="form-input" value="<?= !empty($viewOrder['deadline']) ? htmlspecialchars(date('Y-m-d', strtotime((string)$viewOrder['deadline']))) : '' ?>">
-                  </div>
-                </div>
-                <textarea name="offerNote" class="form-input" rows="3" placeholder="Optional note for the customer..."></textarea>
-                <button type="submit" class="btn-primary"><i class="fas fa-envelope"></i> Send Offer</button>
-              </form>
-            </div>
           </div>
-          <?php if ($viewActiveOffer || $viewLatestOffer): ?>
-            <?php $offerForView = $viewActiveOffer ?: $viewLatestOffer; ?>
-            <div class="custom-order-offer-summary">
-              <h4 class="custom-order-section-title"><?= $viewActiveOffer ? 'Active Customer Offer' : 'Latest Customer Offer' ?></h4>
-              <div class="order-detail-grid custom-order-detail-grid">
-                <div class="order-detail-block">
-                  <p class="text-sm mb-1"><strong>Price:</strong> EUR <?= number_format((float)($offerForView['offeredPrice'] ?? 0), 2) ?></p>
-                  <p class="text-sm mb-1"><strong>Target Date:</strong> <?= !empty($offerForView['proposedDeadline']) ? htmlspecialchars(date('n/j/Y', strtotime((string)$offerForView['proposedDeadline']))) : 'None' ?></p>
-                </div>
-                <div class="order-detail-block">
-                  <p class="text-sm mb-1"><strong>Status:</strong> <?= htmlspecialchars(ucwords(str_replace('_', ' ', (string)($offerForView['offerStatus'] ?? 'pending')))) ?></p>
-                  <p class="text-sm mb-1"><strong>Sent:</strong> <?= !empty($offerForView['createdAt']) ? htmlspecialchars(date('n/j/Y H:i', strtotime((string)$offerForView['createdAt']))) : '-' ?></p>
-                </div>
-              </div>
-              <?php if (trim((string)($offerForView['offerNote'] ?? '')) !== ''): ?>
-                <div class="text-sm text-muted custom-order-description-body"><?= htmlspecialchars((string)$offerForView['offerNote']) ?></div>
-              <?php endif; ?>
-            </div>
-          <?php endif; ?>
           <div class="custom-order-thread">
             <div class="custom-order-thread-header">
               <h4 class="custom-order-section-title">Customer Discussion</h4>
@@ -470,28 +526,30 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
               </div>
             <?php endif; ?>
           </div>
+          <?php endif; ?>
           <div class="card custom-order-checkout-card">
             <div class="custom-order-checkout-header">
               <div>
-                <div class="card-title custom-order-checkout-title">Private Checkout Link</div>
-                <p class="text-sm text-muted custom-order-checkout-copy">Create or refresh the private product and email the customer their secure checkout link.</p>
+                <div class="card-title custom-order-checkout-title">Accept & Private Checkout</div>
+                <p class="text-sm text-muted custom-order-checkout-copy">Accept the request, prepare the hidden private product, and email the customer their access code.</p>
               </div>
               <form method="POST">
                 <?= app_csrf_input() ?>
                 <input type="hidden" name="action" value="create_checkout_link">
                 <input type="hidden" name="customOrderID" value="<?= (int)$viewOrder['customOrderID'] ?>">
-                <button type="submit" class="btn-primary"><i class="fas fa-link"></i> <?= !empty($viewPrivateCheckout['private_link']) ? 'Refresh & Email Link' : 'Create & Email Link' ?></button>
+                <button type="submit" class="btn-primary"><i class="fas fa-link"></i> <?= !empty($viewPrivateCheckout['private_link']) ? 'Refresh & Email Access' : 'Accept & Email Access' ?></button>
               </form>
             </div>
             <?php if (!empty($viewPrivateCheckout['private_link'])): ?>
               <div class="custom-order-checkout-box">
                 <p class="text-sm mb-1"><strong>Private Product ID:</strong> <?= (int)$viewPrivateCheckout['product_id'] ?></p>
                 <p class="text-sm mb-2"><strong>Customer login:</strong> The product opens only after sign-in with <strong><?= htmlspecialchars(trim((string)($viewOrder['email'] ?? ''))) ?></strong>.</p>
-                <label class="form-label">Private URL</label>
+                <label class="form-label">Private Product URL</label>
                 <div class="custom-order-checkout-input-row">
-                  <input type="text" readonly class="form-input custom-order-checkout-input" value="<?= htmlspecialchars((string)$viewPrivateCheckout['private_link']) ?>">
-                  <button type="button" class="btn-edit" onclick='copyText(<?= json_encode((string)$viewPrivateCheckout["private_link"]) ?>)'><i class="fas fa-copy"></i> Copy URL</button>
+                  <input type="text" readonly class="form-input custom-order-checkout-input" value="<?= htmlspecialchars((string)$viewPrivateCheckout['customer_link']) ?>">
+                  <button type="button" class="btn-edit" onclick='copyText(<?= json_encode((string)$viewPrivateCheckout["customer_link"]) ?>)'><i class="fas fa-copy"></i> Copy URL</button>
                 </div>
+                <p class="text-sm text-muted mb-0" style="word-break:break-all;margin-top:8px;">Direct product URL is kept for admin reference. Customers must unlock it with the access code first.</p>
               </div>
             <?php else: ?>
               <div class="custom-order-checkout-warning">
@@ -515,7 +573,7 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
               </thead>
               <tbody>
               <?php foreach ($orders as $ord): ?>
-                <?php $displayEmail = trim((string)($ord['email'] ?? '')); $statusBadgeClass = $statusBadge[$ord['status']] ?? 'badge-muted'; $rowCheckout = adminLoadPrivateLinkForOrder($conn, $ord); $tableDescription = adminFormatDescriptionForTable((string)($ord['requestDescription'] ?? '')); ?>
+                <?php $displayEmail = trim((string)($ord['email'] ?? '')); $statusBadgeClass = $statusBadge[$ord['status']] ?? 'badge-muted'; $rowCheckout = adminLoadPrivateLinkForOrder($conn, $ord); $tableDescription = adminFormatDescriptionForTable(adminStructuredRequestPreview($ord)); ?>
                 <tr>
                   <td class="font-600 cell-top col-customer"><?= htmlspecialchars((string)($ord['displayName'] ?? '—')) ?></td>
                   <td class="text-muted cell-top col-email"><?= htmlspecialchars($displayEmail !== '' ? $displayEmail : '—') ?></td>
@@ -524,19 +582,9 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
                   <td class="cell-top col-status">
                     <div class="custom-orders-status-cell">
                       <span class="badge <?= $statusBadgeClass ?> custom-orders-status-badge"><?= htmlspecialchars(ucwords(str_replace('_', ' ', (string)$ord['status']))) ?></span>
-                      <form method="POST" class="custom-orders-inline-form">
-                      <?= app_csrf_input() ?>
-                      <input type="hidden" name="action" value="status">
-                      <input type="hidden" name="customOrderID" value="<?= (int)$ord['customOrderID'] ?>">
-                      <select name="status" class="status-select status-select-auto" onchange="this.form.submit()">
-                        <?php foreach ($statusOptions as $val => $lbl): ?>
-                          <option value="<?= $val ?>" <?= (string)$ord['status'] === $val ? 'selected' : '' ?>><?= htmlspecialchars($lbl) ?></option>
-                        <?php endforeach; ?>
-                      </select>
-                      </form>
                     </div>
                   </td>
-                  <td class="cell-top col-checkout"><?php if ($rowCheckout['private_link'] !== ''): ?><button type="button" class="btn-edit" onclick='copyText(<?= json_encode((string)$rowCheckout["private_link"]) ?>)'><i class="fas fa-copy"></i> Copy URL</button><?php else: ?><span class="text-muted text-sm">Not created yet</span><?php endif; ?></td>
+                  <td class="cell-top col-checkout"><?php if ($rowCheckout['customer_link'] !== ''): ?><button type="button" class="btn-edit" onclick='copyText(<?= json_encode((string)$rowCheckout["customer_link"]) ?>)'><i class="fas fa-copy"></i> Copy URL</button><?php else: ?><span class="text-muted text-sm">Not created yet</span><?php endif; ?></td>
                   <td class="cell-top col-actions">
                     <div class="custom-orders-actions">
                       <a href="?view=<?= (int)$ord['customOrderID'] ?>" class="btn-secondary btn-sm"><i class="fas fa-eye"></i> View</a>
@@ -563,18 +611,33 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
 <div class="modal-overlay" id="modalAdd">
   <div class="modal-box">
     <h3>New Custom Order</h3>
-    <p class="modal-sub">Create the order record after you agree the details with the customer on Instagram.</p>
+    <p class="modal-sub">Create the order record after you agree the details with the customer.</p>
     <form method="POST" enctype="multipart/form-data" data-ignore-unsaved-warning>
       <?= app_csrf_input() ?>
       <input type="hidden" name="action" value="add">
+      <div class="form-group">
+        <label class="form-label">Customer Email</label>
+        <input type="email" name="email" class="form-input" placeholder="customer@example.com" required>
+        <span class="form-hint">The email must belong to an existing customer account. The customer name is taken from registration info.</span>
+      </div>
       <div class="form-grid-2">
         <div class="form-group">
-          <label class="form-label">Customer Name</label>
-          <input type="text" name="customerName" class="form-input" placeholder="e.g. Jane Doe">
+          <label class="form-label">Idea Title</label>
+          <input type="text" name="ideaTitle" class="form-input" placeholder="e.g. Wedding gift basket" required>
         </div>
         <div class="form-group">
-          <label class="form-label">Customer Email</label>
-          <input type="email" name="email" class="form-input" placeholder="customer@example.com" required>
+          <label class="form-label">Product Type</label>
+          <input type="text" name="productType" class="form-input" placeholder="Plushie, blanket, gift set...">
+        </div>
+      </div>
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label class="form-label">Preferred Size</label>
+          <input type="text" name="preferredSize" class="form-input" placeholder="Small, Medium, Large or exact cm">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Preferred Colours</label>
+          <input type="text" name="preferredColours" class="form-input" placeholder="Pink, cream, lavender...">
         </div>
       </div>
       <div class="form-group">
@@ -584,7 +647,8 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
       <div class="form-grid-3">
         <div class="form-group">
           <label class="form-label">Agreed Price (€)</label>
-          <input type="number" step="0.01" min="0" name="agreedPrice" class="form-input" placeholder="0.00">
+          <input type="text" name="agreedPriceInput" class="form-input" placeholder="120 or 20 - 70" required>
+          <span class="form-hint">For multiple sizes, add exact size prices below.</span>
         </div>
         <div class="form-group">
           <label class="form-label">Deadline</label>
@@ -593,21 +657,19 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
         <div class="form-group">
           <label class="form-label">Access Code</label>
           <input type="text" name="accessCode" class="form-input" placeholder="Auto-generated if empty">
-          <span class="form-hint">Optional internal reference for the admin.</span>
+          <span class="form-hint">Sent to the customer for private product verification.</span>
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label">Reference Photo</label>
-        <input type="file" name="referencePhoto" class="form-input" accept=".jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif">
-        <span class="form-hint">Optional. This photo can also be used as the first image on the private product.</span>
+        <label class="form-label">Size Price Options</label>
+        <textarea name="sizePriceOptions" class="form-input" rows="3" placeholder="Small=20&#10;Medium=35&#10;Large=50"></textarea>
+        <span class="form-hint">Required when the agreed price is a range. One size price per line; this creates the private product price range.</span>
       </div>
       <div class="form-group">
-        <label class="form-label">Status</label>
-        <select name="status" class="form-input">
-          <?php foreach ($statusOptions as $val => $lbl): ?>
-            <option value="<?= $val ?>"><?= htmlspecialchars($lbl) ?></option>
-          <?php endforeach; ?>
-        </select>
+        <label class="form-label">Reference Photo</label>
+        <input type="file" name="referencePhoto" class="form-input js-reference-photo" accept="image/*" data-max-file-size="4194304">
+        <div class="text-sm custom-order-file-error" style="display:none;color:#dc2626;margin-top:6px"></div>
+        <span class="form-hint">Optional. Uploaded images are converted to WebP automatically and can also be used as the first image on the private product.</span>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn-cancel" onclick="closeModal('modalAdd')">Cancel</button>
@@ -626,14 +688,29 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
       <?= app_csrf_input() ?>
       <input type="hidden" name="action" value="edit">
       <input type="hidden" name="customOrderID" value="<?= (int)$editOrder['customOrderID'] ?>">
+      <div class="form-group">
+        <label class="form-label">Customer Email</label>
+        <input type="email" name="email" class="form-input" value="<?= htmlspecialchars((string)($editOrder['email'] ?? '')) ?>" required>
+        <span class="form-hint">The customer name is taken from the registered account.</span>
+      </div>
       <div class="form-grid-2">
         <div class="form-group">
-          <label class="form-label">Customer Name</label>
-          <input type="text" name="customerName" class="form-input" value="<?= htmlspecialchars((string)($editOrder['displayName'] ?? '')) ?>">
+          <label class="form-label">Idea Title</label>
+          <input type="text" name="ideaTitle" class="form-input" value="<?= htmlspecialchars((string)($editOrder['ideaTitle'] ?? '')) ?>" required>
         </div>
         <div class="form-group">
-          <label class="form-label">Customer Email</label>
-          <input type="email" name="email" class="form-input" value="<?= htmlspecialchars((string)($editOrder['email'] ?? '')) ?>" required>
+          <label class="form-label">Product Type</label>
+          <input type="text" name="productType" class="form-input" value="<?= htmlspecialchars((string)($editOrder['productType'] ?? '')) ?>">
+        </div>
+      </div>
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label class="form-label">Preferred Size</label>
+          <input type="text" name="preferredSize" class="form-input" value="<?= htmlspecialchars((string)($editOrder['preferredSize'] ?? '')) ?>">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Preferred Colours</label>
+          <input type="text" name="preferredColours" class="form-input" value="<?= htmlspecialchars((string)($editOrder['preferredColours'] ?? '')) ?>">
         </div>
       </div>
       <div class="form-group">
@@ -643,7 +720,7 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
       <div class="form-grid-3">
         <div class="form-group">
           <label class="form-label">Agreed Price (€)</label>
-          <input type="number" step="0.01" min="0" name="agreedPrice" class="form-input" value="<?= htmlspecialchars((string)($editOrder['agreedPrice'] ?? '0')) ?>">
+          <input type="text" name="agreedPriceInput" class="form-input" value="<?= htmlspecialchars(adminPriceInputFromOrder($editOrder)) ?>" required>
         </div>
         <div class="form-group">
           <label class="form-label">Deadline</label>
@@ -655,8 +732,14 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
         </div>
       </div>
       <div class="form-group">
+        <label class="form-label">Size Price Options</label>
+        <textarea name="sizePriceOptions" class="form-input" rows="3" placeholder="Small=20&#10;Medium=35&#10;Large=50"><?= htmlspecialchars((string)($editOrder['sizePriceOptions'] ?? '')) ?></textarea>
+        <span class="form-hint">Required when the agreed price is a range.</span>
+      </div>
+      <div class="form-group">
         <label class="form-label">Reference Photo</label>
-        <input type="file" name="referencePhoto" class="form-input" accept=".jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif">
+        <input type="file" name="referencePhoto" class="form-input js-reference-photo" accept="image/*" data-max-file-size="4194304">
+        <div class="text-sm custom-order-file-error" style="display:none;color:#dc2626;margin-top:6px"></div>
         <?php if (!empty($editOrder['photoReferencePath'])): ?>
           <?php $editPhotoUrl = '../../' . ltrim(str_replace('\\', '/', (string)$editOrder['photoReferencePath']), '/'); ?>
           <div class="text-sm text-muted custom-order-current-photo-label">Current photo:</div>
@@ -664,14 +747,6 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
             <img src="<?= htmlspecialchars($editPhotoUrl) ?>" alt="Current custom order reference" class="custom-order-current-photo">
           </a>
         <?php endif; ?>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Status</label>
-        <select name="status" class="form-input">
-          <?php foreach ($statusOptions as $val => $lbl): ?>
-            <option value="<?= $val ?>" <?= (string)($editOrder['status'] ?? '') === $val ? 'selected' : '' ?>><?= htmlspecialchars($lbl) ?></option>
-          <?php endforeach; ?>
-        </select>
       </div>
       <div class="modal-footer">
         <a href="custom_orders.php" class="btn-cancel">Cancel</a>
@@ -701,7 +776,32 @@ document.addEventListener('DOMContentLoaded', function () {
       field.addEventListener('input', function () { state.dirty = true; });
       field.addEventListener('change', function () { state.dirty = true; });
     });
-    form.addEventListener('submit', function () { state.isSubmitting = true; state.dirty = false; });
+    form.addEventListener('submit', function (event) {
+      var badFile = Array.from(form.querySelectorAll('.js-reference-photo')).find(function (input) {
+        var max = parseInt(input.getAttribute('data-max-file-size') || '0', 10);
+        var file = input.files && input.files[0] ? input.files[0] : null;
+        var errorBox = input.parentElement ? input.parentElement.querySelector('.custom-order-file-error') : null;
+        if (errorBox) {
+          errorBox.style.display = 'none';
+          errorBox.textContent = '';
+        }
+        if (!max || !file || file.size <= max) return false;
+        if (errorBox) {
+          errorBox.textContent = 'Reference photo must be 4MB or smaller.';
+          errorBox.style.display = 'block';
+        }
+        return true;
+      });
+      if (badFile) {
+        event.preventDefault();
+        state.isSubmitting = false;
+        state.dirty = true;
+        badFile.focus();
+        return;
+      }
+      state.isSubmitting = true;
+      state.dirty = false;
+    });
     function dismissModal() {
       if (state.dirty && !state.isSubmitting && !window.confirm(warningMessage)) return;
       state.dirty = false;

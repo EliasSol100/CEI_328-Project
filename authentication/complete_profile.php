@@ -63,24 +63,80 @@ function profilePasswordHasAsciiSymbol(string $password): bool
     return (bool)preg_match('/[!@#$%^&*()_+\-=\[\]{};\':"\\\\|,.<>\/?`~]/', $password);
 }
 
+function profileCleanText(string $value): string
+{
+    return trim(preg_replace('/\s+/u', ' ', $value) ?? '');
+}
+
+function profileValidLetters(string $value): bool
+{
+    return $value !== '' && (bool)preg_match('/^[\p{L} ]+$/u', $value);
+}
+
+function profileValidAddress(string $value): bool
+{
+    return $value !== '' && (bool)preg_match('/^[\p{L}\p{N} ]+$/u', $value);
+}
+
+function profileValidPostcode(string $value): bool
+{
+    return $value !== '' && (bool)preg_match('/^\d{3,10}$/', $value);
+}
+
+function profileSyncDefaultAddress(mysqli $conn, int $userId, string $country, string $city, string $address, string $postcode): void
+{
+    if ($userId <= 0 || $country === '' || $city === '' || $address === '' || $postcode === '') {
+        return;
+    }
+
+    $existingId = 0;
+    $check = $conn->prepare("SELECT id FROM user_addresses WHERE user_id = ? AND is_default = 1 LIMIT 1");
+    if ($check) {
+        $check->bind_param('i', $userId);
+        $check->execute();
+        $row = $check->get_result()->fetch_assoc();
+        $existingId = (int)($row['id'] ?? 0);
+        $check->close();
+    }
+
+    if ($existingId > 0) {
+        $stmt = $conn->prepare("UPDATE user_addresses SET label = 'Home', country = ?, city = ?, address = ?, postcode = ?, is_default = 1 WHERE id = ?");
+        if ($stmt) {
+            $stmt->bind_param('ssssi', $country, $city, $address, $postcode, $existingId);
+            $stmt->execute();
+            $stmt->close();
+        }
+        return;
+    }
+
+    $stmt = $conn->prepare("INSERT INTO user_addresses (user_id, label, country, city, address, postcode, is_default) VALUES (?, 'Home', ?, ?, ?, ?, 1)");
+    if ($stmt) {
+        $stmt->bind_param('issss', $userId, $country, $city, $address, $postcode);
+        $stmt->execute();
+        $stmt->close();
+    }
+}
+
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     app_require_csrf(false, "Invalid request token. Please refresh and try again.");
 
-    $fullName        = trim($_POST["fullname"]         ?? '');
+    $fullName        = profileCleanText((string)($_POST["fullname"] ?? ''));
     $nameParts       = preg_split('/\s+/', $fullName, -1, PREG_SPLIT_NO_EMPTY);
-    $username        = trim($_POST["username"]         ?? '');
+    $username        = profileCleanText((string)($_POST["username"] ?? ''));
     $password        = $_POST["password"]              ?? '';
     $repeat_password = $_POST["repeat_password"]       ?? '';
-    $country         = trim($_POST["country"]          ?? '');
-    $city            = trim($_POST["city"]             ?? '');
-    $address         = trim($_POST["address"]          ?? '');
-    $postcode        = trim($_POST["postcode"]         ?? '');
+    $country         = profileCleanText((string)($_POST["country"] ?? ''));
+    $city            = profileCleanText((string)($_POST["city"] ?? ''));
+    $address         = profileCleanText((string)($_POST["address"] ?? ''));
+    $postcode        = profileCleanText((string)($_POST["postcode"] ?? ''));
     $dobInput        = trim($_POST["dob"]              ?? '');
     $dob             = parseProfileDobInput($dobInput);
-    $phone           = trim($_POST["phone"]            ?? '');
+    $phone           = profileCleanText((string)($_POST["phone"] ?? ''));
 
     if (count($nameParts) < 2 || count($nameParts) > 3) {
         $errors[] = "Full name must be 2 or 3 words (e.g., First Last or First Middle Last).";
+    } elseif (!profileValidLetters($fullName)) {
+        $errors[] = "Full name must contain letters only.";
     }
 
     $firstName  = $nameParts[0] ?? '';
@@ -113,6 +169,18 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
     if (!app_is_valid_username($username)) {
         $errors[] = "Username must be 3-32 characters and use only letters, numbers, dots, underscores, or hyphens.";
+    }
+
+    if ($city !== '' && !profileValidLetters($city)) {
+        $errors[] = "City must contain letters only.";
+    }
+
+    if ($address !== '' && !profileValidAddress($address)) {
+        $errors[] = "Address must contain letters, numbers and spaces only.";
+    }
+
+    if ($postcode !== '' && !profileValidPostcode($postcode)) {
+        $errors[] = "Postal code must contain numbers only.";
     }
 
     if (!preg_match('/^\+?[0-9]{7,15}$/', $phone)) {
@@ -291,6 +359,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
 
         if (empty($errors) && !empty($newUserId)) {
+            profileSyncDefaultAddress($conn, (int)$newUserId, $country, $city, $address, $postcode);
 
             $stmt = $conn->prepare("SELECT *, userID AS id FROM users WHERE userID = ?");
             $stmt->bind_param("i", $newUserId);
@@ -400,6 +469,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                         <label>Full Name</label>
                         <input type="text" name="fullname" class="form-control"
                                placeholder="e.g. John Doe"
+                               title="Use letters and spaces only"
                                value="<?= htmlspecialchars($_POST['fullname'] ?? '') ?>" required>
                         <?php
                         if (!empty($errors)) {
@@ -438,6 +508,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                     <div class="form-group">
                         <label>Phone Number</label>
                         <input type="tel" class="form-control" id="phone" name="phone"
+                               inputmode="tel"
                                value="<?= htmlspecialchars($_POST['phone'] ?? '') ?>" required>
                         <div id="phone-error" class="text-danger mt-1" style="display:none;">
                             Please enter a phone number.
@@ -515,7 +586,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                 <div class="form-step" id="step3">
                     <?php if (!empty($errors) && isset($_POST["country"])): ?>
                         <?php foreach ($errors as $error): ?>
-                            <?php if ($error === "All fields are required!"): ?>
+                            <?php if ($error === "All fields are required!" || str_contains($error, "City") || str_contains($error, "Address") || str_contains($error, "Postal")): ?>
                                 <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
                             <?php endif; ?>
                         <?php endforeach; ?>
@@ -530,18 +601,25 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                     <div class="form-group">
                         <label>City</label>
                         <input type="text" name="city" class="form-control"
+                               pattern="[A-Za-zÀ-ÖØ-öø-ÿΑ-Ωα-ωΆ-ώ ]+"
+                               title="City must contain letters only"
                                value="<?= htmlspecialchars($_POST['city'] ?? '') ?>" required>
                     </div>
 
                     <div class="form-group">
                         <label>Address</label>
                         <input type="text" name="address" class="form-control"
+                               pattern="[A-Za-zÀ-ÖØ-öø-ÿΑ-Ωα-ωΆ-ώ0-9 ]+"
+                               title="Address must contain letters, numbers and spaces only"
                                value="<?= htmlspecialchars($_POST['address'] ?? '') ?>" required>
                     </div>
 
                     <div class="form-group">
                         <label>Postal Code</label>
                         <input type="text" name="postcode" class="form-control"
+                               inputmode="numeric"
+                               pattern="[0-9]{3,10}"
+                               title="Postal code must contain numbers only"
                                value="<?= htmlspecialchars($_POST['postcode'] ?? '') ?>" required>
                     </div>
                 </div>
@@ -622,6 +700,45 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
             }
             clearDobError();
             return true;
+        }
+
+        function validateProfileTextField(selector, validator, message) {
+            const $field = $(selector);
+            if (!$field.length) {
+                return true;
+            }
+            const value = getFieldValue($field);
+            const errorId = selector.replace(/[^a-z0-9]/gi, "") + "-error";
+            $("#" + errorId).remove();
+
+            if (!validator(value)) {
+                $field.addClass("is-invalid");
+                $("<div id='" + errorId + "' class='text-danger mt-1'></div>").text(message).insertAfter($field);
+                return false;
+            }
+
+            $field.removeClass("is-invalid");
+            return true;
+        }
+
+        function isLettersOnly(value) {
+            return /^[\p{L} ]+$/u.test(value);
+        }
+
+        function isAddressOnly(value) {
+            return /^[\p{L}\p{N} ]+$/u.test(value);
+        }
+
+        function isPostcodeOnly(value) {
+            return /^[0-9]{3,10}$/.test(value);
+        }
+
+        function validateAddressStep() {
+            let valid = true;
+            valid = validateProfileTextField("input[name='city']", isLettersOnly, "City must contain letters only.") && valid;
+            valid = validateProfileTextField("input[name='address']", isAddressOnly, "Address must contain letters, numbers and spaces only.") && valid;
+            valid = validateProfileTextField("input[name='postcode']", isPostcodeOnly, "Postal code must contain numbers only.") && valid;
+            return valid;
         }
 
         $("input[name='fullname']").on("input", function () {
@@ -707,6 +824,12 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                         $("<div id='fullname-error' class='text-danger mt-1'>Full name must be 2 or 3 words (e.g., First Last or First Middle Last).</div>").insertAfter("input[name='fullname']");
                     }
                     valid = false;
+                } else if (!isLettersOnly(fullName)) {
+                    $("input[name='fullname']").addClass("is-invalid");
+                    if ($("#fullname-error").length === 0) {
+                        $("<div id='fullname-error' class='text-danger mt-1'>Full name must contain letters only.</div>").insertAfter("input[name='fullname']");
+                    }
+                    valid = false;
                 } else {
                     $("input[name='fullname']").removeClass("is-invalid");
                     $("#fullname-error").remove();
@@ -760,6 +883,10 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
                     $("#confirm_password").removeClass("is-invalid");
                     $("#confirm-password-error").hide();
                 }
+            }
+
+            if (currentStep === 3 && !validateAddressStep()) {
+                valid = false;
             }
 
             if (valid && currentStep < totalSteps) {
@@ -827,6 +954,11 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
 
         $("#complete-profile-form").on("submit", function (e) {
             const fullPhone = iti.getNumber();
+
+            if (!validateAddressStep()) {
+                e.preventDefault();
+                return false;
+            }
 
             if (!iti.isValidNumber()) {
                 e.preventDefault();

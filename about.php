@@ -3,6 +3,7 @@ session_start();
 require_once "authentication/database.php";
 require_once "authentication/get_config.php";
 require_once "include/translation_helpers.php";
+require_once "include/website_content_settings.php";
 
 $system_title = getSystemConfig("site_title") ?: "Athina E-Shop";
 $logo_path    = getSystemConfig("logo_path") ?: "assets/images/athina-eshop-logo.png";
@@ -13,6 +14,13 @@ if (!file_exists($logo_path) && file_exists("assets/images/athina-eshop-logo.png
 if (!file_exists($logo_path)) {
     $logo_path = "assets/images/athina-eshop-logo.png";
 }
+
+$websiteContent = app_website_content_settings($conn);
+$aboutContent = $websiteContent['about'] ?? app_website_content_defaults()['about'];
+$aboutStory = $aboutContent['story'] ?? app_website_content_defaults()['about']['story'];
+$aboutValues = $aboutContent['values'] ?? app_website_content_defaults()['about']['values'];
+$aboutStoryEnHtml = app_website_content_multiline_html((string)($aboutStory['content_en'] ?? ''));
+$aboutStoryGrHtml = app_website_content_multiline_html((string)($aboutStory['content_gr'] ?? ''));
 
 $role        = "guest";
 $fullName    = "Guest";
@@ -111,23 +119,19 @@ $GLOBALS['header_user_role']      = $role;
     <section class="about-story">
         <div class="container">
             <div class="about-card">
-                <h2 data-translate="ourStoryTitle">Our Story</h2>
-                <p data-translate="ourStoryP1">
-                    Creations by Athina was born out of a deep passion for crochet and the joy of creating
-                    something beautiful with your own hands. What started as a hobby quickly grew into a
-                    small business dedicated to bringing handmade warmth into people's lives.
-                </p>
-                <p data-translate="ourStoryP2">
-                    Every item in our shop is carefully crafted with love, attention to detail, and the
-                    finest quality yarns. No two pieces are exactly alike — that's the beauty of handmade.
-                </p>
+                <h2<?= app_translate_text_attrs((string)$aboutStory['title_en'], (string)$aboutStory['title_gr']) ?>><?= app_h((string)$aboutStory['title_en']) ?></h2>
+                <div<?= app_translate_html_attrs($aboutStoryEnHtml, $aboutStoryGrHtml) ?>><?= $aboutStoryEnHtml ?></div>
             </div>
             <div class="about-card">
-                <h2 data-translate="ourValuesTitle">Our Values</h2>
+                <h2<?= app_translate_text_attrs((string)$aboutValues['title_en'], (string)$aboutValues['title_gr']) ?>><?= app_h((string)$aboutValues['title_en']) ?></h2>
                 <ul>
-                    <li><strong data-translate="handmadeQuality">Handmade Quality</strong> - <span data-translate="handmadeQualityAboutDesc">Each item is carefully crafted by hand with attention to detail</span></li>
-                    <li><strong data-translate="perfectGiftsAbout">Perfect Gifts</strong> - <span data-translate="perfectGiftsDesc">Unique presents that show you care, with gift wrapping available</span></li>
-                    <li><strong data-translate="ecoFriendly">Eco-Friendly</strong> - <span data-translate="ecoFriendlyAboutDesc">Made with sustainable and high-quality materials</span></li>
+                    <?php foreach (($aboutValues['items'] ?? []) as $valueItem): ?>
+                        <li>
+                            <strong<?= app_translate_text_attrs((string)($valueItem['title_en'] ?? ''), (string)($valueItem['title_gr'] ?? '')) ?>><?= app_h((string)($valueItem['title_en'] ?? '')) ?></strong>
+                            -
+                            <span<?= app_translate_text_attrs((string)($valueItem['text_en'] ?? ''), (string)($valueItem['text_gr'] ?? '')) ?>><?= app_h((string)($valueItem['text_en'] ?? '')) ?></span>
+                        </li>
+                    <?php endforeach; ?>
                 </ul>
             </div>
         </div>
@@ -142,4 +146,3 @@ $GLOBALS['header_user_role']      = $role;
     <?php include __DIR__ . '/include/footer.php'; ?>
 </body>
 </html>
-

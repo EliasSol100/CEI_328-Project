@@ -658,7 +658,7 @@ if (!function_exists('app_auth_two_factor_resend_cooldown_seconds')) {
 }
 
 if (!function_exists('app_auth_start_two_factor_challenge')) {
-    function app_auth_start_two_factor_challenge(array $userRow, string $loginIdentifier, bool $rememberRequested): array
+    function app_auth_start_two_factor_challenge(array $userRow, string $loginIdentifier, bool $rememberRequested, bool $forceSend = false): array
     {
         $userId = (int)($userRow['id'] ?? $userRow['userID'] ?? 0);
         $email = trim((string)($userRow['email'] ?? ''));
@@ -666,6 +666,21 @@ if (!function_exists('app_auth_start_two_factor_challenge')) {
             return [
                 'success' => false,
                 'message' => "We couldn't start two-factor authentication right now. Please try again.",
+            ];
+        }
+
+        $existing = app_auth_pending_two_factor();
+        if (!$forceSend
+            && $existing
+            && (int)($existing['user_id'] ?? 0) === $userId
+            && (int)($existing['expires_at'] ?? 0) > time()
+        ) {
+            $existing['login_identifier'] = trim($loginIdentifier);
+            $existing['remember_requested'] = $rememberRequested ? 1 : 0;
+            $_SESSION['pending_2fa_login'] = $existing;
+            return [
+                'success' => true,
+                'message' => 'A 2FA code has already been sent to your email address.',
             ];
         }
 
@@ -753,7 +768,8 @@ if (!function_exists('app_auth_resend_two_factor')) {
         return app_auth_start_two_factor_challenge(
             $user,
             (string)($pending['login_identifier'] ?? ''),
-            !empty($pending['remember_requested'])
+            !empty($pending['remember_requested']),
+            true
         );
     }
 }

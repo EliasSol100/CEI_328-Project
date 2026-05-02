@@ -21,32 +21,32 @@ function mediaOptimizePath(string $relativePath): string
 
     if (strpos($lower, 'uploads/assets/images/homepage/') === 0) {
         if ($baseName === 'header-logo.png' || $baseName === 'header-logo.gif' || $baseName === 'header-logo.webp' || $baseName === 'header-logo.jpeg') {
-            return app_image_convert_local_content_asset_to_jpg($normalized, 50, 50, 88);
+            return app_image_convert_local_content_asset_to_webp($normalized, 50, 50, 88);
         }
         if ($baseName === 'hero-section.png' || $baseName === 'hero-section.webp' || $baseName === 'hero-section.gif') {
-            return app_image_convert_local_content_asset_to_jpg($normalized, 1920, 600, 84);
+            return app_image_convert_local_content_asset_to_webp($normalized, 1920, 600, 84);
         }
         if (strpos($baseName, 'shop-collection-') === 0) {
-            return app_image_convert_local_content_asset_to_jpg($normalized, 261, 260, 84);
+            return app_image_convert_local_content_asset_to_webp($normalized, 261, 260, 84);
         }
         if (strpos($baseName, 'follow-journey-') === 0) {
-            return app_image_convert_local_content_asset_to_jpg($normalized, 361, 260, 84);
+            return app_image_convert_local_content_asset_to_webp($normalized, 361, 260, 84);
         }
     }
 
     if (strpos($lower, 'assets/yarn_colors/') === 0) {
-        return app_image_convert_local_content_asset_to_jpg($normalized, 1200, 1200, 84);
+        return app_image_convert_local_content_asset_to_webp($normalized, 1200, 1200, 84);
     }
 
     if (strpos($lower, 'assets/product_color_scheme_photos/') === 0) {
-        return app_image_convert_local_content_asset_to_jpg($normalized, 1200, 1200, 86);
+        return app_image_convert_local_content_asset_to_webp($normalized, 1200, 1200, 86);
     }
 
     if (strpos($lower, 'assets/product_color_photos/') === 0) {
-        return app_image_convert_local_content_asset_to_jpg($normalized, 800, 800, 84);
+        return app_image_convert_local_content_asset_to_webp($normalized, 800, 800, 84);
     }
 
-    return app_image_convert_local_content_asset_to_jpg($normalized, 1600, 1600, 82);
+    return app_image_convert_local_content_asset_to_webp($normalized, 1600, 1600, 82);
 }
 
 function mediaCollectConvertibleFiles(string $relativeRoot): array
@@ -109,7 +109,7 @@ function mediaResolveOptimizedReference(string $current): ?string
         return null;
     }
 
-    $candidate = preg_replace('/\.(png|gif|webp|jpe?g)$/i', '.jpg', $normalized);
+    $candidate = preg_replace('/\.(png|gif|webp|jpe?g)$/i', '.webp', $normalized);
     if (!is_string($candidate) || $candidate === '' || strcasecmp($candidate, $normalized) === 0) {
         return null;
     }

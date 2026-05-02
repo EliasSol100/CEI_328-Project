@@ -14,6 +14,90 @@ if (!function_exists('app_image_is_remote_asset')) {
     }
 }
 
+if (!function_exists('app_image_is_public_asset_url')) {
+    function app_image_is_public_asset_url(string $path): bool
+    {
+        $path = trim($path);
+        return (bool)preg_match('#^(?:https?:)?//#i', $path) || (bool)preg_match('#^(?:data|blob):#i', $path);
+    }
+}
+
+if (!function_exists('app_image_project_public_path')) {
+    function app_image_project_public_path(): string
+    {
+        static $publicPath = null;
+        if ($publicPath !== null) {
+            return $publicPath;
+        }
+
+        $projectRoot = realpath(app_image_project_root()) ?: app_image_project_root();
+        $projectRoot = rtrim(str_replace('\\', '/', $projectRoot), '/');
+
+        $documentRoot = (string)($_SERVER['DOCUMENT_ROOT'] ?? '');
+        $documentRoot = $documentRoot !== '' ? (realpath($documentRoot) ?: $documentRoot) : '';
+        $documentRoot = rtrim(str_replace('\\', '/', $documentRoot), '/');
+
+        if ($projectRoot !== '' && $documentRoot !== '') {
+            $projectLower = strtolower($projectRoot);
+            $documentLower = strtolower($documentRoot);
+            if ($projectLower === $documentLower || strpos($projectLower, $documentLower . '/') === 0) {
+                $relative = trim(substr($projectRoot, strlen($documentRoot)), '/');
+                $publicPath = $relative !== '' ? '/' . $relative : '';
+                return $publicPath;
+            }
+        }
+
+        $scriptName = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
+        $scriptFile = (string)($_SERVER['SCRIPT_FILENAME'] ?? '');
+        $scriptFile = $scriptFile !== '' ? (realpath($scriptFile) ?: $scriptFile) : '';
+        $scriptFile = str_replace('\\', '/', $scriptFile);
+
+        if ($projectRoot !== '' && $scriptName !== '' && $scriptFile !== '') {
+            $projectLower = strtolower($projectRoot);
+            $scriptLower = strtolower($scriptFile);
+            if ($scriptLower === $projectLower || strpos($scriptLower, $projectLower . '/') === 0) {
+                $scriptRelative = trim(substr($scriptFile, strlen($projectRoot)), '/');
+                $scriptRelativeDir = str_replace('\\', '/', dirname($scriptRelative));
+                $scriptRelativeDir = $scriptRelativeDir === '.' ? '' : trim($scriptRelativeDir, '/');
+                $scriptUrlDir = rtrim(str_replace('\\', '/', dirname($scriptName)), '/');
+
+                if ($scriptRelativeDir !== '') {
+                    $suffix = '/' . $scriptRelativeDir;
+                    if (substr($scriptUrlDir, -strlen($suffix)) === $suffix) {
+                        $scriptUrlDir = substr($scriptUrlDir, 0, -strlen($suffix));
+                    }
+                }
+
+                $publicPath = ($scriptUrlDir === '' || $scriptUrlDir === '/' || $scriptUrlDir === '.') ? '' : $scriptUrlDir;
+                return $publicPath;
+            }
+        }
+
+        $publicPath = '';
+        return $publicPath;
+    }
+}
+
+if (!function_exists('app_image_asset_url')) {
+    function app_image_asset_url(string $path): string
+    {
+        $path = str_replace('\\', '/', trim($path));
+        if ($path === '' || app_image_is_public_asset_url($path)) {
+            return $path;
+        }
+
+        $projectPath = app_image_project_public_path();
+        if ($path[0] === '/') {
+            if ($projectPath !== '' && ($path === $projectPath || strpos($path, $projectPath . '/') === 0)) {
+                return $path;
+            }
+            $path = ltrim($path, '/');
+        }
+
+        return rtrim($projectPath, '/') . '/' . ltrim($path, '/');
+    }
+}
+
 if (!function_exists('app_image_relative_asset_path')) {
     function app_image_relative_asset_path(string $path): string
     {
@@ -37,7 +121,7 @@ if (!function_exists('app_image_is_convertible_content_asset')) {
             return false;
         }
 
-        if (!preg_match('/\.(png|gif|webp|jpeg)$/i', $relativePath)) {
+        if (!preg_match('/\.(png|gif|webp|jpe?g)$/i', $relativePath)) {
             return false;
         }
 
@@ -72,13 +156,16 @@ if (!function_exists('app_image_prefer_optimized_asset_path')) {
             return $path;
         }
 
-        $candidate = preg_replace('/\.(png|gif|webp|jpe?g)$/i', '.jpg', app_image_relative_asset_path($path));
-        if (!is_string($candidate) || $candidate === '') {
-            return $path;
+        $normalized = app_image_relative_asset_path($path);
+
+        $webpCandidate = preg_replace('/\.(png|gif|webp|jpe?g)$/i', '.webp', $normalized);
+        if (is_string($webpCandidate) && $webpCandidate !== '' && is_file(app_image_local_asset_path($webpCandidate))) {
+            return $webpCandidate;
         }
 
-        if (is_file(app_image_local_asset_path($candidate))) {
-            return $candidate;
+        $jpgCandidate = preg_replace('/\.(png|gif|webp|jpe?g)$/i', '.jpg', $normalized);
+        if (is_string($jpgCandidate) && $jpgCandidate !== '' && is_file(app_image_local_asset_path($jpgCandidate))) {
+            return $jpgCandidate;
         }
 
         return $path;
@@ -170,20 +257,59 @@ if (!function_exists('app_image_write_binary_file')) {
     }
 }
 
-if (!function_exists('app_image_convert_binary_to_jpeg_file')) {
-    function app_image_convert_binary_to_jpeg_file(string $binary, string $targetPath, int $maxWidth = 1600, int $maxHeight = 1600, int $quality = 82): bool
+if (!function_exists('app_image_optimize_photo_blob_for_storage')) {
+    function app_image_optimize_photo_blob_for_storage(string $binary, int $maxWidth = 1400, int $maxHeight = 1400, int $quality = 78): string
     {
-        $jpegBinary = app_image_binary_to_optimized_jpeg($binary, $maxWidth, $maxHeight, $quality);
-        if (!is_string($jpegBinary) || $jpegBinary === '') {
-            return false;
+        $webpBinary = app_image_binary_to_optimized_webp($binary, $maxWidth, $maxHeight, $quality);
+        if (is_string($webpBinary) && $webpBinary !== '') {
+            return $webpBinary;
         }
 
-        return app_image_write_binary_file($targetPath, $jpegBinary);
+        $jpegBinary = app_image_binary_to_optimized_jpeg($binary, $maxWidth, $maxHeight, $quality);
+        if (!is_string($jpegBinary) || $jpegBinary === '') {
+            return $binary;
+        }
+
+        return $jpegBinary;
     }
 }
 
-if (!function_exists('app_image_convert_file_to_jpeg')) {
-    function app_image_convert_file_to_jpeg(string $sourcePath, string $targetPath, int $maxWidth = 1600, int $maxHeight = 1600, int $quality = 82): bool
+if (!function_exists('app_image_binary_to_optimized_webp')) {
+    function app_image_binary_to_optimized_webp(string $binary, int $maxWidth = 1600, int $maxHeight = 1600, int $quality = 82): ?string
+    {
+        if (!(imagetypes() & IMG_WEBP)) {
+            return null;
+        }
+
+        $sourceImage = app_image_create_resource_from_binary($binary);
+        if (!$sourceImage) {
+            return null;
+        }
+
+        $sourceWidth = imagesx($sourceImage);
+        $sourceHeight = imagesy($sourceImage);
+        [$targetWidth, $targetHeight] = app_image_calculate_target_size($sourceWidth, $sourceHeight, $maxWidth, $maxHeight);
+        $canvas = app_image_render_resampled_canvas($sourceImage, $sourceWidth, $sourceHeight, $targetWidth, $targetHeight);
+        imagedestroy($sourceImage);
+
+        if (!$canvas) {
+            return null;
+        }
+
+        ob_start();
+        $ok = imagewebp($canvas, null, max(40, min(100, $quality)));
+        $webpBinary = $ok ? (string)ob_get_clean() : '';
+        if (!$ok) {
+            ob_end_clean();
+        }
+        imagedestroy($canvas);
+
+        return $webpBinary !== '' ? $webpBinary : null;
+    }
+}
+
+if (!function_exists('app_image_convert_file_to_webp')) {
+    function app_image_convert_file_to_webp(string $sourcePath, string $targetPath, int $maxWidth = 1600, int $maxHeight = 1600, int $quality = 82): bool
     {
         if (!is_file($sourcePath)) {
             return false;
@@ -194,30 +320,17 @@ if (!function_exists('app_image_convert_file_to_jpeg')) {
             return false;
         }
 
-        return app_image_convert_binary_to_jpeg_file($binary, $targetPath, $maxWidth, $maxHeight, $quality);
+        $webpBinary = app_image_binary_to_optimized_webp($binary, $maxWidth, $maxHeight, $quality);
+        if (!is_string($webpBinary) || $webpBinary === '') {
+            return false;
+        }
+
+        return app_image_write_binary_file($targetPath, $webpBinary);
     }
 }
 
-if (!function_exists('app_image_optimize_photo_blob_for_storage')) {
-    function app_image_optimize_photo_blob_for_storage(string $binary, int $maxWidth = 1400, int $maxHeight = 1400, int $quality = 78): string
-    {
-        $finfo = new finfo(FILEINFO_MIME_TYPE);
-        $mimeType = (string)($finfo->buffer($binary) ?: '');
-        $jpegBinary = app_image_binary_to_optimized_jpeg($binary, $maxWidth, $maxHeight, $quality);
-        if (!is_string($jpegBinary) || $jpegBinary === '') {
-            return $binary;
-        }
-
-        if ($mimeType !== 'image/jpeg') {
-            return $jpegBinary;
-        }
-
-        return strlen($jpegBinary) < strlen($binary) ? $jpegBinary : $binary;
-    }
-}
-
-if (!function_exists('app_image_convert_local_content_asset_to_jpg')) {
-    function app_image_convert_local_content_asset_to_jpg(string $path, int $maxWidth = 1600, int $maxHeight = 1600, int $quality = 82): string
+if (!function_exists('app_image_convert_local_content_asset_to_webp')) {
+    function app_image_convert_local_content_asset_to_webp(string $path, int $maxWidth = 1600, int $maxHeight = 1600, int $quality = 82): string
     {
         $normalizedPath = app_image_relative_asset_path($path);
         if (!app_image_is_convertible_content_asset($normalizedPath)) {
@@ -229,14 +342,14 @@ if (!function_exists('app_image_convert_local_content_asset_to_jpg')) {
             return $path;
         }
 
-        $targetRelative = preg_replace('/\.(png|gif|webp|jpe?g)$/i', '.jpg', $normalizedPath);
+        $targetRelative = preg_replace('/\.(png|gif|webp|jpe?g)$/i', '.webp', $normalizedPath);
         if (!is_string($targetRelative) || $targetRelative === '') {
             return $path;
         }
 
         $targetPath = app_image_local_asset_path($targetRelative);
         if (!is_file($targetPath)) {
-            $converted = app_image_convert_file_to_jpeg($sourcePath, $targetPath, $maxWidth, $maxHeight, $quality);
+            $converted = app_image_convert_file_to_webp($sourcePath, $targetPath, $maxWidth, $maxHeight, $quality);
             if (!$converted) {
                 return $path;
             }

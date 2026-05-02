@@ -56,6 +56,10 @@ const translations = {
         shopNoResults: "No products match your filters right now.",
         addToCart: "Add to Cart",
         selectOptions: "Select Options",
+        productColourSelection: "Product Colour Selection",
+        colourSchemeA: "Colour A",
+        colourSchemeB: "Colour B",
+        colourSchemeC: "Colour C",
         addToWishlist: "Add to wishlist",
         removeFromWishlist: "Remove from wishlist",
         addedToCart: "Added to cart.",
@@ -237,7 +241,7 @@ const translations = {
         settingsSaveChanges: "Save Changes",
         avatarModalTitle: "Change Profile Picture",
         avatarModalLabel: "Upload a new image",
-        avatarModalNote: "JPG, PNG, GIF or WEBP. Max size 2MB.",
+        avatarModalNote: "JPG, PNG, GIF or WEBP. Uploaded images are converted to WebP automatically. Max size 2MB.",
         btnCancel: "Cancel",
         btnSavePicture: "Save Picture",
         btnSaveChanges: "Save Changes",
@@ -268,7 +272,6 @@ const translations = {
         productSizeLabel: "Size",
         productColorLabel: "Colour",
         productSelectColor: "Select colour",
-        productCustomisationTitle: "Custom Colour Request",
         productGiftOptions: "Gift Options",
         productGiftWrapping: "Gift Wrapping (+€2)",
         productGiftBag: "Gift Bag (+€1.5)",
@@ -303,8 +306,6 @@ const translations = {
         productSelectValidSizeColor: "Please select a valid size and color.",
         productSelectedVariationOutOfStock: "Selected variation is out of stock.",
         productSelectAvailableOption: "Please select an available option.",
-        productEnterCustomColour: "Please enter your preferred colour request.",
-        productCompleteCustomColours: "Please complete all custom colour fields.",
         productSelectColorFirst: "Please choose a colour to continue.",
         productSelectedColour: "Selected colour: {name}",
         productCustomisationTitle: "Share Your Colour Preference",
@@ -420,6 +421,10 @@ const translations = {
         shopNoResults: "Δεν υπάρχουν προϊόντα που να ταιριάζουν στα φίλτρα σου αυτή τη στιγμή.",
         addToCart: "Προσθήκη στο Καλάθι",
         selectOptions: "Επιλογή Παραλλαγών",
+        productColourSelection: "Επιλογή Χρωμάτων Προϊόντος",
+        colourSchemeA: "Χρώμα A",
+        colourSchemeB: "Χρώμα B",
+        colourSchemeC: "Χρώμα C",
         addToWishlist: "Προσθήκη στη λίστα επιθυμιών",
         removeFromWishlist: "Αφαίρεση από τη λίστα επιθυμιών",
         addedToCart: "Προστέθηκε στο καλάθι.",
@@ -601,7 +606,7 @@ const translations = {
         settingsSaveChanges: "Αποθήκευση Αλλαγών",
         avatarModalTitle: "Αλλαγή Εικόνας Προφίλ",
         avatarModalLabel: "Ανεβάστε νέα εικόνα",
-        avatarModalNote: "JPG, PNG, GIF ή WEBP. Μέγιστο μέγεθος 2MB.",
+        avatarModalNote: "JPG, PNG, GIF ή WEBP. Οι εικόνες μετατρέπονται αυτόματα σε WebP. Μέγιστο μέγεθος 2MB.",
         btnCancel: "Άκυρο",
         btnSavePicture: "Αποθήκευση Εικόνας",
         btnSaveChanges: "Αποθήκευση Αλλαγών",
@@ -632,7 +637,7 @@ const translations = {
         productSizeLabel: "Μέγεθος",
         productColorLabel: "Χρώμα",
         productSelectColor: "Επιλέξτε χρώμα",
-        productCustomisationTitle: "Αίτημα Προσαρμοσμένου Χρώματος",
+        productCustomisationTitle: "Πείτε μας την προτίμηση χρώματος",
         productGiftOptions: "Επιλογές Δώρου",
         productGiftWrapping: "Συσκευασία Δώρου (+€2)",
         productGiftBag: "Τσάντα Δώρου (+€1.5)",
@@ -667,8 +672,10 @@ const translations = {
         productSelectValidSizeColor: "Παρακαλώ επιλέξτε έγκυρο μέγεθος και χρώμα.",
         productSelectedVariationOutOfStock: "Η επιλεγμένη παραλλαγή δεν είναι διαθέσιμη.",
         productSelectAvailableOption: "Παρακαλώ επιλέξτε διαθέσιμη επιλογή.",
-        productEnterCustomColour: "Παρακαλώ γράψτε το χρώμα που προτιμάτε.",
-        productCompleteCustomColours: "Παρακαλώ συμπληρώστε όλα τα πεδία προσαρμοσμένου χρώματος.",
+        productSelectColorFirst: "Παρακαλώ επιλέξτε χρώμα για να συνεχίσετε.",
+        productSelectedColour: "Επιλεγμένο χρώμα: {name}",
+        productEnterCustomColour: "Παρακαλώ γράψτε το χρώμα που θα θέλατε πριν προσθέσετε το προϊόν στο καλάθι.",
+        productCompleteCustomColours: "Παρακαλώ συμπληρώστε κάθε προτίμηση χρώματος πριν συνεχίσετε.",
         productEnterCouponFirst: "Εισαγάγετε πρώτα έναν κωδικό κουπονιού.",
         productInvalidCoupon: "Μη έγκυρος ή ληγμένος κωδικός κουπονιού.",
         productCouponSaveFailed: "Το κουπόνι είναι έγκυρο, αλλά δεν ήταν δυνατή η αποθήκευσή του. Παρακαλώ δοκιμάστε ξανά.",
@@ -723,22 +730,6 @@ const translations = {
         authRequestNewResetLink: "Ζητήστε νέο σύνδεσμο επαναφοράς"
     }
 };
-
-Object.assign(translations.en, {
-    productSelectColorFirst: "Please choose a colour to continue.",
-    productSelectedColour: "Selected colour: {name}",
-    productCustomisationTitle: "Share Your Colour Preference",
-    productEnterCustomColour: "Please share your preferred colour before adding this item to cart.",
-    productCompleteCustomColours: "Please complete each colour preference before continuing."
-});
-
-Object.assign(translations.el, {
-    productSelectColorFirst: "Παρακαλώ επιλέξτε χρώμα για να συνεχίσετε.",
-    productSelectedColour: "Επιλεγμένο χρώμα: {name}",
-    productCustomisationTitle: "Πείτε μας την προτίμηση χρώματος",
-    productEnterCustomColour: "Παρακαλώ γράψτε το χρώμα που θα θέλατε πριν προσθέσετε το προϊόν στο καλάθι.",
-    productCompleteCustomColours: "Παρακαλώ συμπληρώστε κάθε προτίμηση χρώματος πριν συνεχίσετε."
-});
 
 const APP_COOKIE_CONSENT_NAME = "athina_cookie_consent";
 

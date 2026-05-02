@@ -12,10 +12,10 @@ $GLOBALS['header_user_full_name'] = $fullName;
 $GLOBALS['header_user_role'] = $role;
 
 $sessionCatalog = [
-    'flame_dragon' => ['name' => 'Flame Dragon Amigurumi Plush', 'price' => 38, 'image' => 'assets/images/products/flame-dragon-plush.jpg'],
-    'electric_mouse' => ['name' => 'Electric Mouse Buddy Plush', 'price' => 34, 'image' => 'assets/images/products/electric-mouse-plush.jpg'],
-    'lilac_turtle' => ['name' => 'Lilac Sea Turtle Plush', 'price' => 40, 'image' => 'assets/images/products/lilac-sea-turtle-plush.jpg'],
-    'daisy_bunny' => ['name' => 'Daisy Dress Bunny Plush', 'price' => 42, 'image' => 'assets/images/products/bunny-pink-hat-plush.jpg'],
+    'flame_dragon' => ['name' => 'Flame Dragon Amigurumi Plush', 'price' => 38, 'image' => 'assets/images/products/flame-dragon-plush.webp'],
+    'electric_mouse' => ['name' => 'Electric Mouse Buddy Plush', 'price' => 34, 'image' => 'assets/images/products/electric-mouse-plush.webp'],
+    'lilac_turtle' => ['name' => 'Lilac Sea Turtle Plush', 'price' => 40, 'image' => 'assets/images/products/lilac-sea-turtle-plush.webp'],
+    'daisy_bunny' => ['name' => 'Daisy Dress Bunny Plush', 'price' => 42, 'image' => 'assets/images/products/bunny-pink-hat-plush.webp'],
 ];
 
 function getOrCreateWishlistID(mysqli $conn, int $uid): int {

@@ -11,6 +11,7 @@ require_once __DIR__ . '/../include/payment_gateway.php';
 require_once __DIR__ . '/../include/checkout_payment_helpers.php';
 require_once __DIR__ . '/../include/translation_helpers.php';
 require_once __DIR__ . '/../include/shipping_helpers.php';
+require_once __DIR__ . '/../include/cart_persistence.php';
 require_once __DIR__ . '/place_order.php';
 
 $configPath = __DIR__ . '/../authentication/get_config.php';
@@ -24,6 +25,7 @@ if (file_exists($configPath)) {
 if (!$conn || $conn->connect_error) {
     die("Database connection failed: " . ($conn->connect_error ?? 'Unknown error'));
 }
+app_cart_restore_for_current_user($conn);
 
 function ensurePromotionCouponColumn(mysqli $conn): void {
     static $checked = false;
@@ -207,6 +209,26 @@ function checkoutSanitizePickupPoint($value): string {
     }
 
     return substr($value, 0, 160);
+}
+
+function checkoutCleanText(string $value): string {
+    return trim(preg_replace('/\s+/u', ' ', strip_tags($value)) ?? '');
+}
+
+function checkoutValidLetters(string $value): bool {
+    return $value !== '' && (bool)preg_match('/^[\p{L} ]+$/u', $value);
+}
+
+function checkoutValidAddressText(string $value): bool {
+    return $value !== '' && (bool)preg_match('/^[\p{L}\p{N} ]+$/u', $value);
+}
+
+function checkoutValidOptionalLabel(string $value): bool {
+    return $value === '' || (bool)preg_match('/^[\p{L}\p{N} ]+$/u', $value);
+}
+
+function checkoutValidPhone(string $value): bool {
+    return (bool)preg_match('/^\+?\d{7,15}$/', $value);
 }
 
 function checkoutShippingCost(
@@ -655,6 +677,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_POST['shipping_country'] = $shippingCountry;
         $formData['shipping_country'] = $shippingCountry;
 
+        $shippingAddress = checkoutCleanText((string)($_POST['shipping_address'] ?? ''));
+        $shippingCity = checkoutCleanText((string)($_POST['shipping_city'] ?? ''));
+        $shippingLabel = checkoutCleanText((string)($_POST['shipping_label'] ?? ''));
+        $_POST['shipping_address'] = $shippingAddress;
+        $_POST['shipping_city'] = $shippingCity;
+        $_POST['shipping_label'] = $shippingLabel;
+        $formData['shipping_address'] = $shippingAddress;
+        $formData['shipping_city'] = $shippingCity;
+        $formData['shipping_label'] = $shippingLabel;
+
+        if ($shippingAddress !== '' && !checkoutValidAddressText($shippingAddress)) {
+            $errors['shipping_address'] = 'Address must contain letters, numbers and spaces only.';
+        }
+        if ($shippingCity !== '' && !checkoutValidLetters($shippingCity)) {
+            $errors['shipping_city'] = 'City must contain letters only.';
+        }
+        if (!checkoutValidOptionalLabel($shippingLabel)) {
+            $errors['shipping_label'] = 'Label must contain letters, numbers and spaces only.';
+        }
+
         $shippingSpeed = trim((string)($_POST['shipping_speed'] ?? 'standard'));
         if (!in_array($shippingSpeed, $shippingSpeeds, true)) {
             $errors['shipping_speed'] = 'Please select a valid shipping speed.';
@@ -695,18 +737,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if (!$isLoggedIn) {
-            if (empty($_POST['full_name'])) {
+            $guestFullName = checkoutCleanText((string)($_POST['full_name'] ?? ''));
+            $guestPhone = checkoutCleanText((string)($_POST['phone'] ?? ''));
+            $_POST['full_name'] = $guestFullName;
+            $_POST['phone'] = $guestPhone;
+            $formData['full_name'] = $guestFullName;
+            $formData['phone'] = $guestPhone;
+            $guestNameParts = preg_split('/\s+/u', $guestFullName, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+            if ($guestFullName === '') {
                 $errors['full_name'] = 'Full name is required';
-            } elseif (str_word_count(trim($_POST['full_name'])) < 2) {
+            } elseif (count($guestNameParts) < 2) {
                 $errors['full_name'] = 'Enter first and last name';
+            } elseif (!checkoutValidLetters($guestFullName)) {
+                $errors['full_name'] = 'Full name must contain letters only.';
             }
             if (empty($_POST['email'])) {
                 $errors['email'] = 'Email is required';
             } elseif (!filter_var($_POST['email'], FILTER_VALIDATE_EMAIL)) {
                 $errors['email'] = 'Invalid email format';
             }
-            if (empty($_POST['phone'])) {
+            if ($guestPhone === '') {
                 $errors['phone'] = 'Phone is required';
+            } elseif (!checkoutValidPhone($guestPhone)) {
+                $errors['phone'] = 'Phone must contain only digits and an optional leading plus.';
             }
         }
 
@@ -790,8 +844,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'user_email' => $isLoggedIn ? (string)$userEmail : '',
                     'user_full_name' => $isLoggedIn ? (string)$userFullName : '',
                     'guest_email' => !$isLoggedIn ? trim((string)($_POST['email'] ?? '')) : '',
-                    'guest_full_name' => !$isLoggedIn ? trim((string)($_POST['full_name'] ?? 'Customer')) : '',
-                    'guest_phone' => !$isLoggedIn ? trim((string)($_POST['phone'] ?? '')) : '',
+                    'guest_full_name' => !$isLoggedIn ? checkoutCleanText((string)($_POST['full_name'] ?? 'Customer')) : '',
+                    'guest_phone' => !$isLoggedIn ? checkoutCleanText((string)($_POST['phone'] ?? '')) : '',
                     'create_account' => !$isLoggedIn && !empty($_POST['create_account']) && $_POST['create_account'] === 'yes',
                     'subtotal' => $cartTotal,
                     'coupon_discount' => $couponDiscount,
@@ -801,10 +855,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'shipping_cost' => $shippingCost,
                     'shipping_country' => $shippingCountry,
                     'shipping_speed' => $shippingSpeed,
-                    'shipping_address' => trim((string)($_POST['shipping_address'] ?? '')),
-                    'shipping_city' => trim((string)($_POST['shipping_city'] ?? '')),
+                    'shipping_address' => checkoutCleanText((string)($_POST['shipping_address'] ?? '')),
+                    'shipping_city' => checkoutCleanText((string)($_POST['shipping_city'] ?? '')),
                     'shipping_postal_code' => trim((string)($_POST['shipping_postal_code'] ?? '')),
-                    'shipping_label' => trim((string)($_POST['shipping_label'] ?? '')),
+                    'shipping_label' => checkoutCleanText((string)($_POST['shipping_label'] ?? '')),
                     'courier' => $courier,
                     'fulfillment_mode' => $fulfillmentMode,
                     'pickup_point' => $pickupPoint,
@@ -902,7 +956,7 @@ if (file_exists($headerPath)) {
                     <legend data-translate="checkoutContact">Contact</legend>
                     <div class="form-group">
                         <label><span data-translate="checkoutFullName">Full Name</span> *</label>
-                        <input type="text" name="full_name" value="<?= htmlspecialchars($formData['full_name']??'') ?>" class="<?= isset($errors['full_name'])?'error-field':'' ?>" required>
+                        <input type="text" name="full_name" value="<?= htmlspecialchars($formData['full_name']??'') ?>" class="<?= isset($errors['full_name'])?'error-field':'' ?>" pattern="[A-Za-zÀ-ÖØ-öø-ÿΑ-Ωα-ωΆ-ώ ]+" title="Use letters and spaces only" required>
                         <?php if (isset($errors['full_name'])): ?><span class="error"><?= $errors['full_name'] ?></span><?php endif; ?>
                     </div>
                     <div class="form-group">
@@ -912,7 +966,7 @@ if (file_exists($headerPath)) {
                     </div>
                     <div class="form-group">
                         <label><span data-translate="checkoutPhone">Phone</span> *</label>
-                        <input type="tel" name="phone" value="<?= htmlspecialchars($formData['phone']??'') ?>" class="<?= isset($errors['phone'])?'error-field':'' ?>" required>
+                        <input type="tel" name="phone" value="<?= htmlspecialchars($formData['phone']??'') ?>" class="<?= isset($errors['phone'])?'error-field':'' ?>" inputmode="tel" pattern="\+?[0-9]{7,15}" title="Use digits and an optional leading plus" required>
                         <?php if (isset($errors['phone'])): ?><span class="error"><?= $errors['phone'] ?></span><?php endif; ?>
                     </div>
                 </fieldset>
@@ -931,13 +985,13 @@ if (file_exists($headerPath)) {
                     <?php endif; ?>
                     <div class="form-group">
                         <label><span data-translate="checkoutAddress">Address</span> *</label>
-                        <input type="text" id="shipping_address" name="shipping_address" value="<?= htmlspecialchars($formData['shipping_address']??'') ?>" class="<?= isset($errors['shipping_address'])?'error-field':'' ?>" required>
+                        <input type="text" id="shipping_address" name="shipping_address" value="<?= htmlspecialchars($formData['shipping_address']??'') ?>" class="<?= isset($errors['shipping_address'])?'error-field':'' ?>" pattern="[A-Za-zÀ-ÖØ-öø-ÿΑ-Ωα-ωΆ-ώ0-9 ]+" title="Use letters, numbers and spaces only" required>
                         <?php if (isset($errors['shipping_address'])): ?><span class="error"><?= $errors['shipping_address'] ?></span><?php endif; ?>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label><span data-translate="checkoutCity">City</span> *</label>
-                            <input type="text" id="shipping_city" name="shipping_city" value="<?= htmlspecialchars($formData['shipping_city']??'') ?>" class="<?= isset($errors['shipping_city'])?'error-field':'' ?>" required>
+                            <input type="text" id="shipping_city" name="shipping_city" value="<?= htmlspecialchars($formData['shipping_city']??'') ?>" class="<?= isset($errors['shipping_city'])?'error-field':'' ?>" pattern="[A-Za-zÀ-ÖØ-öø-ÿΑ-Ωα-ωΆ-ώ ]+" title="Use letters and spaces only" required>
                             <?php if (isset($errors['shipping_city'])): ?><span class="error"><?= $errors['shipping_city'] ?></span><?php endif; ?>
                         </div>
                         <div class="form-group">
@@ -969,7 +1023,8 @@ if (file_exists($headerPath)) {
                     </div>
                     <div class="form-group">
                         <label data-translate="checkoutLabelOptional">Label (optional)</label>
-                        <input type="text" id="shipping_label" name="shipping_label" value="<?= htmlspecialchars($formData['shipping_label']??'') ?>" data-translate-placeholder="checkoutLabelPlaceholder" placeholder="Home, Office, Gift address...">
+                        <input type="text" id="shipping_label" name="shipping_label" value="<?= htmlspecialchars($formData['shipping_label']??'') ?>" class="<?= isset($errors['shipping_label'])?'error-field':'' ?>" pattern="[A-Za-zÀ-ÖØ-öø-ÿΑ-Ωα-ωΆ-ώ0-9 ]*" title="Use letters, numbers and spaces only" data-translate-placeholder="checkoutLabelPlaceholder" placeholder="Home, Office, Gift address...">
+                        <?php if (isset($errors['shipping_label'])): ?><span class="error"><?= $errors['shipping_label'] ?></span><?php endif; ?>
                     </div>
                 </fieldset>
 
