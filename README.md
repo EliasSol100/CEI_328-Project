@@ -21,7 +21,7 @@ Creations by Athina E-Shop is a PHP/MySQL online shop for handmade crochet produ
 - MySQL/MariaDB
 - HTML, CSS, JavaScript
 - PHPMailer
-- XAMPP-friendly local development
+- Production deployment on https://creationsbyathina.com/
 - WebP image processing through PHP GD
 
 ## Important Folders
@@ -32,47 +32,33 @@ Creations by Athina E-Shop is a PHP/MySQL online shop for handmade crochet produ
 - `modules/` - public modules, checkout/order handlers, receipt pages, and admin dashboard modules.
 - `profile/` - customer account/profile pages.
 - `scripts/` - maintenance/import/optimization scripts.
-- `sql/` - database dump used for local import.
+- `sql/` - database schema and seed data used to prepare or restore the site database.
 - `uploads/` - uploaded public assets that are still needed by the site.
 
-## Local Setup
+## Live Website
 
-1. Clone the repository into your local web server directory, for example:
+Official website:
 
-   ```bash
-   C:\xampp\htdocs\athina-eshop-github\CEI_328-Project
-   ```
+```text
+https://creationsbyathina.com/
+```
 
-2. Create a local `.env` file based on the expected database settings:
+This branch represents the code intended for the live web server. Runtime credentials and server-specific values must stay in the server `.env` file and must not be committed to the repository.
 
-   ```env
-   DB_HOST=127.0.0.1
-   DB_PORT=3306
-   DB_NAME=athina_eshop
-   DB_USER=root
-   DB_PASSWORD=
-   APP_URL=http://localhost/athina-eshop-github/CEI_328-Project
-   ```
+Required production configuration:
 
-3. Create the database in phpMyAdmin or MySQL:
+- `APP_URL=https://creationsbyathina.com`
+- Production database host, name, username, and password in `.env`
+- PHPMailer settings for authentication, custom order, contact, and order update emails
+- PHP GD enabled with WebP support
 
-   ```sql
-   CREATE DATABASE athina_eshop CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
-   ```
+Deployment checklist:
 
-4. Import:
-
-   ```text
-   sql/athina_eshop.sql
-   ```
-
-5. Make sure PHP GD is enabled with WebP support. New uploads are optimized and stored as WebP where image uploads are used.
-
-6. Open the local site:
-
-   ```text
-   http://localhost/athina-eshop-github/CEI_328-Project/
-   ```
+1. Merge tested changes from `test2` into `test-webserver`.
+2. Confirm `README.md` and `.env` still describe/use the live domain, not localhost paths.
+3. Upload the `test-webserver` branch files to the production web root.
+4. Import `sql/athina_eshop.sql` only when a database reset or full schema refresh is intentionally required.
+5. Check the live homepage, shop, product page, custom orders, login, cart, checkout, admin dashboard, and receipt flow after deployment.
 
 ## Admin Areas
 
@@ -85,8 +71,7 @@ Creations by Athina E-Shop is a PHP/MySQL online shop for handmade crochet produ
 
 ## Notes
 
-- Do not commit production credentials. Use `.env` for local secrets.
-- The SQL dump is intended for local import and testing.
+- Do not commit production credentials. Use the live server `.env` for secrets.
+- The SQL dump should be imported to production only after confirming that overwriting or changing production data is expected.
 - Existing old image blobs remain in their stored format until they are re-uploaded or migrated.
 - New image uploads are converted to WebP to reduce file size and improve page speed.
-- The XAMPP CLI may show a missing `sodium` extension warning depending on the local PHP setup; that warning is environment-related.
