@@ -6,6 +6,7 @@ require_once "../include/security.php";
 require_once "../include/image_storage.php";
 require_once "../include/loyalty_program.php";
 require_once "../include/translation_helpers.php";
+require_once "../include/cart_persistence.php";
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
@@ -96,6 +97,38 @@ function formatLoyaltyRuleLabel(?string $rule): string {
         return "Loyalty activity";
     }
     return ucwords(str_replace("_", " ", $rule));
+}
+
+function accountCleanText(string $value): string {
+    return trim(preg_replace('/\s+/', ' ', $value) ?? '');
+}
+
+function accountValidLetters(string $value): bool {
+    return $value !== '' && (bool)preg_match('/^[\p{L} ]+$/u', $value);
+}
+
+function accountValidAddress(string $value): bool {
+    return $value !== '' && (bool)preg_match('/^[\p{L}\p{N} ]+$/u', $value);
+}
+
+function accountValidPostcode(string $value): bool {
+    return $value !== '' && (bool)preg_match('/^\d{3,10}$/', $value);
+}
+
+function accountValidateAddressFields(string $country, string $city, string $address, string $postcode): string {
+    if ($country === '' || $city === '' || $address === '' || $postcode === '') {
+        return 'Please fill in all address fields.';
+    }
+    if (!accountValidLetters($city)) {
+        return 'City must contain letters only.';
+    }
+    if (!accountValidAddress($address)) {
+        return 'Address must contain letters, numbers and spaces only.';
+    }
+    if (!accountValidPostcode($postcode)) {
+        return 'Postal code must contain numbers only.';
+    }
+    return '';
 }
 
 function &accountGetOrInitCart(): array {
@@ -224,7 +257,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                             pv.yarnType,
                             pv.colorID,
                             c.colorName,
-                            vs.quantityAvailable
+                            COALESCE(vs.quantityAvailable, p.inventory, 0) AS quantityAvailable
                         FROM order_items oi
                         INNER JOIN orders o ON o.orderID = oi.orderID
                         LEFT JOIN products p ON p.productID = oi.productID
@@ -362,6 +395,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                             if ($addedLineCount > 0) {
                                 $cart["totals"] = accountRecalcCartTotals($cart["items"]);
                                 $cart["updated_at"] = gmdate("c");
+                                app_cart_persist_for_current_user($conn);
                                 $successMessage = "Reorder added to your cart.";
                                 if ($skippedCount > 0) {
                                     $successMessage .= " {$skippedCount} item(s) were skipped due to availability changes.";
@@ -426,14 +460,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     }
 
     if ($action === "add_address") {
-        $label       = trim($_POST["address_label"] ?? "");
-        $country     = trim($_POST["country"]  ?? "");
-        $city        = trim($_POST["city"]     ?? "");
-        $address     = trim($_POST["address"]  ?? "");
-        $postcode    = trim($_POST["postcode"] ?? "");
+        $label       = accountCleanText((string)($_POST["address_label"] ?? ""));
+        $country     = accountCleanText((string)($_POST["country"]  ?? ""));
+        $city        = accountCleanText((string)($_POST["city"]     ?? ""));
+        $address     = accountCleanText((string)($_POST["address"]  ?? ""));
+        $postcode    = accountCleanText((string)($_POST["postcode"] ?? ""));
         $makeDefault = isset($_POST["make_default"]) ? 1 : 0;
+        $addressError = accountValidateAddressFields($country, $city, $address, $postcode);
 
-        if ($country && $city && $address && $postcode) {
+        if ($addressError === '') {
             if ($makeDefault) {
                 accountResetDefaultAddresses($conn, $userId);
             }
@@ -464,7 +499,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             $successMessage = "Address added successfully.";
         } else {
-            $errorMessage = "Please fill in all address fields.";
+            $errorMessage = $addressError;
         }
 
         $activeTab = "addresses";
@@ -528,14 +563,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $stmt->close();
 
         if ($addressRow) {
-            $label       = trim($_POST["address_label"] ?? "");
-            $country     = trim($_POST["country"]  ?? "");
-            $city        = trim($_POST["city"]     ?? "");
-            $address     = trim($_POST["address"]  ?? "");
-            $postcode    = trim($_POST["postcode"] ?? "");
+            $label       = accountCleanText((string)($_POST["address_label"] ?? ""));
+            $country     = accountCleanText((string)($_POST["country"]  ?? ""));
+            $city        = accountCleanText((string)($_POST["city"]     ?? ""));
+            $address     = accountCleanText((string)($_POST["address"]  ?? ""));
+            $postcode    = accountCleanText((string)($_POST["postcode"] ?? ""));
             $makeDefault = isset($_POST["make_default"]) ? 1 : 0;
+            $addressError = accountValidateAddressFields($country, $city, $address, $postcode);
 
-            if ($country && $city && $address && $postcode) {
+            if ($addressError === '') {
                 $existingDefault = (int)$addressRow["is_default"];
                 $isDefaultNew    = $makeDefault ? 1 : $existingDefault;
 
@@ -580,7 +616,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                 $successMessage = "Address updated successfully.";
             } else {
-                $errorMessage = "Please fill in all address fields.";
+                $errorMessage = $addressError;
             }
         } else {
             $errorMessage = "Address not found.";
@@ -1511,15 +1547,15 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                 </div>
                 <div class="mb-3">
                     <label class="form-label" data-translate="addressCityLabel">City</label>
-                    <input type="text" name="city" class="form-control" required>
+                    <input type="text" name="city" class="form-control" required pattern="[\p{L} ]+" title="Use letters and spaces only">
                 </div>
                 <div class="mb-3">
                     <label class="form-label" data-translate="addressAddressLabel">Address</label>
-                    <input type="text" name="address" class="form-control" required>
+                    <input type="text" name="address" class="form-control" required pattern="[\p{L}\p{N} ]+" title="Use letters, numbers and spaces only">
                 </div>
                 <div class="mb-3">
                     <label class="form-label" data-translate="addressPostcodeLabel">Postal Code</label>
-                    <input type="text" name="postcode" class="form-control" required>
+                    <input type="text" name="postcode" class="form-control" required inputmode="numeric" pattern="\d{3,10}" title="Use numbers only">
                 </div>
                 <div class="mb-3">
                     <label class="form-label" data-translate="accountAddressLabelOptional">Address label (optional)</label>
@@ -1579,15 +1615,15 @@ $updatedAt  = formatDateTime($user["updated_at"] ?? null);
                 </div>
                 <div class="mb-3">
                     <label class="form-label" for="edit_address_city" data-translate="addressCityLabel">City</label>
-                    <input type="text" name="city" id="edit_address_city" class="form-control" required>
+                    <input type="text" name="city" id="edit_address_city" class="form-control" required pattern="[\p{L} ]+" title="Use letters and spaces only">
                 </div>
                 <div class="mb-3">
                     <label class="form-label" for="edit_address_address" data-translate="addressAddressLabel">Address</label>
-                    <input type="text" name="address" id="edit_address_address" class="form-control" required>
+                    <input type="text" name="address" id="edit_address_address" class="form-control" required pattern="[\p{L}\p{N} ]+" title="Use letters, numbers and spaces only">
                 </div>
                 <div class="mb-3">
                     <label class="form-label" for="edit_address_postcode" data-translate="addressPostcodeLabel">Postal Code</label>
-                    <input type="text" name="postcode" id="edit_address_postcode" class="form-control" required>
+                    <input type="text" name="postcode" id="edit_address_postcode" class="form-control" required inputmode="numeric" pattern="\d{3,10}" title="Use numbers only">
                 </div>
                 <div class="mb-3">
                     <label class="form-label" for="edit_address_label" data-translate="accountAddressLabelOptional">Address label (optional)</label>

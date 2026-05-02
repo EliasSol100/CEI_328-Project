@@ -192,6 +192,33 @@ $GLOBALS["header_user_full_name"] = $fullName;
 $GLOBALS["header_user_role"] = $role;
 
 if (isset($_GET['mto_token']) && (string)$_GET['mto_token'] !== '') {
+    $customTokenRequiresCode = false;
+    $customTokenCheck = $conn->prepare("
+        SELECT accessCode
+        FROM custom_orders
+        WHERE sourceProductID = ?
+          AND COALESCE(accessCode, '') <> ''
+        LIMIT 1
+    ");
+    if ($customTokenCheck) {
+        $customTokenCheck->bind_param('i', $productId);
+        $customTokenCheck->execute();
+        $customTokenRes = $customTokenCheck->get_result();
+        $customTokenRequiresCode = ($customTokenRes && $customTokenRes->num_rows > 0);
+        $customTokenCheck->close();
+    }
+
+    if ($customTokenRequiresCode) {
+        $safeQuery = $_GET;
+        unset($safeQuery['mto_token']);
+        $redirectUrl = 'product.php';
+        if (!empty($safeQuery)) {
+            $redirectUrl .= '?' . http_build_query($safeQuery);
+        }
+        header('Location: ' . $redirectUrl);
+        exit;
+    }
+
     $grant = grantMadeToOrderAccessFromLink($conn, $productId, (string)$_GET['mto_token']);
     if (!empty($grant['ok'])) {
         $safeQuery = $_GET;
@@ -264,7 +291,55 @@ function userCanReviewDeliveredProduct(mysqli $conn, int $userId, int $productId
     return $allowed;
 }
 
-$canWriteReview = userCanReviewDeliveredProduct($conn, $userId, $productId);
+function userReviewEligibleOrderCount(mysqli $conn, int $userId, int $productId): int {
+    if ($userId <= 0 || $productId <= 0) {
+        return 0;
+    }
+    $stmt = $conn->prepare(
+        "SELECT COUNT(DISTINCT o.orderID) AS c
+         FROM orders o
+         INNER JOIN order_items oi ON oi.orderID = o.orderID
+         WHERE o.userID = ?
+           AND oi.productID = ?
+           AND LOWER(o.status) IN ('delivered', 'completed')
+           AND EXISTS (
+               SELECT 1
+               FROM payments p
+               WHERE p.orderID = o.orderID
+                 AND LOWER(p.paymentStatus) IN ('paid', 'completed', 'captured', 'succeeded', 'confirmed')
+               LIMIT 1
+           )"
+    );
+    if (!$stmt) {
+        return 0;
+    }
+    $stmt->bind_param("ii", $userId, $productId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $row = $res ? $res->fetch_assoc() : null;
+    $stmt->close();
+    return max(0, (int)($row["c"] ?? 0));
+}
+
+function userReviewVisibleCount(mysqli $conn, int $userId, int $productId): int {
+    if ($userId <= 0 || $productId <= 0) {
+        return 0;
+    }
+    $stmt = $conn->prepare("SELECT COUNT(*) AS c FROM reviews WHERE userID = ? AND productID = ? AND isVisible = 1");
+    if (!$stmt) {
+        return 0;
+    }
+    $stmt->bind_param("ii", $userId, $productId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $row = $res ? $res->fetch_assoc() : null;
+    $stmt->close();
+    return max(0, (int)($row["c"] ?? 0));
+}
+
+$eligibleReviewOrders = userReviewEligibleOrderCount($conn, $userId, $productId);
+$visibleOwnReviewCount = userReviewVisibleCount($conn, $userId, $productId);
+$canWriteReview = $eligibleReviewOrders > $visibleOwnReviewCount;
 
 $reviewErrors = [];
 $reviewInput = [
@@ -293,50 +368,62 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         if (empty($reviewErrors)) {
             $reviewText = mb_substr($reviewInput["review_text"], 0, 1200);
-            $existingReviewId = 0;
-
-            $checkStmt = $conn->prepare("SELECT reviewID FROM reviews WHERE userID = ? AND productID = ? LIMIT 1");
-            if ($checkStmt) {
-                $checkStmt->bind_param("ii", $userId, $productId);
-                $checkStmt->execute();
-                $checkRes = $checkStmt->get_result();
-                $checkRow = $checkRes ? $checkRes->fetch_assoc() : null;
-                $existingReviewId = (int)($checkRow["reviewID"] ?? 0);
-                $checkStmt->close();
-            }
-
-            if ($existingReviewId > 0) {
-                $updateStmt = $conn->prepare(
-                    "UPDATE reviews
-                     SET rating = ?, reviewText = ?, timestamp = NOW(), isVisible = 1
-                     WHERE reviewID = ? AND userID = ? AND productID = ?"
-                );
-                if ($updateStmt) {
-                    $updateStmt->bind_param("isiii", $rating, $reviewText, $existingReviewId, $userId, $productId);
-                    $ok = $updateStmt->execute();
-                    $updateStmt->close();
-                    if ($ok) {
-                        header("Location: product.php?id=" . $productId . "&review_status=saved#customer-reviews");
-                        exit;
-                    }
+            $insertStmt = $conn->prepare(
+                "INSERT INTO reviews (userID, productID, rating, reviewText, isVisible)
+                 VALUES (?, ?, ?, ?, 1)"
+            );
+            if ($insertStmt) {
+                $insertStmt->bind_param("iiis", $userId, $productId, $rating, $reviewText);
+                $ok = $insertStmt->execute();
+                $insertStmt->close();
+                if ($ok) {
+                    header("Location: product.php?id=" . $productId . "&review_status=saved#customer-reviews");
+                    exit;
                 }
-                $reviewErrors[] = "Could not update your review. Please try again.";
-            } else {
-                $insertStmt = $conn->prepare(
-                    "INSERT INTO reviews (userID, productID, rating, reviewText, isVisible)
-                     VALUES (?, ?, ?, ?, 1)"
-                );
-                if ($insertStmt) {
-                    $insertStmt->bind_param("iiis", $userId, $productId, $rating, $reviewText);
-                    $ok = $insertStmt->execute();
-                    $insertStmt->close();
-                    if ($ok) {
-                        header("Location: product.php?id=" . $productId . "&review_status=saved#customer-reviews");
-                        exit;
-                    }
-                }
-                $reviewErrors[] = "Could not save your review. Please try again.";
             }
+            $reviewErrors[] = "Could not save your review. Please try again.";
+        }
+    } elseif ($action === "user_update_review") {
+        $reviewId = (int)($_POST["review_id"] ?? 0);
+        $rating = (int)($_POST["rating"] ?? 0);
+        $reviewText = mb_substr(trim((string)($_POST["review_text"] ?? "")), 0, 1200);
+        if ($userId <= 0 || $reviewId <= 0 || $rating < 1 || $rating > 5) {
+            $reviewErrors[] = "Could not update your review.";
+        } else {
+            $updateStmt = $conn->prepare(
+                "UPDATE reviews
+                 SET rating = ?, reviewText = ?, timestamp = NOW(), isVisible = 1
+                 WHERE reviewID = ? AND userID = ? AND productID = ?"
+            );
+            if ($updateStmt) {
+                $updateStmt->bind_param("isiii", $rating, $reviewText, $reviewId, $userId, $productId);
+                $updateStmt->execute();
+                $affected = $updateStmt->affected_rows;
+                $updateStmt->close();
+                if ($affected >= 0) {
+                    header("Location: product.php?id=" . $productId . "&review_status=saved#customer-reviews");
+                    exit;
+                }
+            }
+            $reviewErrors[] = "Could not update your review.";
+        }
+    } elseif ($action === "user_delete_review") {
+        $reviewId = (int)($_POST["review_id"] ?? 0);
+        if ($userId <= 0 || $reviewId <= 0) {
+            $reviewErrors[] = "Review not found.";
+        } else {
+            $delStmt = $conn->prepare("UPDATE reviews SET isVisible = 0, timestamp = NOW() WHERE reviewID = ? AND userID = ? AND productID = ?");
+            if ($delStmt) {
+                $delStmt->bind_param("iii", $reviewId, $userId, $productId);
+                $delStmt->execute();
+                $affected = $delStmt->affected_rows;
+                $delStmt->close();
+                if ($affected > 0) {
+                    header("Location: product.php?id=" . $productId . "&review_status=deleted#customer-reviews");
+                    exit;
+                }
+            }
+            $reviewErrors[] = "Could not delete your review.";
         }
     } elseif ($isAdmin && $action === "admin_delete_review") {
         $reviewId = (int)($_POST["review_id"] ?? 0);
@@ -469,60 +556,58 @@ $product["_globalProductWarningGR"] = $globalProductWarnings['gr'] ?? '';
 $publicProductStatuses = ["active", "low_stock", "out_of_stock"];
 $madeToOrderAccessRequired = false;
 $madeToOrderAccessError = '';
-if (!$isAdmin) {
-    $productStatus = (string)($product["cartStatus"] ?? "");
-    if ($productStatus === 'made_to_order') {
-        if (!isMadeToOrderProductAccessible($conn, $productId)) {
-            $accessRow = loadMadeToOrderProductAccessRow($conn, $productId);
-            $targetEmail = normalizeCustomerEmail((string)($accessRow['privateCustomerEmail'] ?? ''));
-            $sessionEmail = currentSessionUserEmail();
-            if ($sessionEmail === '') {
-                if (function_exists('rememberAuthRedirectTarget')) {
-                    rememberAuthRedirectTarget((string)($_SERVER['REQUEST_URI'] ?? ('product.php?id=' . $productId)));
-                }
-                header("Location: authentication/login.php");
-                exit;
+$productStatus = (string)($product["cartStatus"] ?? "");
+if ($productStatus === 'made_to_order') {
+    if (!isMadeToOrderProductAccessible($conn, $productId)) {
+        $accessRow = loadMadeToOrderProductAccessRow($conn, $productId);
+        $targetEmail = normalizeCustomerEmail((string)($accessRow['privateCustomerEmail'] ?? ''));
+        $sessionEmail = currentSessionUserEmail();
+        if ($sessionEmail === '') {
+            if (function_exists('rememberAuthRedirectTarget')) {
+                rememberAuthRedirectTarget((string)($_SERVER['REQUEST_URI'] ?? ('product.php?id=' . $productId)));
             }
-            if (!$accessRow || $targetEmail === '' || $sessionEmail !== $targetEmail) {
-                $_SESSION['shop_mto_flash'] = 'err:This private product belongs to a different customer email.';
-                header("Location: shop.php");
-                exit;
-            }
-
-            $customAccessCode = '';
-            $codeStmt = $conn->prepare("
-                SELECT accessCode
-                FROM custom_orders
-                WHERE sourceProductID = ?
-                ORDER BY customOrderID DESC
-                LIMIT 1
-            ");
-            if ($codeStmt) {
-                $codeStmt->bind_param("i", $productId);
-                $codeStmt->execute();
-                $codeRes = $codeStmt->get_result();
-                $codeRow = $codeRes ? $codeRes->fetch_assoc() : null;
-                $codeStmt->close();
-                $customAccessCode = normalizeCustomOrderAccessCode((string)($codeRow['accessCode'] ?? ''));
-            }
-
-            if ((string)($_POST['action'] ?? '') === 'verify_mto_access_code') {
-                $submittedCode = normalizeCustomOrderAccessCode((string)($_POST['accessCode'] ?? ''));
-                $token = trim((string)($accessRow['privateAccessToken'] ?? ''));
-                if ($customAccessCode !== '' && $submittedCode !== '' && $token !== '' && hash_equals($customAccessCode, $submittedCode)) {
-                    setMadeToOrderSessionAccess($productId, $token);
-                    header("Location: product.php?id=" . $productId);
-                    exit;
-                }
-                $madeToOrderAccessError = 'Invalid access code.';
-            }
-
-            $madeToOrderAccessRequired = true;
+            header("Location: authentication/login.php");
+            exit;
         }
-    } elseif (!in_array($productStatus, $publicProductStatuses, true)) {
-        header("Location: shop.php");
-        exit;
+        if (!$accessRow || $targetEmail === '' || $sessionEmail !== $targetEmail) {
+            $_SESSION['shop_mto_flash'] = 'err:This private product belongs to a different customer email.';
+            header("Location: shop.php");
+            exit;
+        }
+
+        $customAccessCode = '';
+        $codeStmt = $conn->prepare("
+            SELECT accessCode
+            FROM custom_orders
+            WHERE sourceProductID = ?
+            ORDER BY customOrderID DESC
+            LIMIT 1
+        ");
+        if ($codeStmt) {
+            $codeStmt->bind_param("i", $productId);
+            $codeStmt->execute();
+            $codeRes = $codeStmt->get_result();
+            $codeRow = $codeRes ? $codeRes->fetch_assoc() : null;
+            $codeStmt->close();
+            $customAccessCode = normalizeCustomOrderAccessCode((string)($codeRow['accessCode'] ?? ''));
+        }
+
+        if ((string)($_POST['action'] ?? '') === 'verify_mto_access_code') {
+            $submittedCode = normalizeCustomOrderAccessCode((string)($_POST['accessCode'] ?? ''));
+            $token = trim((string)($accessRow['privateAccessToken'] ?? ''));
+            if ($customAccessCode !== '' && $submittedCode !== '' && $token !== '' && hash_equals($customAccessCode, $submittedCode)) {
+                setMadeToOrderSessionAccess($productId, $token);
+                header("Location: product.php?id=" . $productId);
+                exit;
+            }
+            $madeToOrderAccessError = 'Invalid access code.';
+        }
+
+        $madeToOrderAccessRequired = true;
     }
+} elseif (!$isAdmin && !in_array($productStatus, $publicProductStatuses, true)) {
+    header("Location: shop.php");
+    exit;
 }
 
 if ($madeToOrderAccessRequired) {
@@ -1111,6 +1196,8 @@ $reviewStatus = (string)($_GET["review_status"] ?? "");
 $reviewSuccessMessage = "";
 if ($reviewStatus === "saved") {
     $reviewSuccessMessage = "Your review was saved successfully.";
+} elseif ($reviewStatus === "deleted") {
+    $reviewSuccessMessage = "Your review was removed.";
 } elseif ($reviewStatus === "admin_deleted") {
     $reviewSuccessMessage = "Review was removed.";
 } elseif ($reviewStatus === "admin_reply_saved") {
@@ -1365,7 +1452,7 @@ include __DIR__ . "/include/header.php";
                 <div id="cs-carousel" style="position:relative;margin-bottom:16px;border-radius:12px;overflow:hidden;background:#f3f4f6">
                     <?php foreach ($colorSchemePhotos as $ci => $csPhoto): ?>
                     <img
-                        src="<?= htmlspecialchars($csPhoto['photoPath']) ?>"
+                        src="<?= htmlspecialchars(app_image_asset_url((string)$csPhoto['photoPath'])) ?>"
                         class="cs-slide"
                         data-index="<?= $ci ?>"
                         style="width:100%;display:<?= $ci === 0 ? 'block' : 'none' ?>;border-radius:12px;object-fit:contain;max-height:320px">
@@ -1386,7 +1473,7 @@ include __DIR__ . "/include/header.php";
                     <div>
                         <label class="gift-note-label" for="cs-color-a" data-translate="colourSchemeA">Colour A</label>
                         <select id="cs-color-a" class="custom-request-input" style="appearance:auto">
-                            <option value="">— Select Colour A —</option>
+                            <option value="">&mdash; Select Colour A &mdash;</option>
                             <?php foreach ($colorSchemeColors as $csColor): ?>
                             <option value="<?= (int)$csColor['colorID'] ?>"><?= htmlspecialchars($csColor['colorName']) ?></option>
                             <?php endforeach; ?>
@@ -1395,7 +1482,7 @@ include __DIR__ . "/include/header.php";
                     <div>
                         <label class="gift-note-label" for="cs-color-b" data-translate="colourSchemeB">Colour B</label>
                         <select id="cs-color-b" class="custom-request-input" style="appearance:auto">
-                            <option value="">— Select Colour B —</option>
+                            <option value="">&mdash; Select Colour B &mdash;</option>
                             <?php foreach ($colorSchemeColors as $csColor): ?>
                             <option value="<?= (int)$csColor['colorID'] ?>"><?= htmlspecialchars($csColor['colorName']) ?></option>
                             <?php endforeach; ?>
@@ -1405,7 +1492,7 @@ include __DIR__ . "/include/header.php";
                     <div>
                         <label class="gift-note-label" for="cs-color-c" data-translate="colourSchemeC">Colour C</label>
                         <select id="cs-color-c" class="custom-request-input" style="appearance:auto">
-                            <option value="">— Select Colour C —</option>
+                            <option value="">&mdash; Select Colour C &mdash;</option>
                             <?php foreach ($colorSchemeColors as $csColor): ?>
                             <option value="<?= (int)$csColor['colorID'] ?>"><?= htmlspecialchars($csColor['colorName']) ?></option>
                             <?php endforeach; ?>
@@ -1506,6 +1593,8 @@ include __DIR__ . "/include/header.php";
             <h2 data-translate="productCustomerReviews">Customer Reviews</h2>
             <?php if ($userId > 0 && $canWriteReview): ?>
                 <button type="button" class="write-review-btn" id="write-review-btn" data-translate="productWriteReview">Write a Review</button>
+            <?php elseif ($userId > 0 && $visibleOwnReviewCount > 0): ?>
+                <span class="write-review-btn is-disabled">Review Submitted</span>
             <?php elseif ($userId > 0): ?>
                 <span class="write-review-btn is-disabled" data-translate="productAvailableAfterDelivery">Available After Delivery</span>
             <?php else: ?>
@@ -1519,9 +1608,13 @@ include __DIR__ . "/include/header.php";
         <?php if (!empty($reviewErrors)): ?>
             <div class="review-alert error"><?= htmlspecialchars(implode(" ", $reviewErrors)) ?></div>
         <?php endif; ?>
-        <?php if ($userId > 0 && !$canWriteReview): ?>
+        <?php if ($userId > 0 && !$canWriteReview && $visibleOwnReviewCount === 0): ?>
             <div class="review-alert info" data-translate="productReviewUnlockInfo">
                 Review opens only after your order is delivered and payment is confirmed.
+            </div>
+        <?php elseif ($userId > 0 && !$canWriteReview && $visibleOwnReviewCount > 0): ?>
+            <div class="review-alert info">
+                You have already reviewed this product. You can edit or delete your review below, and another review opens after a new completed order.
             </div>
         <?php endif; ?>
 
@@ -1592,6 +1685,36 @@ include __DIR__ . "/include/header.php";
                                 </div>
                                 <p><?= nl2br(htmlspecialchars($review["adminReplyText"])) ?></p>
                             </div>
+                        <?php endif; ?>
+
+                        <?php if ($userId > 0 && (int)$review["userID"] === $userId): ?>
+                            <div class="review-admin-actions">
+                                <form method="post" onsubmit="return confirm('Delete your review?');">
+                                    <?= app_csrf_input() ?>
+                                    <input type="hidden" name="action" value="user_delete_review">
+                                    <input type="hidden" name="review_id" value="<?= (int)$review["id"] ?>">
+                                    <button type="submit" class="submit-review-btn review-admin-danger">Delete Review</button>
+                                </form>
+                            </div>
+                            <form method="post" class="review-admin-reply-form">
+                                <?= app_csrf_input() ?>
+                                <input type="hidden" name="action" value="user_update_review">
+                                <input type="hidden" name="review_id" value="<?= (int)$review["id"] ?>">
+                                <label class="review-label">Your Rating</label>
+                                <div class="review-rating-input">
+                                    <?php for ($i = 1; $i <= 5; $i++): ?>
+                                        <label class="review-star-option <?= $i <= (int)$review["rating"] ? "is-on" : "" ?>">
+                                            <input type="radio" name="rating" value="<?= $i ?>" <?= $i === (int)$review["rating"] ? "checked" : "" ?>>
+                                            <i class="fas fa-star"></i>
+                                        </label>
+                                    <?php endfor; ?>
+                                </div>
+                                <label class="review-label" for="own_review_<?= (int)$review["id"] ?>">Edit Review</label>
+                                <textarea id="own_review_<?= (int)$review["id"] ?>" name="review_text" rows="3" maxlength="1200"><?= htmlspecialchars($review["text"]) ?></textarea>
+                                <div class="review-form-actions">
+                                    <button type="submit" class="submit-review-btn">Save Review</button>
+                                </div>
+                            </form>
                         <?php endif; ?>
 
                         <?php if ($isAdmin): ?>

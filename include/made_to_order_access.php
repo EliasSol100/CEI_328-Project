@@ -137,11 +137,6 @@ if (!function_exists('grantMadeToOrderAccessFromLink')) {
             return ['ok' => false, 'reason' => 'invalid_token'];
         }
 
-        if (isCurrentSessionAdminUser()) {
-            setMadeToOrderSessionAccess($productId, $token);
-            return ['ok' => true, 'reason' => 'admin_granted'];
-        }
-
         $sessionEmail = currentSessionUserEmail();
         $targetEmail = normalizeCustomerEmail((string)($row['privateCustomerEmail'] ?? ''));
         if ($sessionEmail === '') {
@@ -219,10 +214,6 @@ if (!function_exists('isMadeToOrderProductAccessible')) {
         }
 
         if ((string)($row['cartStatus'] ?? '') !== 'made_to_order') {
-            return true;
-        }
-
-        if (isCurrentSessionAdminUser()) {
             return true;
         }
 

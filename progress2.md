@@ -155,8 +155,29 @@
 - Με την εισαγωγή tracking number στέλνεται email στον customer ότι το product shipped.
 - Το receipt/invoice ενημερώνεται με το tracking number.
 - Όταν ο admin πατήσει receipt μετά την αλλαγή, ο customer παίρνει updated receipt notification με το tracking number.
-- Το tracking number μπορεί να γίνει edit και μέσα από receipt/invoice.
+- Το receipt/invoice έγινε read-only για tracking number. Το tracking number αλλάζει μόνο από `Order Management`, ώστε admin και customer να βλέπουν την αποθηκευμένη τιμή χωρίς να μπορούν να την επεξεργαστούν μέσα από το receipt.
 - Προστέθηκε helper file `include/order_tracking_helpers.php` για shared tracking/receipt/email logic.
+
+## Τελευταία fixes μετά το manual testing
+
+- Διορθώθηκε πιθανό image break στο `shop.php` όταν γίνεται hide ένα product από `Product Management`. Τα path-based product images ελέγχονται αν υπάρχουν πριν μπουν στο carousel και υπάρχει fallback UI αν λείπουν όλα τα images.
+- Τα product cards στο `Shop` δείχνουν πλέον σταθερά `Select Options` αντί για `Add to Cart`, ώστε όλα τα products να οδηγούν πρώτα στο product page για size/colour/custom επιλογές.
+- Το `Colour Photos` tab στο `Product Page & Stock` έχει πλέον καθαρό save/upload button (`Save Photo(s)`) και inline status για upload success/failure.
+- Τα `Multi-Colour` labels στο public product page εμφανίζονται ως κανονικά customer-facing labels (`Colour Selection`, `Colour A`, `Colour B`, `Colour C`) αντί για raw keys τύπου `productColourSelection` ή `colourSchemeA`.
+- Το `Customer Management` πλέον δημιουργεί verified ή unverified customer με complete profile data, ώστε μετά το 2FA/verify flow να μην οδηγείται άδικα στο `complete_profile.php`.
+- Τα customer accounts που δημιουργούνται από admin συγχρονίζουν default address στο `user_addresses`, ώστε το checkout και το `My Account > Addresses` να γεμίζουν με τα ίδια στοιχεία.
+- Τα passwords που γράφει ο admin γίνονται πάντα `password_hash`, άρα δύο ίδιοι raw passwords αποθηκεύονται με διαφορετικά hashes στη database.
+- Στα `Customer Management`, `Complete Profile`, `My Account` και `Checkout` προστέθηκαν stricter validations για fields που πρέπει να δέχονται letters only, numbers only ή letters/numbers/spaces only.
+- Το `Custom Orders` admin modal κάνει client-side έλεγχο file size στο reference photo πριν γίνει submit, ώστε το error να εμφανίζεται μέσα στο modal και να μη χάνονται τα ήδη γραμμένα fields.
+- Τα private custom order products πλέον απαιτούν σωστό logged-in customer email και access code πριν εμφανιστεί το product. Δεν αρκεί πλέον κάποιος να έχει το private URL.
+- Για admin-created custom orders κρύφτηκαν τα `Reply / Request More Info` και `Customer Discussion` boxes, επειδή αυτά χρειάζονται μόνο όταν το request ξεκινά από customer στο public custom orders page.
+- Το `submit_product_review.php` και το reviews section στο `product.php` περιορίζουν τα reviews σε ένα visible review ανά completed paid purchase. Ο customer μπορεί να κάνει edit/delete το υπάρχον review και νέο review ανοίγει μόνο μετά από νέο completed order για το ίδιο product.
+- Προστέθηκε `include/cart_persistence.php` και συνδέθηκε με `cart.php`, `cart_api.php`, `checkout`, `header` και payment clear flow, ώστε το cart να παραμένει για logged-in users μετά από session/login expiry.
+- Το wishlist count στο header διαβάζει από database για logged-in users, ώστε να μην χάνεται όταν λήξει το session.
+- Στο public `custom_order.php` τα μεγάλα request texts πλέον κάνουν wrap μέσα στο box και το preferred budget δέχεται numeric value.
+- Το reorder από `My Account` ελέγχει stock και variants πιο σωστά, ώστε available/in-stock products να μπαίνουν ξανά στο cart.
+- Τα product colour scheme/multi-colour images περνούν από `app_image_asset_url`, ώστε να εμφανίζονται σωστά και όταν το project τρέχει σε subfolder.
+- Στο `Product Management` μπήκε 5 MB client-side/file-size guard για product photos, ώστε να μη χάνονται modal fields όταν επιλεγεί oversized image.
 
 ## Shipping Settings
 

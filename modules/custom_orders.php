@@ -178,8 +178,8 @@ function createCustomOrderRequest($conn, $userId, $email, $requestDescription, $
         INSERT INTO custom_orders (
             userID, email, requestDescription, status, expertNotes, aiWritingAcknowledgeFlag,
             customerName, ideaTitle, productType, preferredSize, preferredColours,
-            deadline, photoReferencePath, access_token, token_expires_at, created_at
-        ) VALUES (?, ?, ?, 'pending', ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+            deadline, photoReferencePath, sourceChannel, access_token, token_expires_at, created_at
+        ) VALUES (?, ?, ?, 'pending', ?, 0, ?, ?, ?, ?, ?, ?, ?, 'website', ?, ?, NOW())
     ");
     if (!$stmt) {
         throw new Exception('Failed to prepare insert: ' . $conn->error);
@@ -863,6 +863,7 @@ function ensureCustomOrdersTable($conn)
                 sourceProductID INT NULL,
                 linkedProductName VARCHAR(255) NULL,
                 photoReferencePath VARCHAR(255) NULL,
+                sourceChannel VARCHAR(30) NOT NULL DEFAULT 'website',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 INDEX idx_custom_orders_userID (userID),
                 INDEX idx_custom_orders_status (status)
@@ -891,6 +892,7 @@ function ensureCustomOrdersTable($conn)
         'sourceOrderNumber' => "ALTER TABLE custom_orders ADD COLUMN sourceOrderNumber VARCHAR(64) NULL AFTER sourceOrderID",
         'sourceProductID' => "ALTER TABLE custom_orders ADD COLUMN sourceProductID INT NULL AFTER sourceOrderNumber",
         'linkedProductName' => "ALTER TABLE custom_orders ADD COLUMN linkedProductName VARCHAR(255) NULL AFTER sourceProductID",
+        'sourceChannel' => "ALTER TABLE custom_orders ADD COLUMN sourceChannel VARCHAR(30) NOT NULL DEFAULT 'website' AFTER photoReferencePath",
     ];
 
     foreach ($columnChecks as $column => $sql) {

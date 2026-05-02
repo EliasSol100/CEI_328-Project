@@ -794,7 +794,7 @@ if ($r) {
           <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
             <input type="file" id="pcp-file" class="form-input" accept="image/*" multiple style="flex:1;min-width:220px">
             <button type="button" class="btn-primary" onclick="pcpUpload()" style="white-space:nowrap">
-              <i class="fas fa-upload"></i> Upload
+              <i class="fas fa-save"></i> Save Photo(s)
             </button>
           </div>
           <div id="pcp-upload-progress" style="margin-top:8px;font-size:13px;color:#6b7280"></div>
@@ -1136,7 +1136,7 @@ function pcpLoadColors() {
   var empty = document.getElementById('pcp-empty');
   var pid = parseInt(productEl ? productEl.value : '0', 10) || 0;
   if (!colorSel || !uploadArea || !grid || !empty) return;
-  colorSel.innerHTML = '<option value="">— Select colour —</option>';
+  colorSel.innerHTML = '<option value="">&mdash; Select colour &mdash;</option>';
   colorSel.disabled = true;
   uploadArea.style.display = 'none';
   grid.innerHTML = '';
@@ -1199,8 +1199,14 @@ function pcpUpload() {
   var cid = parseInt(colorEl ? colorEl.value : '0', 10) || 0;
   var files = fileEl ? fileEl.files : [];
   if (!pid || !cid || !files.length) return;
-  if (prog) prog.textContent = 'Uploading...';
+  var tooLarge = Array.from(files).filter(function (file) { return file.size > 5 * 1024 * 1024; });
+  if (tooLarge.length) {
+    if (prog) prog.textContent = 'Each colour photo must be 5MB or smaller.';
+    return;
+  }
+  if (prog) prog.textContent = 'Saving...';
   var remaining = files.length;
+  var failed = 0;
   Array.from(files).forEach(function (file) {
     var fd = new FormData();
     fd.append('action', 'upload');
@@ -1211,13 +1217,22 @@ function pcpUpload() {
     fetch(pcpAjax, { method: 'POST', body: fd })
       .then(function (res) { return res.json(); })
       .then(function (data) {
-        if (data.ok) pcpAddThumb(data);
+        if (data.ok) {
+          pcpAddThumb(data);
+        } else {
+          failed++;
+        }
         remaining--;
         if (remaining === 0) {
-          if (prog) prog.textContent = 'Done.';
+          if (prog) prog.textContent = failed ? 'Some photo(s) could not be saved.' : 'Saved.';
           if (fileEl) fileEl.value = '';
-          setTimeout(function () { if (prog) prog.textContent = ''; }, 2000);
+          setTimeout(function () { if (prog) prog.textContent = ''; }, failed ? 4000 : 2000);
         }
+      })
+      .catch(function () {
+        failed++;
+        remaining--;
+        if (remaining === 0 && prog) prog.textContent = 'Some photo(s) could not be saved.';
       });
   });
 }

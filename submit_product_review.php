@@ -377,6 +377,60 @@ function canReviewProduct(mysqli $conn, bool $isAdmin, bool $guestAccess, int $l
     return false;
 }
 
+function reviewEligibleOrderCount(mysqli $conn, bool $isAdmin, bool $guestAccess, int $loggedUserId, int $orderId, int $productId): int {
+    if ($productId <= 0) {
+        return 0;
+    }
+    if ($isAdmin) {
+        return PHP_INT_MAX;
+    }
+    if ($guestAccess) {
+        return orderContainsProduct($conn, $orderId, $productId) ? 1 : 0;
+    }
+    if ($loggedUserId <= 0) {
+        return 0;
+    }
+
+    $stmt = $conn->prepare(
+        "SELECT COUNT(DISTINCT o.orderID) AS c
+         FROM orders o
+         INNER JOIN order_items oi ON oi.orderID = o.orderID
+         WHERE o.userID = ?
+           AND oi.productID = ?
+           AND LOWER(o.status) IN ('delivered', 'completed')
+           AND EXISTS (
+               SELECT 1
+               FROM payments p
+               WHERE p.orderID = o.orderID
+                 AND LOWER(p.paymentStatus) IN ('paid', 'completed', 'captured', 'succeeded', 'confirmed')
+               LIMIT 1
+           )"
+    );
+    if (!$stmt) {
+        return 0;
+    }
+    $stmt->bind_param("ii", $loggedUserId, $productId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return max(0, (int)($row["c"] ?? 0));
+}
+
+function reviewVisibleCountForActor(mysqli $conn, int $actorUserId, int $productId): int {
+    if ($actorUserId <= 0 || $productId <= 0) {
+        return 0;
+    }
+    $stmt = $conn->prepare("SELECT COUNT(*) AS c FROM reviews WHERE userID = ? AND productID = ? AND isVisible = 1");
+    if (!$stmt) {
+        return 0;
+    }
+    $stmt->bind_param("ii", $actorUserId, $productId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return max(0, (int)($row["c"] ?? 0));
+}
+
 function buildReviewUrl(int $orderId, int $productId, string $status = "", string $reviewKey = ""): string {
     $params = [];
     if ($orderId > 0) {
@@ -424,6 +478,7 @@ $selectedProductId = (int)($_GET["product_id"] ?? $_POST["product_id"] ?? 0);
 $reviewKey = trim((string)($_GET["review_key"] ?? $_POST["review_key"] ?? ""));
 $reviewErrors = [];
 $reviewInput = ["rating" => "5", "review_text" => ""];
+$editingReviewId = 0;
 
 $orderSummary = fetchOrderSummary($conn, $orderId);
 $guestAccess = false;
@@ -505,6 +560,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && ($actorUserId > 0 || $isAdmin)) {
     if ($action === "save_review") {
         $reviewInput["rating"] = trim((string)($_POST["rating"] ?? ""));
         $reviewInput["review_text"] = trim((string)($_POST["review_text"] ?? ""));
+        $editingReviewId = (int)($_POST["review_id"] ?? 0);
         $rating = (int)$reviewInput["rating"];
         $reviewText = $reviewInput["review_text"];
 
@@ -523,30 +579,29 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && ($actorUserId > 0 || $isAdmin)) {
 
         if (empty($reviewErrors)) {
             $reviewText = mb_substr($reviewText, 0, 7000);
-            $existingReviewId = 0;
 
-            $find = $conn->prepare("SELECT reviewID FROM reviews WHERE userID = ? AND productID = ? ORDER BY reviewID DESC LIMIT 1");
-            if ($find) {
-                $find->bind_param("ii", $actorUserId, $selectedProductId);
-                $find->execute();
-                $row = $find->get_result()->fetch_assoc();
-                $existingReviewId = (int)($row["reviewID"] ?? 0);
-                $find->close();
-            }
-
-            if ($existingReviewId > 0) {
-                $up = $conn->prepare("UPDATE reviews SET rating = ?, reviewText = ?, timestamp = NOW(), isVisible = 1 WHERE reviewID = ? AND userID = ?");
+            if ($editingReviewId > 0) {
+                $up = $conn->prepare("UPDATE reviews SET rating = ?, reviewText = ?, timestamp = NOW(), isVisible = 1 WHERE reviewID = ? AND userID = ? AND productID = ?");
                 if ($up) {
-                    $up->bind_param("isii", $rating, $reviewText, $existingReviewId, $actorUserId);
+                    $up->bind_param("isiii", $rating, $reviewText, $editingReviewId, $actorUserId, $selectedProductId);
                     $ok = $up->execute();
+                    $affected = $up->affected_rows;
                     $up->close();
-                    if ($ok) {
+                    if ($ok && $affected > 0) {
                         header("Location: " . buildReviewUrl($orderId, $selectedProductId, "saved", $reviewKey));
                         exit;
                     }
                 }
                 $reviewErrors[] = "Could not update your review. Please try again.";
             } else {
+                $eligibleReviewCount = reviewEligibleOrderCount($conn, $isAdmin, $guestAccess, $loggedUserId, $orderId, $selectedProductId);
+                $visibleReviewCount = reviewVisibleCountForActor($conn, $actorUserId, $selectedProductId);
+                if (!$isAdmin && $visibleReviewCount >= $eligibleReviewCount) {
+                    $reviewErrors[] = "You have already reviewed this completed purchase. Edit or delete your existing review, or review again after another completed order.";
+                }
+            }
+
+            if (empty($reviewErrors) && $editingReviewId <= 0) {
                 $ins = $conn->prepare("INSERT INTO reviews (userID, productID, rating, reviewText, isVisible) VALUES (?, ?, ?, ?, 1)");
                 if ($ins) {
                     $ins->bind_param("iiis", $actorUserId, $selectedProductId, $rating, $reviewText);
@@ -600,7 +655,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && ($actorUserId > 0 || $isAdmin)) {
 
 $myReview = null;
 if ($actorUserId > 0 && $selectedProductId > 0) {
-    $myStmt = $conn->prepare("SELECT reviewID, rating, reviewText, timestamp, isVisible FROM reviews WHERE userID = ? AND productID = ? ORDER BY reviewID DESC LIMIT 1");
+    $myStmt = $conn->prepare("SELECT reviewID, rating, reviewText, timestamp, isVisible FROM reviews WHERE userID = ? AND productID = ? AND isVisible = 1 ORDER BY reviewID DESC LIMIT 1");
     if ($myStmt) {
         $myStmt->bind_param("ii", $actorUserId, $selectedProductId);
         $myStmt->execute();
@@ -617,6 +672,15 @@ if ($actorUserId > 0 && $selectedProductId > 0) {
     }
 }
 
+$eligibleReviewCount = 0;
+$visibleReviewCount = 0;
+$hasNewReviewSlot = false;
+if ($selectedProductId > 0 && ($actorUserId > 0 || $isAdmin)) {
+    $eligibleReviewCount = reviewEligibleOrderCount($conn, $isAdmin, $guestAccess, $loggedUserId, $orderId, $selectedProductId);
+    $visibleReviewCount = reviewVisibleCountForActor($conn, $actorUserId, $selectedProductId);
+    $hasNewReviewSlot = $isAdmin || $visibleReviewCount < $eligibleReviewCount;
+}
+
 $status = (string)($_GET["status"] ?? "");
 $statusMessage = "";
 if ($status === "saved") {
@@ -625,19 +689,22 @@ if ($status === "saved") {
     $statusMessage = "Your review was deleted successfully.";
 }
 
-if ($myReview && ($_SERVER["REQUEST_METHOD"] !== "POST" || empty($reviewErrors))) {
+if ($myReview && !$hasNewReviewSlot && ($_SERVER["REQUEST_METHOD"] !== "POST" || empty($reviewErrors))) {
     $reviewInput["rating"] = (string)$myReview["rating"];
     $reviewInput["review_text"] = (string)$myReview["reviewText"];
 }
 
 $canSubmitCurrentSelection = false;
 if ($selectedProductId > 0) {
-    $canSubmitCurrentSelection = canReviewProduct($conn, $isAdmin, $guestAccess, $loggedUserId, $orderId, $selectedProductId);
+    $canSubmitCurrentSelection = canReviewProduct($conn, $isAdmin, $guestAccess, $loggedUserId, $orderId, $selectedProductId)
+        && ($isAdmin || $hasNewReviewSlot || $myReview !== null);
 }
 
 $defaultRating = max(1, min(5, (int)$reviewInput["rating"]));
-$openReviewForm = $canSubmitCurrentSelection && (!empty($reviewErrors) || !$myReview);
+$openReviewForm = $canSubmitCurrentSelection && (!empty($reviewErrors) || !$myReview || $hasNewReviewSlot);
 $canUseReviewModule = $isAdmin || $actorUserId > 0;
+$formReviewId = $editingReviewId > 0 ? $editingReviewId : (($myReview && !$hasNewReviewSlot) ? (int)$myReview["reviewID"] : 0);
+$formStartsAsEdit = $formReviewId > 0;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -787,19 +854,28 @@ include __DIR__ . "/include/header.php";
                                 </button>
                             </form>
                             <button type="button" class="spr-edit-btn" id="spr-edit-btn"<?= app_translate_text_attrs('Edit', 'Επεξεργασία') ?>>Edit</button>
+                            <?php if ($hasNewReviewSlot): ?>
+                                <button type="button" class="spr-edit-btn" id="spr-new-review-btn"<?= app_translate_text_attrs('Write Another Review', 'Γράψτε Νέα Αξιολόγηση') ?>>Write Another Review</button>
+                            <?php endif; ?>
                         </div>
                     <?php endif; ?>
                 </article>
             <?php endif; ?>
 
             <?php if ($canSubmitCurrentSelection): ?>
-                <form method="post" id="spr-form" class="spr-form <?= $openReviewForm ? "" : "hidden" ?>">
+                <form method="post"
+                      id="spr-form"
+                      class="spr-form <?= $openReviewForm ? "" : "hidden" ?>"
+                      data-my-review-id="<?= $myReview ? (int)$myReview["reviewID"] : 0 ?>"
+                      data-my-rating="<?= $myReview ? (int)$myReview["rating"] : 5 ?>"
+                      data-my-text="<?= htmlspecialchars($myReview ? (string)$myReview["reviewText"] : '', ENT_QUOTES, 'UTF-8') ?>">
                     <?= app_csrf_input() ?>
                     <input type="hidden" name="review_token" value="<?= htmlspecialchars($reviewToken) ?>">
                     <input type="hidden" name="review_key" value="<?= htmlspecialchars($reviewKey) ?>">
                     <input type="hidden" name="action" value="save_review">
                     <input type="hidden" name="order_id" value="<?= (int)$orderId ?>">
                     <input type="hidden" name="product_id" value="<?= (int)$selectedProductId ?>">
+                    <input type="hidden" name="review_id" id="spr-review-id" value="<?= (int)$formReviewId ?>">
 
                     <label class="spr-label"<?= app_translate_text_attrs('Your rating *', 'Η βαθμολογία σας *') ?>>Your rating *</label>
                     <div class="spr-star-input" id="spr-star-input">
@@ -821,7 +897,7 @@ include __DIR__ . "/include/header.php";
                     <div class="spr-word-counter" id="spr-word-counter"<?= app_translate_text_attrs('0 / 1000 words', '0 / 1000 λέξεις') ?>>0 / 1000 words</div>
 
                     <div class="spr-form-actions">
-                        <button type="submit" class="spr-btn spr-btn-primary"<?= app_translate_text_attrs($myReview ? 'Save Changes' : 'Submit Review', $myReview ? 'Αποθήκευση Αλλαγών' : 'Υποβολή Αξιολόγησης') ?>><?= $myReview ? "Save Changes" : "Submit Review" ?></button>
+                        <button type="submit" class="spr-btn spr-btn-primary" id="spr-submit-btn"<?= app_translate_text_attrs($formStartsAsEdit ? 'Save Changes' : 'Submit Review', $formStartsAsEdit ? 'Αποθήκευση Αλλαγών' : 'Υποβολή Αξιολόγησης') ?>><?= $formStartsAsEdit ? "Save Changes" : "Submit Review" ?></button>
                         <?php if ($myReview): ?>
                             <button type="button" class="spr-btn spr-btn-secondary" id="spr-cancel-btn"<?= app_translate_text_attrs('Cancel', 'Ακύρωση') ?>>Cancel</button>
                         <?php endif; ?>
@@ -874,9 +950,61 @@ include __DIR__ . "/include/header.php";
     var form = document.getElementById("spr-form");
     var deleteForms = Array.prototype.slice.call(document.querySelectorAll(".spr-delete-review-form"));
     var editBtn = document.getElementById("spr-edit-btn");
+    var newReviewBtn = document.getElementById("spr-new-review-btn");
     var cancelBtn = document.getElementById("spr-cancel-btn");
+    var reviewIdInput = document.getElementById("spr-review-id");
+    var submitBtn = document.getElementById("spr-submit-btn");
+    var textarea = document.getElementById("spr-review-text");
+    var counter = document.getElementById("spr-word-counter");
+
+    function setRating(value) {
+        var target = String(value || "5");
+        ratingInputs.forEach(function (input) {
+            input.checked = input.value === target;
+        });
+        paintStars();
+    }
+
+    function setReviewMode(mode) {
+        if (!form) {
+            return;
+        }
+        if (mode === "edit") {
+            if (reviewIdInput) {
+                reviewIdInput.value = form.getAttribute("data-my-review-id") || "0";
+            }
+            if (textarea) {
+                textarea.value = form.getAttribute("data-my-text") || "";
+            }
+            setRating(form.getAttribute("data-my-rating") || "5");
+            if (submitBtn) {
+                submitBtn.textContent = "Save Changes";
+            }
+        } else {
+            if (reviewIdInput) {
+                reviewIdInput.value = "0";
+            }
+            if (textarea) {
+                textarea.value = "";
+            }
+            setRating("5");
+            if (submitBtn) {
+                submitBtn.textContent = "Submit Review";
+            }
+        }
+        updateCounter();
+    }
+
     if (editBtn && form) {
         editBtn.addEventListener("click", function () {
+            setReviewMode("edit");
+            form.classList.remove("hidden");
+            form.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+    }
+    if (newReviewBtn && form) {
+        newReviewBtn.addEventListener("click", function () {
+            setReviewMode("new");
             form.classList.remove("hidden");
             form.scrollIntoView({ behavior: "smooth", block: "center" });
         });
@@ -915,8 +1043,6 @@ include __DIR__ . "/include/header.php";
     });
     paintStars();
 
-    var textarea = document.getElementById("spr-review-text");
-    var counter = document.getElementById("spr-word-counter");
     function updateCounter() {
         if (!textarea || !counter) {
             return;

@@ -135,6 +135,18 @@ function ensureProductSalesOverridesSchema(mysqli $conn): void {
 
 ensureProductSalesOverridesSchema($conn);
 
+function shopImageAssetUsable(string $path): bool
+{
+    $path = trim($path);
+    if ($path === '') {
+        return false;
+    }
+    if (app_image_is_public_asset_url($path)) {
+        return true;
+    }
+    return is_file(app_image_local_asset_path($path));
+}
+
 function shopCategoryLabels(): array
 {
     return [
@@ -680,6 +692,7 @@ $reviewData = [];
 $revRes = $conn->query("
     SELECT productID, COUNT(*) AS cnt, ROUND(AVG(rating), 1) AS avg_rating
     FROM reviews
+    WHERE isVisible = 1
     GROUP BY productID
 ");
 if ($revRes) {
@@ -696,7 +709,7 @@ $cpRes = $conn->query("SELECT productID, photoPath FROM product_color_photos ORD
 if ($cpRes) {
     while ($row = $cpRes->fetch_assoc()) {
         $path = app_image_prefer_optimized_asset_path((string)($row['photoPath'] ?? ''));
-        if ($path !== '') {
+        if ($path !== '' && shopImageAssetUsable($path)) {
             $colorPhotosByProduct[(int)$row['productID']][] = $path;
         }
     }
@@ -712,7 +725,7 @@ $vpRes = $conn->query("
 if ($vpRes) {
     while ($row = $vpRes->fetch_assoc()) {
         $path = app_image_prefer_optimized_asset_path((string)($row['photoPath'] ?? ''));
-        if ($path !== '') {
+        if ($path !== '' && shopImageAssetUsable($path)) {
             $variationPhotosByProduct[(int)$row['productID']][] = $path;
         }
     }
@@ -1096,10 +1109,10 @@ foreach ($products as $p) {
                                         $allSlides[] = ['type' => 'blob', 'src' => 'modules/admin/ajax/product_image.php?id=' . $imgID];
                                     }
                                     foreach ($variationPaths as $vp) {
-                                        $allSlides[] = ['type' => 'path', 'src' => $vp];
+                                        $allSlides[] = ['type' => 'path', 'src' => app_image_asset_url((string)$vp)];
                                     }
                                     foreach ($colorPaths as $cp) {
-                                        $allSlides[] = ['type' => 'path', 'src' => $cp];
+                                        $allSlides[] = ['type' => 'path', 'src' => app_image_asset_url((string)$cp)];
                                     }
                                     $seenSlideSources = [];
                                     $allSlides = array_values(array_filter($allSlides, static function (array $slide) use (&$seenSlideSources): bool {
@@ -1123,6 +1136,7 @@ foreach ($products as $p) {
                                         <div class="carousel-item <?= $cidx === 0 ? 'active' : '' ?>">
                                             <img src="<?= htmlspecialchars($slide['src']) ?>"
                                                  alt="<?= htmlspecialchars($p['nameEN']) ?>"
+                                                 data-product-placeholder="<?= htmlspecialchars($p['nameEN']) ?>"
                                                  loading="<?= $loadingMode ?>"
                                                  decoding="async"
                                                  fetchpriority="<?= $fetchPriority ?>">
@@ -1136,6 +1150,10 @@ foreach ($products as $p) {
                                         <?php endfor; ?>
                                     </div>
                                     <?php endif; ?>
+                                </div>
+                                <?php else: ?>
+                                <div class="shop-image-fallback" aria-label="<?= htmlspecialchars($p['nameEN']) ?>">
+                                    <i class="fas fa-image"></i>
                                 </div>
                                 <?php endif; ?>
                                 <form method="post" action="shop.php" style="position:absolute;top:8px;right:8px;z-index:10;">
@@ -1185,13 +1203,9 @@ foreach ($products as $p) {
                                 <button class="shop-atc-btn"
                                         data-product-id="<?= $pid ?>"
                                         data-has-variants="<?= (int)$p['hasVariants'] ?>"
-                                        data-requires-options="<?= $requiresOptionSelection ? 1 : 0 ?>"
+                                        data-requires-options="1"
                                         data-product-url="product.php?id=<?= $pid ?>">
-                                    <?php if ($requiresOptionSelection): ?>
-                                        <i class="fas fa-sliders-h"></i> <span data-translate="selectOptions">Select Options</span>
-                                    <?php else: ?>
-                                        <i class="fas fa-cart-plus"></i> <span data-translate="addToCart">Add to Cart</span>
-                                    <?php endif; ?>
+                                    <i class="fas fa-sliders-h"></i> <span data-translate="selectOptions">Select Options</span>
                                 </button>
                             </div>
                         </article>
@@ -1286,6 +1300,45 @@ foreach ($products as $p) {
     <script src="assets/js/instant-carousel.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/instant-carousel.js') ?>"></script>
     <script src="assets/js/wishlist-live.js?v=<?= (int)@filemtime(__DIR__ . '/assets/js/wishlist-live.js') ?>" defer></script>
     <script>
+    function syncCarouselDots(carouselEl) {
+        const dots = carouselEl.querySelectorAll('.shop-carousel-dot');
+        if (!dots.length) return;
+        const activeIndex = Array.from(carouselEl.querySelectorAll('.carousel-item')).findIndex(item => item.classList.contains('active'));
+        dots.forEach((dot, index) => dot.classList.toggle('is-active', index === Math.max(0, activeIndex)));
+    }
+
+    function showShopImageFallback(carouselEl) {
+        const imageWrap = carouselEl.closest('.shop-product-image');
+        if (!imageWrap) return;
+        carouselEl.remove();
+        if (!imageWrap.querySelector('.shop-image-fallback')) {
+            const fallback = document.createElement('div');
+            fallback.className = 'shop-image-fallback';
+            fallback.innerHTML = '<i class="fas fa-image"></i>';
+            imageWrap.insertBefore(fallback, imageWrap.firstChild);
+        }
+    }
+
+    document.querySelectorAll('.shop-product-image img').forEach(img => {
+        img.addEventListener('error', () => {
+            const item = img.closest('.carousel-item');
+            const carouselEl = img.closest('.shop-carousel');
+            if (!item || !carouselEl) return;
+
+            const wasActive = item.classList.contains('active');
+            item.remove();
+            const remaining = carouselEl.querySelectorAll('.carousel-item');
+            if (!remaining.length) {
+                showShopImageFallback(carouselEl);
+                return;
+            }
+            if (wasActive && !carouselEl.querySelector('.carousel-item.active')) {
+                remaining[0].classList.add('active');
+            }
+            syncCarouselDots(carouselEl);
+        }, { once: true });
+    });
+
     document.querySelectorAll('.shop-carousel').forEach(carouselEl => {
         const slideCount = carouselEl.querySelectorAll('.carousel-item').length;
         if (slideCount < 2) return;
@@ -1395,13 +1448,8 @@ foreach ($products as $p) {
         btn.addEventListener('click', function (e) {
             e.stopPropagation();
             const pid = parseInt(this.dataset.productId);
-            const requiresOptions = this.dataset.requiresOptions === '1';
             const productUrl = this.dataset.productUrl || ('product.php?id=' + pid);
-            if (requiresOptions) {
-                window.location.href = productUrl;
-                return;
-            }
-            addToCart(pid);
+            window.location.href = productUrl;
         });
     });
     </script>

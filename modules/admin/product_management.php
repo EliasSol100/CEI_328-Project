@@ -10,6 +10,7 @@ require_once __DIR__ . '/../../include/made_to_order_access.php';
 $current_page = 'product_management';
 $flash = '';
 const PRODUCT_MGMT_MAX_PRODUCT_PHOTOS = 10;
+const PRODUCT_MGMT_MAX_UPLOAD_BYTES = 5242880;
 
 $sellingFastColumn = mysqli_query($conn, "SHOW COLUMNS FROM products LIKE 'isSellingFast'");
 if ($sellingFastColumn && mysqli_num_rows($sellingFastColumn) === 0) {
@@ -132,6 +133,9 @@ function productMgmtReadUploadedImageBlob(array $files, int $index): ?string
     $tmpName = (string)($files['tmp_name'][$index] ?? '');
     $error = (int)($files['error'][$index] ?? UPLOAD_ERR_NO_FILE);
     if ($error !== UPLOAD_ERR_OK || $tmpName === '' || !is_file($tmpName)) {
+        return null;
+    }
+    if ((int)($files['size'][$index] ?? 0) > PRODUCT_MGMT_MAX_UPLOAD_BYTES) {
         return null;
     }
 
@@ -1041,7 +1045,7 @@ $statusFilterOptions = [
       <input type="hidden" name="status_filter" value="<?= htmlspecialchars($statusFilter) ?>">
       <div class="form-group">
         <label class="form-label">Product Photos <span class="text-muted">(up to <?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS ?>)</span></label>
-        <input type="file" name="photos[]" class="form-input" accept="image/*" multiple data-product-photo-input data-photo-slots="<?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS ?>">
+        <input type="file" name="photos[]" class="form-input" accept="image/*" multiple data-product-photo-input data-photo-slots="<?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS ?>" data-max-file-size="<?= PRODUCT_MGMT_MAX_UPLOAD_BYTES ?>">
         <span class="form-hint">Hold Ctrl/Cmd to select multiple photos. Uploaded product photos are optimized and stored as WebP automatically.</span>
       </div>
       <div class="form-grid-2">
@@ -1158,7 +1162,7 @@ $statusFilterOptions = [
           <span class="form-hint"><?= count($productPhotos) ?>/<?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS ?> photos — click &times; to remove</span>
         <?php endif; ?>
         <?php if (count($productPhotos) < PRODUCT_MGMT_MAX_PRODUCT_PHOTOS): ?>
-          <input type="file" name="photos[]" class="form-input" accept="image/*" multiple style="margin-top:8px;" data-product-photo-input data-photo-slots="<?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS - count($productPhotos) ?>">
+          <input type="file" name="photos[]" class="form-input" accept="image/*" multiple style="margin-top:8px;" data-product-photo-input data-photo-slots="<?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS - count($productPhotos) ?>" data-max-file-size="<?= PRODUCT_MGMT_MAX_UPLOAD_BYTES ?>">
           <span class="form-hint">Add up to <?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS - count($productPhotos) ?> more photo(s) — hold Ctrl/Cmd to select multiple. Uploaded product photos are optimized and stored as WebP automatically.</span>
         <?php endif; ?>
       </div>
@@ -1399,6 +1403,17 @@ document.querySelectorAll('[data-product-photo-input]').forEach(function(input) 
     if (slots > 0 && input.files && input.files.length > slots) {
       alert('You can add only ' + slots + ' more product photo(s). The limit is <?= PRODUCT_MGMT_MAX_PRODUCT_PHOTOS ?> photos per product.');
       input.value = '';
+      return;
+    }
+    var maxSize = parseInt(input.getAttribute('data-max-file-size') || '0', 10) || 0;
+    if (maxSize > 0 && input.files) {
+      for (var i = 0; i < input.files.length; i++) {
+        if (input.files[i].size > maxSize) {
+          alert('Each product photo must be 5 MB or smaller. Please choose a smaller image.');
+          input.value = '';
+          return;
+        }
+      }
     }
   });
 });

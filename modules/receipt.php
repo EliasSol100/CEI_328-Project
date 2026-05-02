@@ -194,40 +194,6 @@ if (!$isAdmin && !$isOwner) {
     exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_receipt_tracking') {
-    if (!$isAdmin) {
-        http_response_code(403);
-        echo "Only administrators can update tracking numbers.";
-        exit;
-    }
-
-    app_require_csrf(false, 'Invalid request token. Please refresh and try again.');
-
-    $newTracking = trim((string)($_POST['trackingCode'] ?? ''));
-    $resolvedCourier = courierLabelFromCode(
-        inferCourierCode((string)($order['courierCode'] ?? ''), (string)($order['shipmentCourierName'] ?? ''))
-    );
-    if (!app_order_tracking_save($conn, $orderId, $newTracking, $resolvedCourier)) {
-        header('Location: receipt.php?order_id=' . $orderId . '&tracking_error=1');
-        exit;
-    }
-
-    $emailQuery = '';
-    if ($newTracking !== '') {
-        app_order_tracking_mark_shipped($conn, $orderId);
-        $emailResult = app_order_tracking_send_shipped_receipt_email($conn, $orderId);
-        if (!empty($emailResult['success'])) {
-            $emailQuery = '&tracking_email=1';
-        } else {
-            error_log('Receipt tracking email failed for order #' . $orderId . ': ' . (string)($emailResult['message'] ?? 'unknown error'));
-            $emailQuery = '&tracking_email=0';
-        }
-    }
-
-    header('Location: receipt.php?order_id=' . $orderId . '&tracking_updated=1' . $emailQuery);
-    exit;
-}
-
 $payments = [];
 $paymentStmt = $conn->prepare("
     SELECT paymentID, provider, transactionID, paymentStatus, amount, currency, timestamp
@@ -560,18 +526,6 @@ $shippingAddressText = !empty($shippingAddressParts) ? implode(", ", $shippingAd
                     <span class="muted">Courier: <?= htmlspecialchars($courierLabel) ?> (<?= htmlspecialchars($shippingPriority) ?>)</span><br>
                     <span class="muted">Tracking: <?= htmlspecialchars($trackingCode !== "" ? $trackingCode : "Not assigned yet") ?></span>
                 </p>
-                <?php if ($isAdmin): ?>
-                    <form method="POST" class="tracking-form">
-                        <?= app_csrf_input() ?>
-                        <input type="hidden" name="action" value="update_receipt_tracking">
-                        <input
-                            type="text"
-                            name="trackingCode"
-                            value="<?= htmlspecialchars($trackingCode) ?>"
-                            placeholder="Enter tracking number, or leave blank to clear">
-                        <button type="submit" class="btn">Save Tracking</button>
-                    </form>
-                <?php endif; ?>
             </div>
             <div class="box">
                 <h4>Payment</h4>

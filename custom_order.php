@@ -186,6 +186,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             if ($input['project_title'] === '') {
                 throw new InvalidArgumentException("Please add a short title for your custom idea.");
             }
+            if ($input['budget'] !== '' && !preg_match('/^\d+(?:\.\d{1,2})?$/', $input['budget'])) {
+                throw new InvalidArgumentException("Preferred budget must be a number.");
+            }
             if (function_exists('mb_strlen') ? mb_strlen($input['details']) < 20 : strlen($input['details']) < 20) {
                 throw new InvalidArgumentException("Please describe your idea with a little more detail.");
             }
@@ -424,7 +427,7 @@ include __DIR__ . '/include/header.php';
                             <div class="form-grid">
                                 <div class="form-field">
                                     <label for="budget" data-co-text="customOrderPreferredBudgetLabel">Preferred budget</label>
-                                    <input type="text" id="budget" name="budget" maxlength="80" placeholder="Optional" data-co-placeholder="customOrderPreferredBudgetPlaceholder">
+                                    <input type="number" id="budget" name="budget" min="0" step="0.01" inputmode="decimal" placeholder="Optional" data-co-placeholder="customOrderPreferredBudgetPlaceholder">
                                 </div>
                                 <div class="form-field">
                                     <label for="needed_by" data-co-text="customOrderNeededByLabel">Needed by</label>

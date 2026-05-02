@@ -198,8 +198,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         INSERT INTO custom_orders (
                             userID, email, requestDescription, status, customerName,
                             ideaTitle, productType, preferredSize, preferredColours,
-                            agreedPrice, agreedPriceMax, deadline, accessCode, sizePriceOptions, photoReferencePath
-                        ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            agreedPrice, agreedPriceMax, deadline, accessCode, sizePriceOptions, photoReferencePath, sourceChannel
+                        ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admin')
                     ");
                     if ($stmt) {
                         mysqli_stmt_bind_param(
@@ -428,6 +428,8 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
         $viewStatusClass = $statusBadge[$viewStatus] ?? 'badge-muted';
         $viewPhotoPath = trim((string)($viewOrder['photoReferencePath'] ?? ''));
         $viewPhotoUrl = $viewPhotoPath !== '' ? '../../' . ltrim(str_replace('\\', '/', $viewPhotoPath), '/') : '';
+        $viewSourceChannel = strtolower(trim((string)($viewOrder['sourceChannel'] ?? 'website')));
+        $showCustomerDiscussion = $viewSourceChannel !== 'admin';
         ?>
         <div class="card mb-6">
           <div class="custom-order-detail-header">
@@ -482,6 +484,7 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
               </a>
             </div>
           <?php endif; ?>
+          <?php if ($showCustomerDiscussion): ?>
           <div class="custom-order-admin-grid">
             <div class="card custom-order-admin-panel">
               <div class="card-title custom-order-checkout-title">Reply / Request More Info</div>
@@ -523,6 +526,7 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
               </div>
             <?php endif; ?>
           </div>
+          <?php endif; ?>
           <div class="card custom-order-checkout-card">
             <div class="custom-order-checkout-header">
               <div>
@@ -663,7 +667,8 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
       </div>
       <div class="form-group">
         <label class="form-label">Reference Photo</label>
-        <input type="file" name="referencePhoto" class="form-input" accept="image/*">
+        <input type="file" name="referencePhoto" class="form-input js-reference-photo" accept="image/*" data-max-file-size="4194304">
+        <div class="text-sm custom-order-file-error" style="display:none;color:#dc2626;margin-top:6px"></div>
         <span class="form-hint">Optional. Uploaded images are converted to WebP automatically and can also be used as the first image on the private product.</span>
       </div>
       <div class="modal-footer">
@@ -733,7 +738,8 @@ $statusBadge = ['pending' => 'badge-muted', 'in_discussion' => 'badge-orange', '
       </div>
       <div class="form-group">
         <label class="form-label">Reference Photo</label>
-        <input type="file" name="referencePhoto" class="form-input" accept="image/*">
+        <input type="file" name="referencePhoto" class="form-input js-reference-photo" accept="image/*" data-max-file-size="4194304">
+        <div class="text-sm custom-order-file-error" style="display:none;color:#dc2626;margin-top:6px"></div>
         <?php if (!empty($editOrder['photoReferencePath'])): ?>
           <?php $editPhotoUrl = '../../' . ltrim(str_replace('\\', '/', (string)$editOrder['photoReferencePath']), '/'); ?>
           <div class="text-sm text-muted custom-order-current-photo-label">Current photo:</div>
@@ -770,7 +776,32 @@ document.addEventListener('DOMContentLoaded', function () {
       field.addEventListener('input', function () { state.dirty = true; });
       field.addEventListener('change', function () { state.dirty = true; });
     });
-    form.addEventListener('submit', function () { state.isSubmitting = true; state.dirty = false; });
+    form.addEventListener('submit', function (event) {
+      var badFile = Array.from(form.querySelectorAll('.js-reference-photo')).find(function (input) {
+        var max = parseInt(input.getAttribute('data-max-file-size') || '0', 10);
+        var file = input.files && input.files[0] ? input.files[0] : null;
+        var errorBox = input.parentElement ? input.parentElement.querySelector('.custom-order-file-error') : null;
+        if (errorBox) {
+          errorBox.style.display = 'none';
+          errorBox.textContent = '';
+        }
+        if (!max || !file || file.size <= max) return false;
+        if (errorBox) {
+          errorBox.textContent = 'Reference photo must be 4MB or smaller.';
+          errorBox.style.display = 'block';
+        }
+        return true;
+      });
+      if (badFile) {
+        event.preventDefault();
+        state.isSubmitting = false;
+        state.dirty = true;
+        badFile.focus();
+        return;
+      }
+      state.isSubmitting = true;
+      state.dirty = false;
+    });
     function dismissModal() {
       if (state.dirty && !state.isSubmitting && !window.confirm(warningMessage)) return;
       state.dirty = false;

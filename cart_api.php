@@ -7,10 +7,12 @@ require_once "include/security.php";
 require_once __DIR__ . '/include/product_option_helpers.php';
 require_once __DIR__ . '/include/coupon_helpers.php';
 require_once __DIR__ . '/include/made_to_order_access.php';
+require_once __DIR__ . '/include/cart_persistence.php';
 header('Content-Type: application/json; charset=utf-8');
 
 app_product_options_ensure_schema($conn);
 app_coupon_ensure_schema($conn);
+app_cart_restore_for_current_user($conn);
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
 
@@ -70,6 +72,7 @@ try {
             badRequest((string)($evaluation['message'] ?? 'Coupon code is invalid, expired, or not applicable to your cart.'));
         }
         $_SESSION['cart_coupon_code'] = $couponCode;
+        app_cart_persist_for_current_user($conn);
         echo json_encode([
             'success' => true,
             'message' => (string)$evaluation['message'],
@@ -82,6 +85,7 @@ try {
     if ($action === 'remove_coupon' || $action === 'clear_coupon') {
         unset($_SESSION['cart_coupon_code']);
         $cart = &getOrInitCart();
+        app_cart_persist_for_current_user($conn);
         echo json_encode([
             'success' => true,
             'message' => 'Coupon removed.',
@@ -289,6 +293,7 @@ try {
 
     $cart['totals'] = recalcCartTotals($cart['items']);
     $cart['updated_at'] = gmdate('c');
+    app_cart_persist_for_current_user($conn);
 
     $notice = null;
     if ($cartStatus !== 'made_to_order' && $availableStock <= 3) {
