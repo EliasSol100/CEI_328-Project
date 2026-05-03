@@ -666,12 +666,12 @@ if ($photoStmt) {
     $photoStmt->execute();
     $photoRes = $photoStmt->get_result();
     while ($photoRes && ($row = $photoRes->fetch_assoc())) {
-        $photos[] = "modules/admin/ajax/product_image.php?id=" . (int)$row["imageID"];
+        $photos[] = app_image_asset_url("modules/admin/ajax/product_image.php?id=" . (int)$row["imageID"]);
     }
     $photoStmt->close();
 }
 
-if (empty($photos) && productPageCanQueryCustomOrderPhoto($conn)) {
+if (productPageCanQueryCustomOrderPhoto($conn)) {
     $customPhotoStmt = $conn->prepare("
         SELECT photoReferencePath
         FROM custom_orders
@@ -693,15 +693,26 @@ if (empty($photos) && productPageCanQueryCustomOrderPhoto($conn)) {
             $relativePhotoPath = app_image_prefer_optimized_asset_path(ltrim(str_replace("\\", "/", $customPhotoPath), "/"));
             $absolutePhotoPath = __DIR__ . "/" . $relativePhotoPath;
             if (is_file($absolutePhotoPath)) {
-                $photos[] = $relativePhotoPath;
+                $customPhotoUrl = app_image_asset_url($relativePhotoPath);
+                if ($customPhotoUrl !== '') {
+                    // For private custom-order products, prefer the uploaded reference file as the primary gallery image.
+                    if ((string)($product['cartStatus'] ?? '') === 'made_to_order') {
+                        array_unshift($photos, $customPhotoUrl);
+                    } else {
+                        $photos[] = $customPhotoUrl;
+                    }
+                }
             }
         }
     }
 }
 
 if (empty($photos)) {
-    $photos[] = "assets/images/athina-eshop-logo.png";
+    $photos[] = app_image_asset_url("assets/images/athina-eshop-logo.png");
 }
+$photos = array_values(array_unique(array_filter($photos, static function ($src) {
+    return trim((string)$src) !== '';
+})));
 
 $colorPhotos = [];
 $productColorChoices = [];
