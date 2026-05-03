@@ -234,21 +234,12 @@ function checkoutValidPhone(string $value): bool {
 function checkoutShippingCost(
     string $country,
     string $courier,
-    string $speed,
+    string $mode,
     float $cartTotal,
     float $freeShippingThreshold,
-    array $cartShippingProfile,
-    array $shippingRateTable
+    array $flatRates
 ): float {
-    return app_shipping_calculate_cost(
-        $country,
-        $courier,
-        $speed,
-        $cartTotal,
-        $freeShippingThreshold,
-        $cartShippingProfile,
-        $shippingRateTable
-    );
+    return app_shipping_calculate_cost($country, $courier, $mode, $cartTotal, $freeShippingThreshold, $flatRates);
 }
 
 function checkoutTableExists(mysqli $conn, string $tableName): bool {
@@ -447,9 +438,8 @@ $estimatedEarnedPoints = (($isLoggedIn && $userId > 0) || (!empty($_POST['create
     ? loyaltyCalculateEarnedPoints(max(0, round($loyaltyEligibleSubtotal - $loyaltyDiscount, 2)))
     : 0;
 
-$countryCouriers = app_shipping_country_couriers();
-$shippingRateTable = app_shipping_rate_table();
-$cartShippingProfile = app_shipping_cart_profile($conn, $cartItems);
+$countryCouriers = app_shipping_courier_labels();
+$shippingFlatRates = app_shipping_flat_rates();
 $fulfillmentModes = ['delivery', 'pickup'];
 $shippingSpeeds = ['standard', 'express'];
 $shippingModeLabels = [
@@ -531,6 +521,7 @@ if ($isLoggedIn) {
 $selectedCountry = checkoutNormalizeCountry((string)($formData['shipping_country'] ?? ''), $availableCountries);
 $formData['shipping_country'] = $selectedCountry;
 $selectedSpeed = (string)$formData['shipping_speed'];
+$selectedMode = ($formData['fulfillment_mode'] ?? 'delivery') === 'pickup' ? 'pickup' : 'home';
 $countryCourierOptions = checkoutCountryCouriers($selectedCountry, $countryCouriers);
 $selectedCourier = (string)($formData['courier'] ?? '');
 if (!checkoutIsCourierAllowed($selectedCountry, $selectedCourier, $countryCouriers)) {
@@ -540,11 +531,10 @@ $formData['courier'] = $selectedCourier;
 $displayShippingCost = checkoutShippingCost(
     $selectedCountry,
     $selectedCourier,
-    $selectedSpeed,
+    $selectedMode,
     (float)$cartTotal,
     (float)$freeShippingThreshold,
-    $cartShippingProfile,
-    $shippingRateTable
+    $shippingFlatRates
 );
 $displayTotal = max(0, ($cartTotal - $couponDiscount - $loyaltyDiscount) + $displayShippingCost);
 
@@ -818,11 +808,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $shippingCost = checkoutShippingCost(
                     $shippingCountry,
                     $courier,
-                    $shippingSpeed,
+                    $fulfillmentMode === 'pickup' ? 'pickup' : 'home',
                     (float)$cartTotal,
                     (float)$freeShippingThreshold,
-                    $cartShippingProfile,
-                    $shippingRateTable
+                    $shippingFlatRates
                 );
                 $previewLoyaltyRedemption = loyaltyBuildRedemptionPreview(
                     $selectedLoyaltyPoints,
@@ -1285,8 +1274,7 @@ if (file_exists($headerPath)) {
     var subtotal = <?= json_encode((float)$cartTotal) ?>;
     var couponDiscount = <?= json_encode((float)$couponDiscount) ?>;
     var loyaltyDiscount = <?= json_encode((float)$loyaltyDiscount) ?>;
-    var shippingRateTable = <?= json_encode($shippingRateTable) ?>;
-    var cartShippingProfile = <?= json_encode($cartShippingProfile) ?>;
+    var flatRates = <?= json_encode($shippingFlatRates) ?>;
     var countryCouriers = <?= json_encode($countryCouriers) ?>;
     var defaultAddress = <?= json_encode($defaultAddress) ?>;
 
