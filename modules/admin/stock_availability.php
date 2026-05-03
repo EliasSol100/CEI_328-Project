@@ -742,16 +742,10 @@ if ($r) {
               <?php endif; ?>
               <span style="font-size:10px;color:#6b7280;text-align:center;min-height:12px"><?= htmlspecialchars($c['typeNames'] ?? '') ?></span>
               <span style="font-size:11px;color:#9ca3af">Internal #<?= (int)$c['colorID'] ?></span>
-              <div class="assign-switch-row">
-                <span>Assigned</span>
-                <label class="toggle-wrap assign-toggle" title="Show this colour on this product">
-                  <input type="checkbox" name="colorIDs[]" value="<?= $c['colorID'] ?>" class="colour-checkbox">
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
+              <input type="hidden" name="colorIDs[]" value="<?= $c['colorID'] ?>">
               <div class="assign-switch-row is-available">
                 <span>Available</span>
-                <label class="toggle-wrap assign-toggle" title="Allow customers to select this colour for this product">
+                <label class="toggle-wrap assign-toggle" title="Show this colour on this product page (off = red unavailable line)">
                   <input type="checkbox" name="availableColorIDs[]" value="<?= $c['colorID'] ?>" class="colour-available-checkbox">
                   <span class="toggle-slider"></span>
                 </label>
@@ -1529,38 +1523,24 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
-  var productColorMap = <?= json_encode($productColorMap, JSON_FORCE_OBJECT) ?>;
   var productColorAvailabilityMap = <?= json_encode($productColorAvailabilityMap, JSON_FORCE_OBJECT) ?>;
   var assignSelect = document.getElementById('assign-product-select');
   var colourCards  = document.querySelectorAll('.colour-assign-card');
 
-  function paintAssignCard(card, assigned, available) {
-    if (!assigned) {
-      card.style.borderColor = '#e5e7eb';
-      card.style.opacity = '0.62';
-    } else if (!available) {
-      card.style.borderColor = '#dc2626';
-      card.style.opacity = '1';
-    } else {
-      card.style.borderColor = '#111827';
-      card.style.opacity = '1';
-    }
+  function paintAssignCard(card, available) {
+    card.style.opacity      = '1';
+    card.style.borderColor  = available ? '#111827' : '#dc2626';
   }
 
   function syncCheckboxes(productID) {
-    var assigned = productColorMap[productID];
-    var availability = productColorAvailabilityMap[productID] || {};
-    var neverAssigned = assigned === undefined;
+    var availability = productColorAvailabilityMap[productID];
+    var neverSaved   = availability === undefined;
     colourCards.forEach(function (card) {
-      var colorID  = String(card.dataset.colorId);
-      var checkbox = card.querySelector('.colour-checkbox');
+      var colorID           = String(card.dataset.colorId);
       var availableCheckbox = card.querySelector('.colour-available-checkbox');
-      var isChecked = neverAssigned ? true : !!assigned[colorID];
-      var isAvailable = isChecked && (availability[colorID] === undefined || Number(availability[colorID]) === 1);
-      checkbox.checked = isChecked;
+      var isAvailable       = neverSaved ? true : Number((availability || {})[colorID] ?? 0) === 1;
       availableCheckbox.checked = isAvailable;
-      availableCheckbox.disabled = !isChecked;
-      paintAssignCard(card, isChecked, isAvailable);
+      paintAssignCard(card, isAvailable);
     });
   }
 
@@ -1573,30 +1553,13 @@ document.addEventListener('DOMContentLoaded', function () {
   colourCards.forEach(function (card) {
     card.addEventListener('click', function (e) {
       if (e.target.closest('input, label, .assign-switch-row, .toggle-wrap')) return;
-      var checkbox = card.querySelector('.colour-checkbox');
       var availableCheckbox = card.querySelector('.colour-available-checkbox');
-      checkbox.checked = !checkbox.checked;
-      if (checkbox.checked && !availableCheckbox.checked) {
-        availableCheckbox.checked = true;
-      }
-      availableCheckbox.disabled = !checkbox.checked;
-      paintAssignCard(card, checkbox.checked, availableCheckbox.checked);
+      availableCheckbox.checked = !availableCheckbox.checked;
+      paintAssignCard(card, availableCheckbox.checked);
     });
-    var checkbox = card.querySelector('.colour-checkbox');
     var availableCheckbox = card.querySelector('.colour-available-checkbox');
-    checkbox.addEventListener('change', function () {
-      if (checkbox.checked && !availableCheckbox.checked) {
-        availableCheckbox.checked = true;
-      }
-      availableCheckbox.disabled = !checkbox.checked;
-      paintAssignCard(card, checkbox.checked, availableCheckbox.checked);
-    });
     availableCheckbox.addEventListener('change', function () {
-      if (availableCheckbox.checked) {
-        checkbox.checked = true;
-      }
-      availableCheckbox.disabled = !checkbox.checked;
-      paintAssignCard(card, checkbox.checked, availableCheckbox.checked);
+      paintAssignCard(card, availableCheckbox.checked);
     });
   });
 
