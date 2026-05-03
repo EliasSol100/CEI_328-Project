@@ -423,7 +423,34 @@ foreach ($categoryOptions as $categoryOption) {
     ];
 }
 
-$materialOptions = $visibleAssignedOptions(app_shop_filter_active_options($shopFilterSettings, 'materials'));
+$materialOptions = [];
+$materialOptionIds = [];
+$materialNamesById = [];
+$materialRes = $conn->query("
+    SELECT typeID, typeName
+    FROM yarn_types
+    WHERE typeName IS NOT NULL AND TRIM(typeName) <> ''
+    ORDER BY typeName ASC
+");
+if ($materialRes) {
+    while ($row = $materialRes->fetch_assoc()) {
+        $typeId = (int)($row['typeID'] ?? 0);
+        $typeName = trim((string)($row['typeName'] ?? ''));
+        if ($typeId <= 0 || $typeName === '') {
+            continue;
+        }
+        $id = (string)$typeId;
+        $materialOptions[] = [
+            'id' => $id,
+            'label_en' => $typeName,
+            'label_gr' => $typeName,
+            'active' => 1,
+            'product_ids' => [],
+        ];
+        $materialOptionIds[] = $id;
+        $materialNamesById[$id] = $typeName;
+    }
+}
 
 $colorFilterOptions = [];
 $colorDisplaySql = app_color_display_sql('c');
@@ -498,7 +525,7 @@ if (!is_array($selectedMaterials)) {
     $selectedMaterials = [$selectedMaterials];
 }
 $selectedMaterials = array_values(array_unique(array_intersect(
-    app_shop_filter_valid_ids($shopFilterSettings, 'materials'),
+    $materialOptionIds,
     array_map('strval', $selectedMaterials)
 )));
 
@@ -596,15 +623,68 @@ if ($searchQuery !== '') {
 }
 
 if (!empty($selectedMaterials)) {
-    $materialProductIds = app_shop_filter_product_ids_for($shopFilterSettings, 'materials', $selectedMaterials);
-    if (empty($materialProductIds)) {
+    $selectedMaterialIds = array_values(array_unique(array_map('intval', $selectedMaterials)));
+    $selectedMaterialIds = array_values(array_filter($selectedMaterialIds, static fn(int $id): bool => $id > 0));
+    $selectedMaterialNames = [];
+    foreach ($selectedMaterials as $materialId) {
+        $materialName = trim((string)($materialNamesById[(string)$materialId] ?? ''));
+        if ($materialName !== '') {
+            $selectedMaterialNames[] = $materialName;
+        }
+    }
+    $selectedMaterialNames = array_values(array_unique($selectedMaterialNames));
+
+    if (empty($selectedMaterialIds) && empty($selectedMaterialNames)) {
         $sql .= " AND 1 = 0";
     } else {
-        $placeholders = implode(',', array_fill(0, count($materialProductIds), '?'));
-        $sql .= " AND p.productID IN ({$placeholders})";
-        $bindTypes .= str_repeat('i', count($materialProductIds));
-        foreach ($materialProductIds as $productId) {
-            $bindValues[] = (int)$productId;
+        $idPlaceholders = !empty($selectedMaterialIds)
+            ? implode(',', array_fill(0, count($selectedMaterialIds), '?'))
+            : '';
+        $namePlaceholders = !empty($selectedMaterialNames)
+            ? implode(',', array_fill(0, count($selectedMaterialNames), '?'))
+            : '';
+
+        $sql .= " AND (";
+        if (!empty($selectedMaterialIds)) {
+            $sql .= "
+                EXISTS (
+                    SELECT 1
+                    FROM product_variations pvf
+                    JOIN color_yarn_types cyt ON cyt.colorID = pvf.colorID
+                    WHERE pvf.productID = p.productID
+                      AND cyt.typeID IN ({$idPlaceholders})
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM product_color_photos pcpf
+                    JOIN color_yarn_types cyt ON cyt.colorID = pcpf.colorID
+                    WHERE pcpf.productID = p.productID
+                      AND cyt.typeID IN ({$idPlaceholders})
+                )
+            ";
+        }
+        if (!empty($selectedMaterialNames)) {
+            if (!empty($selectedMaterialIds)) {
+                $sql .= " OR ";
+            }
+            $sql .= "TRIM(COALESCE(p.materialType, '')) IN ({$namePlaceholders})";
+        }
+        $sql .= ")";
+
+        if (!empty($selectedMaterialIds)) {
+            $bindTypes .= str_repeat('i', count($selectedMaterialIds) * 2);
+            foreach ($selectedMaterialIds as $materialId) {
+                $bindValues[] = $materialId;
+            }
+            foreach ($selectedMaterialIds as $materialId) {
+                $bindValues[] = $materialId;
+            }
+        }
+        if (!empty($selectedMaterialNames)) {
+            $bindTypes .= str_repeat('s', count($selectedMaterialNames));
+            foreach ($selectedMaterialNames as $materialName) {
+                $bindValues[] = $materialName;
+            }
         }
     }
 }
