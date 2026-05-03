@@ -1490,57 +1490,31 @@ if (file_exists($headerPath)) {
         return Object.keys(options)[0] || '';
     }
 
-    function sizeSurcharge() {
-        var sizeCode = String((cartShippingProfile && cartShippingProfile.size_code) || 'small').toLowerCase();
-        var surcharges = { small: 0, medium: 0.75, large: 1.5, oversized: 3 };
-        return Number(surcharges[sizeCode] || 0);
-    }
-
-    function rateFor(country, courier, speed) {
-        var tiers = (((shippingRateTable || {})[country] || {})[courier] || {})[speed] || [];
-        var weight = Math.max(0.1, Number((cartShippingProfile && cartShippingProfile.weight_kg) || 0.1));
-        for (var i = 0; i < tiers.length; i++) {
-            var max = tiers[i].max;
-            if (max === null || typeof max === 'undefined' || weight <= Number(max)) {
-                return Number(tiers[i].price || 0) + sizeSurcharge();
-            }
-        }
-        return 0;
+    function rateFor(country, courier, mode) {
+        return Number(((flatRates[country] || {})[courier] || {})[mode] || 0);
     }
 
     function formatMoney(value) {
         return '\u20AC' + Number(value || 0).toFixed(2);
     }
 
-    function shippingCost(country, courier, speed) {
-        if (subtotal >= freeThreshold) {
-            return 0;
-        }
-        return rateFor(country, courier, speed);
+    function shippingCost(country, courier, mode) {
+        if (subtotal >= freeThreshold) return 0;
+        return rateFor(country, courier, mode);
     }
 
     function updateTotals() {
         var country = selectedCountry();
         var courier = selectedCourier();
-        var speed = selectedSpeed();
-        var currentShippingCost = shippingCost(country, courier, speed);
+        var mode = selectedMode() === 'pickup' ? 'pickup' : 'home';
+        var currentShippingCost = shippingCost(country, courier, mode);
         if (shippingOut) shippingOut.textContent = currentShippingCost === 0 ? t('freeLabel') : formatMoney(currentShippingCost);
         var total = Math.max(0, subtotal - couponDiscount - loyaltyDiscount + currentShippingCost);
         if (totalOut) totalOut.textContent = total.toFixed(2);
         if (btnTotalOut) btnTotalOut.textContent = total.toFixed(2);
     }
 
-    function updateSpeedLabels() {
-        var country = selectedCountry();
-        var courier = selectedCourier();
-        var freeText = '(' + t('checkoutFreeOverAmount', { amount: Number(freeThreshold).toFixed(0) }) + ')';
-        if (standardCostLabelEl) {
-            standardCostLabelEl.textContent = subtotal >= freeThreshold ? freeText : '(' + formatMoney(rateFor(country, courier, 'standard')) + ')';
-        }
-        if (expressCostLabelEl) {
-            expressCostLabelEl.textContent = subtotal >= freeThreshold ? freeText : '(' + formatMoney(rateFor(country, courier, 'express')) + ')';
-        }
-    }
+    function updateSpeedLabels() {}
 
     function refreshCourierOptions() {
         if (!courierEl) {
@@ -1952,6 +1926,7 @@ if (file_exists($headerPath)) {
 
     modeEls.forEach(function (el) {
         el.addEventListener('change', function () {
+            updateTotals();
             updateCourierMap();
             togglePickupPointWrappers();
         });
