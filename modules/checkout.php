@@ -1023,7 +1023,7 @@ if (file_exists($headerPath)) {
                             <label><span data-translate="checkoutDeliveryOption">Delivery Option</span> *</label>
                         <div class="form-options">
                             <?php foreach ($shippingModeLabels as $modeKey => $modeLabel): ?>
-                                <label class="option-label"><input type="radio" name="fulfillment_mode" value="<?= htmlspecialchars($modeKey) ?>" <?= (($formData['fulfillment_mode'] ?? 'delivery') === $modeKey) ? 'checked' : '' ?>> <span<?= $modeKey === 'delivery' ? app_translate_text_attrs('Deliver to my address', 'Παράδοση στη διεύθυνσή μου') : app_translate_text_attrs('Pickup from courier point', 'Παραλαβή από σημείο courier') ?>><?= htmlspecialchars($modeLabel) ?></span></label>
+                                <label class="option-label"<?= $modeKey === 'delivery' ? ' id="fulfillment-delivery-option"' : '' ?>><input type="radio" name="fulfillment_mode" value="<?= htmlspecialchars($modeKey) ?>" <?= (($formData['fulfillment_mode'] ?? 'delivery') === $modeKey) ? 'checked' : '' ?>> <span<?= $modeKey === 'delivery' ? app_translate_text_attrs('Deliver to my address', 'Παράδοση στη διεύθυνσή μου') : app_translate_text_attrs('Pickup from courier point', 'Παραλαβή από σημείο courier') ?>><?= htmlspecialchars($modeLabel) ?></span></label>
                             <?php endforeach; ?>
                         </div>
                         <?php if (isset($errors['fulfillment_mode'])): ?><span class="error"><?= $errors['fulfillment_mode'] ?></span><?php endif; ?>
@@ -1908,8 +1908,25 @@ if (file_exists($headerPath)) {
         }
     }
 
+    function toggleDeliveryOption() {
+        var courier = courierEl ? courierEl.value : '';
+        var deliveryOptionEl = document.getElementById('fulfillment-delivery-option');
+        if (!deliveryOptionEl) return;
+
+        var isBoxNow = courier === 'boxnow';
+        deliveryOptionEl.style.display = isBoxNow ? 'none' : '';
+
+        if (isBoxNow) {
+            var pickupRadio = document.querySelector('input[name="fulfillment_mode"][value="pickup"]');
+            if (pickupRadio && !pickupRadio.checked) {
+                pickupRadio.checked = true;
+            }
+        }
+    }
+
     if (courierEl) {
         courierEl.addEventListener('change', function () {
+            toggleDeliveryOption();
             updateSpeedLabels();
             updateTotals();
             updateCourierMap();
@@ -1950,6 +1967,7 @@ if (file_exists($headerPath)) {
     }
 
     refreshCourierOptions();
+    toggleDeliveryOption();
     updateSpeedLabels();
     applyPostalRule();
     updateTotals();
