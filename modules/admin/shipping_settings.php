@@ -62,9 +62,8 @@ $methodLabels   = ['home' => 'Deliver to your address', 'pickup' => 'Pick up fro
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     .shipping-price-input { max-width: 120px; }
-    .courier-section { margin-top: 24px; }
-    .courier-section:first-child { margin-top: 0; }
-    .courier-section h3 { font-size: 15px; color: #111827; margin: 0 0 10px; }
+    .shipping-country-row td { background: #f3f4f6; font-weight: 700; color: #374151; font-size: 13px; padding: 8px 14px; }
+    .shipping-courier-name { padding-left: 28px !important; }
   </style>
 </head>
 <body>
@@ -102,39 +101,39 @@ $methodLabels   = ['home' => 'Deliver to your address', 'pickup' => 'Pick up fro
         <div class="card mb-6">
           <div class="card-title">Courier Prices</div>
 
-          <?php foreach (app_shipping_default_flat_rates() as $country => $couriers): ?>
-            <div class="courier-section">
-              <h3><?= app_h($country) ?></h3>
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Courier</th>
-                    <th>Method</th>
-                    <th>Price (EUR)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <?php foreach ($couriers as $courierCode => $methods): ?>
-                    <?php foreach ($methods as $method => $defaultPrice): ?>
-                      <tr>
-                        <td class="font-600"><?= app_h($courierLabels[$country][$courierCode] ?? $courierCode) ?></td>
-                        <td><?= app_h($methodLabels[$method] ?? $method) ?></td>
-                        <td>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            class="form-input shipping-price-input"
-                            name="flat[<?= app_h($country) ?>][<?= app_h($courierCode) ?>][<?= app_h($method) ?>]"
-                            value="<?= app_h(shippingSettingsMoney($flatRates[$country][$courierCode][$method] ?? $defaultPrice)) ?>">
-                        </td>
-                      </tr>
-                    <?php endforeach; ?>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Courier</th>
+                <th>Method</th>
+                <th>Price (EUR)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php foreach (app_shipping_default_flat_rates() as $country => $couriers): ?>
+                <tr class="shipping-country-row">
+                  <td colspan="3"><?= app_h($country) ?></td>
+                </tr>
+                <?php foreach ($couriers as $courierCode => $methods): ?>
+                  <?php foreach ($methods as $method => $defaultPrice): ?>
+                    <tr>
+                      <td class="font-600 shipping-courier-name"><?= app_h($courierLabels[$country][$courierCode] ?? $courierCode) ?></td>
+                      <td><?= app_h($methodLabels[$method] ?? $method) ?></td>
+                      <td>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          class="form-input shipping-price-input"
+                          name="flat[<?= app_h($country) ?>][<?= app_h($courierCode) ?>][<?= app_h($method) ?>]"
+                          value="<?= app_h(shippingSettingsMoney($flatRates[$country][$courierCode][$method] ?? $defaultPrice)) ?>">
+                      </td>
+                    </tr>
                   <?php endforeach; ?>
-                </tbody>
-              </table>
-            </div>
-          <?php endforeach; ?>
+                <?php endforeach; ?>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
 
           <div class="modal-footer" style="margin-top: 24px;">
             <button type="submit" class="btn-save"><i class="fas fa-save"></i> Save Shipping Settings</button>
