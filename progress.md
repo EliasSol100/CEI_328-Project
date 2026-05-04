@@ -1,5 +1,32 @@
 # ti allages na kanei o ilias:
 
+ΠΟΛΥ ΣΗΜΑΝΤΙΚΟ (διάβασε πριν ξεκινήσεις):
+Μην πας να τα κάνεις όλα κατευθείαν. Πρώτα στήσε σωστό plan, σπάσε τα tasks σε μικρά κομμάτια (agile φάση), δούλευε step-by-step και κάνε testing σε κάθε αλλαγή. Είμαστε στις τελευταίες μέρες και δεν υπάρχει χρόνος για errors ή rework.
+
+Yarn Type Integration (Πολύ βασικό)
+Στο product page & stock / colour inventory μένει όπως είναι τώρα. Απλά προσθέτεις ακόμα ένα category field, είτε dropdown είτε tickbox, για τα yarn types. Τα yarn types πρέπει να έρχονται dynamic με function, από αυτά που δημιουργεί ο admin. Ο σκοπός είναι ο admin να μπαίνει εκεί, να επιλέγει πρώτα το yarn type και μετά να βλέπει τα colours που ανήκουν σε αυτό.
+
+Colour Availability Logic (Inventory)
+Από το colour inventory, ο admin επιλέγει yarn type, βρίσκει το colour που θέλει και το κάνει unavailable / out of stock. Όταν γίνει unavailable, στο storefront πρέπει να εμφανίζεται η κόκκινη διαγώνια γραμμή πάνω στο colour, όπως το είχαμε ήδη κάνει.
+
+Assign Colours (Αλλαγή λογικής)
+Το assign colours φεύγει τελείως. Η νέα λογική είναι ότι ο admin στο product management επιλέγει μόνο το yarn type για κάθε product και αυτόματα μπαίνουν όλα τα colours που ανήκουν σε αυτό το yarn type. Για παράδειγμα, αν το yarn type velvet έχει 4 colours και ο admin επιλέξει velvet σε 5 products, τότε μπαίνουν και τα 4 colours και στα 5 products. Δεν υπάρχει περίπτωση product χωρίς colours, ούτε manual αφαίρεση colour. Η μόνη “αφαίρεση” είναι είτε να γίνει unavailable, άρα να φαίνεται με κόκκινη διαγώνια γραμμή, είτε να γίνει delete το colour από το system.
+
+Product Stock (Καταργείται)
+Το stock από τα products φεύγει τελείως. Μπορεί να γίνει hidden για μελλοντικό reference, αν βοηθά, αλλιώς να σβηστεί. Πλέον όλα τα products είναι made_to_order, όπως έχει υλοποιηθεί και στο custom_orders.
+
+Default Image (Optional)
+Αν σε κάποιο product δεν έχει επιλεχθεί chosen image, τότε να μπαίνει default εικόνα μαλλιού / yarn icon. Αυτό δεν είναι πρώτη προτεραιότητα, οπότε γίνεται μόνο αν υπάρχει χρόνος.
+
+Colour Display Code Cleanup
+Από το add colour πρέπει να φύγει το display code και να μείνει μόνο το internal ID.
+
+Frontend – Colour Selection UX (Σημαντικό)
+Στο product colour selection, όταν ο πελάτης επιλέγει colours και ένα product έχει πάνω από 2-3 επιλογές χρωμάτων, να εμφανίζεται από πάνω ένα GUI table που να δείχνει όλες τις επιλογές που έχει κάνει μέχρι εκείνη τη στιγμή. Επίσης, κάθε φορά που επιλέγει colour από dropdown, να εμφανίζεται popup image που να δείχνει την ακριβή εικόνα του colour που έχει μπει από το dashboard. Ο σκοπός είναι ο πελάτης να βλέπει live τι διαλέγει και να μην επιλέγει στα τυφλά.
+
+
+--------------------------------------
+
 tracking number editable stin apodixi,, na xekina me null stin database diladi kathe fora pou gvenei h apodixi na exi attribute to table kai na einai null to pedio tracking number alla stin apodixi na mpori na to allaxei
 
 na diorthothei to link sto custom order na to anoigei o pelatis kai na tou perni sto custom order.php den thimame to onoma katalaves ti ennow kai na tu gvazei auta p prepei diladi tin etisi tou custom order n paei gia pliromi
