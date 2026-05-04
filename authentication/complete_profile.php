@@ -192,6 +192,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
     }
 
+    $country = trim(preg_replace('/\s*\(.*?\)/', '', $country));
+    $countryIsoMap = ['cy' => 'Cyprus', 'gr' => 'Greece'];
+    if (isset($countryIsoMap[strtolower($country)])) {
+        $country = $countryIsoMap[strtolower($country)];
+    }
     $allowedCountries = ['Greece', 'Cyprus', 'Ελλάδα', 'Κύπρος'];
     if (!empty($country) && !in_array($country, $allowedCountries, true)) {
         $errors[] = "We currently ship only to Greece and Cyprus.";
@@ -414,8 +419,9 @@ if (!empty($errors)) {
         if (
             str_contains($errorText, 'Country') ||
             str_contains($errorText, 'City') ||
-            str_contains($errorText, 'address') ||
-            str_contains($errorText, 'Postal')
+            str_contains($errorText, 'Address') ||
+            str_contains($errorText, 'Postal') ||
+            str_contains($errorText, 'ship only')
         ) {
             $initialStep = 3;
         }
@@ -456,7 +462,7 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
             <?= app_csrf_input() ?>
             <div class="wizard-content">
 
-                <div class="form-step active" id="step1">
+<div class="form-step active" id="step1">
                     <?php if (!empty($errors) && isset($_POST["fullname"])): ?>
                         <?php foreach ($errors as $error): ?>
                             <?php if (in_array($error, ["All fields are required!", "Phone number is not valid!", "Email is not valid!"])): ?>
@@ -954,6 +960,13 @@ $profileLogoUrl = app_auth_logo_url($conn, '../');
 
         $("#complete-profile-form").on("submit", function (e) {
             const fullPhone = iti.getNumber();
+
+            if (!$("#country").val().trim()) {
+                try {
+                    const countryName = $("#country").countrySelect("getSelectedCountryData").name || "";
+                    if (countryName) $("#country").val(countryName);
+                } catch (_) {}
+            }
 
             if (!validateAddressStep()) {
                 e.preventDefault();

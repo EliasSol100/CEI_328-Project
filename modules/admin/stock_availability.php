@@ -13,7 +13,7 @@ app_product_sync_stock_statuses($conn);
 
 function stock_normalize_tab(string $value): string
 {
-    return in_array($value, ['products', 'assign', 'photos', 'multi', 'add', 'inventory'], true) ? $value : 'products';
+    return in_array($value, ['products', 'photos', 'multi', 'add', 'inventory'], true) ? $value : 'products';
 }
 
 function stock_build_project_base_path(): string
@@ -30,7 +30,6 @@ function stock_colour_admin_label(array $row): string
 {
     $typeNames = trim((string)($row['typeNames'] ?? $row['typeName'] ?? ''));
     $displayName = trim((string)($row['displayName'] ?? $row['colorName'] ?? ''));
-    $displayCode = trim((string)($row['displayCode'] ?? ''));
 
     $parts = [];
     if ($typeNames !== '') {
@@ -41,9 +40,6 @@ function stock_colour_admin_label(array $row): string
     }
 
     $label = implode(' - ', $parts);
-    if ($displayCode !== '') {
-        $label .= ($label !== '' ? ' ' : '') . '(Code ' . $displayCode . ')';
-    }
 
     if ($label !== '') {
         return $label;
@@ -98,31 +94,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $activeTab = stock_normalize_tab((string)($_POST['active_tab'] ?? 'products'));
 
     if ($action === 'update_stock') {
-        $productID = (int)$_POST['productID'];
-        $inventory = max(0, (int)$_POST['inventory']);
-
-        if (!$productID) {
-            $flash = 'err:Invalid product ID.';
-        } else {
-            $currentStatus = '';
-            $statusStmt = mysqli_prepare($conn, "SELECT cartStatus FROM products WHERE productID = ? LIMIT 1");
-            if ($statusStmt) {
-                mysqli_stmt_bind_param($statusStmt, 'i', $productID);
-                mysqli_stmt_execute($statusStmt);
-                $statusRes = mysqli_stmt_get_result($statusStmt);
-                if ($statusRes && ($statusRow = mysqli_fetch_assoc($statusRes))) {
-                    $currentStatus = (string)($statusRow['cartStatus'] ?? '');
-                }
-                mysqli_stmt_close($statusStmt);
-            }
-
-            $status = app_product_status_from_stock($inventory, $currentStatus);
-            $stmt = mysqli_prepare($conn, "UPDATE products SET inventory=?, cartStatus=? WHERE productID=?");
-            mysqli_stmt_bind_param($stmt, 'isi', $inventory, $status, $productID);
-            mysqli_stmt_execute($stmt);
-            mysqli_stmt_close($stmt);
-            $flash = 'ok:Stock updated.';
-        }
+        $flash = 'err:Product stock is no longer managed. Products are public made-to-order.';
     }
 
     if ($action === 'update_color_stock') {
@@ -255,62 +227,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'assign_product_colors') {
-        $productID = (int)($_POST['productID'] ?? 0);
-        $colorIDs  = array_filter(array_map('intval', $_POST['colorIDs'] ?? []));
-        $availableColorIDs = array_fill_keys(array_filter(array_map('intval', $_POST['availableColorIDs'] ?? [])), true);
-
-        if (!$productID) {
-            $flash = 'err:Select a product first.';
-        } else {
-
-            $stmt = mysqli_prepare($conn,
-                "DELETE FROM product_variations
-                 WHERE productID = ?
-                   AND colorID IS NOT NULL
-                   AND (size IS NULL OR size = '')
-                   AND (yarnType IS NULL OR yarnType = '')");
-            mysqli_stmt_bind_param($stmt, 'i', $productID);
-            mysqli_stmt_execute($stmt);
-            mysqli_stmt_close($stmt);
-
-            $stmt = mysqli_prepare($conn, "DELETE FROM product_color_availability WHERE productID = ?");
-            mysqli_stmt_bind_param($stmt, 'i', $productID);
-            mysqli_stmt_execute($stmt);
-            mysqli_stmt_close($stmt);
-
-            foreach ($colorIDs as $colorID) {
-                $stmt = mysqli_prepare($conn,
-                    "INSERT INTO product_variations (productID, colorID) VALUES (?, ?)");
-                mysqli_stmt_bind_param($stmt, 'ii', $productID, $colorID);
-                mysqli_stmt_execute($stmt);
-                $newVarID = (int)mysqli_insert_id($conn);
-                mysqli_stmt_close($stmt);
-
-                $isAvailable = isset($availableColorIDs[$colorID]) ? 1 : 0;
-                $stmt = mysqli_prepare($conn,
-                    "INSERT INTO product_color_availability (productID, colorID, isAvailable)
-                     VALUES (?, ?, ?)
-                     ON DUPLICATE KEY UPDATE isAvailable = VALUES(isAvailable)");
-                mysqli_stmt_bind_param($stmt, 'iii', $productID, $colorID, $isAvailable);
-                mysqli_stmt_execute($stmt);
-                mysqli_stmt_close($stmt);
-            }
-
-            $hasVariants = !empty($colorIDs) ? 1 : 0;
-            $stmt = mysqli_prepare($conn,
-                "UPDATE products SET hasVariants = ? WHERE productID = ?");
-            mysqli_stmt_bind_param($stmt, 'ii', $hasVariants, $productID);
-            mysqli_stmt_execute($stmt);
-            mysqli_stmt_close($stmt);
-
-            $flash = 'ok:Product colours updated.';
-        }
+        $flash = 'err:Assign Colours has been removed. Product colours now come from the product yarn type.';
     }
 
     if ($action === 'add_color') {
         $colorID     = (int)($_POST['colorID'] ?? 0);
         $colorName   = trim($_POST['colorName'] ?? '');
-        $displayCode = trim($_POST['displayCode'] ?? '');
         $typeIDRaw   = $_POST['typeID'] ?? '';
         $newTypeName = trim($_POST['newTypeName'] ?? '');
         $stock       = max(0, (int)($_POST['globalInventoryAvailable'] ?? 50));
@@ -343,11 +265,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $hexRaw  = trim($_POST['hexCode'] ?? '');
             $hexCode = preg_match('/^#[0-9a-fA-F]{6}$/', $hexRaw) ? $hexRaw : '#ece6f6';
-            $displayCodeForDb = $displayCode !== '' ? $displayCode : null;
             $colorNameForDb = $colorName;
-            if ($displayCode !== '' && !preg_match('/\s+' . preg_quote($displayCode, '/') . '$/u', $colorNameForDb)) {
-                $colorNameForDb = trim($colorNameForDb . ' ' . $displayCode);
-            }
+            $displayCodeForDb = null;
 
             $stmt = mysqli_prepare($conn,
                 "INSERT INTO colors (colorID, colorName, displayCode, hexCode, globalInventoryAvailable, isActive)
@@ -388,31 +307,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
 
-
-            $prodRes = mysqli_query($conn,
-                "SELECT productID FROM products
-                 WHERE cartStatus IN ('active','low_stock','out_of_stock','made_to_order')");
-            if ($prodRes) {
-                $autoAssignStmt = mysqli_prepare($conn,
-                    "INSERT IGNORE INTO product_variations (productID, colorID) VALUES (?, ?)");
-                if ($autoAssignStmt) {
-                    while ($prodRow = mysqli_fetch_assoc($prodRes)) {
-                        $pid = (int)$prodRow['productID'];
-                        mysqli_stmt_bind_param($autoAssignStmt, 'ii', $pid, $colorID);
-                        mysqli_stmt_execute($autoAssignStmt);
-                    }
-                    mysqli_stmt_close($autoAssignStmt);
-                }
-                mysqli_query($conn,
-                    "UPDATE products SET hasVariants = 1
-                     WHERE cartStatus IN ('active','low_stock','out_of_stock','made_to_order')");
-            }
-
-            $flash = 'ok:Colour added successfully.';
+            $flash = 'ok:Colour added successfully. Products using this yarn type now see it automatically.';
         }
     }
 
-    header('Location: stock_availability.php?tab=' . urlencode($activeTab) . '&flash=' . urlencode($flash));
+    $redirectParams = ['tab' => $activeTab, 'flash' => $flash];
+    $postedInventoryTypeID = (int)($_POST['inventory_type_id'] ?? 0);
+    if ($postedInventoryTypeID > 0) {
+        $redirectParams['type_id'] = $postedInventoryTypeID;
+    }
+    header('Location: stock_availability.php?' . http_build_query($redirectParams));
     exit;
 }
 
@@ -441,7 +345,12 @@ if ($msRes) {
 }
 
 $products = [];
-$r = mysqli_query($conn, "SELECT productID, nameEN, category, inventory, cartStatus FROM products ORDER BY nameEN");
+$r = mysqli_query($conn, "
+    SELECT p.productID, p.nameEN, p.category, p.inventory, p.cartStatus, p.yarnTypeID, yt.typeName
+    FROM products p
+    LEFT JOIN yarn_types yt ON yt.typeID = p.yarnTypeID
+    ORDER BY p.nameEN
+");
 if ($r) {
     while ($row = mysqli_fetch_assoc($r)) {
         $products[] = $row;
@@ -449,91 +358,39 @@ if ($r) {
 }
 
 $colorDisplaySql = app_color_display_sql('c');
-$productColorMap = [];
-$r = mysqli_query($conn, "
-    SELECT productID, colorID
-    FROM product_variations
-    WHERE colorID IS NOT NULL
-      AND (size IS NULL OR size = '')
-      AND (yarnType IS NULL OR yarnType = '')
-    UNION
-    SELECT productID, colorID
-    FROM product_color_photos
-    WHERE colorID IS NOT NULL
-");
-if ($r) {
-    while ($row = mysqli_fetch_assoc($r)) {
-        $productColorMap[(int)$row['productID']][(int)$row['colorID']] = true;
-    }
+$yarnTypes = app_yarn_types_all($conn);
+$selectedInventoryTypeID = (int)($_GET['type_id'] ?? 0);
+$validInventoryTypeIDs = array_fill_keys(array_map(static fn(array $yt): int => (int)$yt['typeID'], $yarnTypes), true);
+if ($selectedInventoryTypeID <= 0 || !isset($validInventoryTypeIDs[$selectedInventoryTypeID])) {
+    $selectedInventoryTypeID = !empty($yarnTypes) ? (int)$yarnTypes[0]['typeID'] : 0;
 }
 
 $pcpColorsByProduct = [];
-$r = mysqli_query($conn,
-    "SELECT product_colours.productID,
-            product_colours.colorID,
-            {$colorDisplaySql} AS colorName,
-            c.displayCode,
-            c.isActive,
-            c.globalInventoryAvailable,
-            COALESCE(pca.isAvailable, 1) AS productColorAvailable,
-            GROUP_CONCAT(DISTINCT yt.typeName ORDER BY yt.typeName SEPARATOR ', ') AS typeNames
-     FROM (
-        SELECT productID, colorID
-        FROM product_variations
-        WHERE colorID IS NOT NULL
-          AND (size IS NULL OR size = '')
-          AND (yarnType IS NULL OR yarnType = '')
-        UNION
-        SELECT productID, colorID
-        FROM product_color_photos
-        WHERE colorID IS NOT NULL
-     ) product_colours
-     JOIN colors c ON c.colorID = product_colours.colorID
-     LEFT JOIN product_color_availability pca ON pca.productID = product_colours.productID AND pca.colorID = product_colours.colorID
-     LEFT JOIN color_yarn_types cyt ON cyt.colorID = c.colorID
-     LEFT JOIN yarn_types yt ON yt.typeID = cyt.typeID
-     GROUP BY product_colours.productID, product_colours.colorID, c.colorName, c.displayCode, c.isActive, c.globalInventoryAvailable, pca.isAvailable
-     ORDER BY typeNames ASC, colorName ASC, c.displayCode ASC");
-if ($r) {
-    while ($row = mysqli_fetch_assoc($r)) {
-        $isUsable = ((int)($row['isActive'] ?? 1) === 1)
-            && ((int)($row['globalInventoryAvailable'] ?? 0) > 0)
-            && ((int)($row['productColorAvailable'] ?? 1) === 1);
-        $colorRow = [
-            'colorID' => (int)$row['colorID'],
-            'colorName' => (string)$row['colorName'],
-            'displayCode' => (string)($row['displayCode'] ?? ''),
-            'typeNames' => (string)($row['typeNames'] ?? ''),
-        ];
-        $pcpColorsByProduct[(int)$row['productID']][] = [
-            'id' => (int)$row['colorID'],
-            'name' => (string)$row['colorName'],
-            'code' => (string)($row['displayCode'] ?? ''),
-            'typeNames' => (string)($row['typeNames'] ?? ''),
-            'available' => $isUsable ? 1 : 0,
-            'stock' => (int)($row['globalInventoryAvailable'] ?? 0),
-            'label' => stock_colour_admin_label($colorRow),
+foreach ($products as $productRow) {
+    $pid = (int)($productRow['productID'] ?? 0);
+    if ($pid <= 0) {
+        continue;
+    }
+    foreach (app_product_colours_for_product($conn, $pid, false) as $colorRow) {
+        $pcpColorsByProduct[$pid][] = [
+            'id' => (int)$colorRow['colorID'],
+            'name' => (string)$colorRow['colorName'],
+            'code' => '',
+            'typeNames' => (string)$colorRow['typeName'],
+            'available' => (int)$colorRow['available'],
+            'stock' => (int)$colorRow['globalInventoryAvailable'],
+            'label' => stock_colour_admin_label([
+                'colorID' => (int)$colorRow['colorID'],
+                'colorName' => (string)$colorRow['colorName'],
+                'typeNames' => (string)$colorRow['typeName'],
+            ]),
         ];
     }
 }
-
 $productColorAvailabilityMap = [];
-$r = mysqli_query($conn, "SELECT productID, colorID, isAvailable FROM product_color_availability");
-if ($r) {
-    while ($row = mysqli_fetch_assoc($r)) {
-        $productColorAvailabilityMap[(int)$row['productID']][(int)$row['colorID']] = (int)$row['isAvailable'];
-    }
-}
-
-$yarnTypes = [];
-$r = mysqli_query($conn, "SELECT * FROM yarn_types ORDER BY typeName");
-if ($r) {
-    while ($row = mysqli_fetch_assoc($r)) {
-        $yarnTypes[] = $row;
-    }
-}
 
 $colours = [];
+$typeFilterSql = $selectedInventoryTypeID > 0 ? "WHERE EXISTS (SELECT 1 FROM color_yarn_types ctf WHERE ctf.colorID = c.colorID AND ctf.typeID = {$selectedInventoryTypeID})" : "";
 $r = mysqli_query($conn, "
     SELECT c.*,
            {$colorDisplaySql} AS displayName,
@@ -543,6 +400,7 @@ $r = mysqli_query($conn, "
     FROM colors c
     LEFT JOIN color_yarn_types cyt ON cyt.colorID = c.colorID
     LEFT JOIN yarn_types yt ON yt.typeID = cyt.typeID
+    {$typeFilterSql}
     GROUP BY c.colorID
     ORDER BY displayName
 ");
@@ -595,10 +453,7 @@ if ($r) {
 
       <div class="tab-nav stock-category-nav" data-tab-group="stock-availability">
         <button type="button" class="tab-btn<?= $activeTab === 'products' ? ' active' : '' ?>" data-tab="stock-panel-products" data-tab-key="products" onclick="switchStockTab(this)">
-          <i class="fas fa-boxes-stacked"></i> Product Stock
-        </button>
-        <button type="button" class="tab-btn<?= $activeTab === 'assign' ? ' active' : '' ?>" data-tab="stock-panel-assign" data-tab-key="assign" onclick="switchStockTab(this)">
-          <i class="fas fa-palette"></i> Assign Colours
+          <i class="fas fa-chart-line"></i> Product Sales
         </button>
         <button type="button" class="tab-btn<?= $activeTab === 'photos' ? ' active' : '' ?>" data-tab="stock-panel-photos" data-tab-key="photos" onclick="switchStockTab(this)">
           <i class="fas fa-images"></i> Colour Photos
@@ -616,16 +471,15 @@ if ($r) {
 
       <section id="stock-panel-products" class="tab-content stock-tab-panel<?= $activeTab === 'products' ? ' active' : '' ?>" data-tab-target="stock-availability">
       <div class="card">
-        <div class="card-title">Product Stock Levels</div>
+        <div class="card-title">Product Sales</div>
         <p class="text-sm text-muted mb-4">
-          Update product stock and current sales. Availability is calculated automatically from the stock quantity.
+          Products are public made-to-order. Stock is no longer edited here; keep current sales accurate for storefront social proof.
         </p>
         <table class="data-table stock-table">
           <thead>
             <tr>
               <th class="col-product">Product</th>
               <th class="col-category">Category</th>
-              <th class="col-stock">Current Stock</th>
               <th class="col-auto">Current Sales</th>
             </tr>
           </thead>
@@ -648,25 +502,6 @@ if ($r) {
             <tr>
               <td class="col-product font-600"><?= htmlspecialchars($p['nameEN']) ?></td>
               <td class="col-category text-muted"><?= htmlspecialchars($p['category'] ?? '—') ?></td>
-              <td class="col-stock">
-                <form method="POST" class="stock-cell" data-ignore-unsaved-warning>
-                  <input type="hidden" name="action" value="update_stock">
-                  <input type="hidden" name="active_tab" value="products" data-active-tab-input="stock-availability">
-                  <input type="hidden" name="productID" value="<?= $pid ?>">
-                  <div class="input-with-icon">
-                    <input
-                      type="number"
-                      name="inventory"
-                      value="<?= (int)$p['inventory'] ?>"
-                      min="0"
-                      class="form-input has-icon-right"
-                    >
-                    <button type="submit" class="icon-btn" aria-label="Save stock quantity">
-                      <i class="fas fa-save"></i>
-                    </button>
-                  </div>
-                </form>
-              </td>
               <td class="col-auto">
                 <form method="POST" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap" data-ignore-unsaved-warning data-stock-warning>
                   <input type="hidden" name="action" value="update_sales_override">
@@ -695,6 +530,7 @@ if ($r) {
       </div>
       </section>
 
+      <?php if (false): ?>
       <section id="stock-panel-assign" class="tab-content stock-tab-panel<?= $activeTab === 'assign' ? ' active' : '' ?>" data-tab-target="stock-availability">
       <div class="card">
         <div class="card-title">Assign Colours to Products</div>
@@ -742,16 +578,10 @@ if ($r) {
               <?php endif; ?>
               <span style="font-size:10px;color:#6b7280;text-align:center;min-height:12px"><?= htmlspecialchars($c['typeNames'] ?? '') ?></span>
               <span style="font-size:11px;color:#9ca3af">Internal #<?= (int)$c['colorID'] ?></span>
-              <div class="assign-switch-row">
-                <span>Assigned</span>
-                <label class="toggle-wrap assign-toggle" title="Show this colour on this product">
-                  <input type="checkbox" name="colorIDs[]" value="<?= $c['colorID'] ?>" class="colour-checkbox">
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
+              <input type="hidden" name="colorIDs[]" value="<?= $c['colorID'] ?>">
               <div class="assign-switch-row is-available">
                 <span>Available</span>
-                <label class="toggle-wrap assign-toggle" title="Allow customers to select this colour for this product">
+                <label class="toggle-wrap assign-toggle" title="Show this colour on this product page (off = red unavailable line)">
                   <input type="checkbox" name="availableColorIDs[]" value="<?= $c['colorID'] ?>" class="colour-available-checkbox">
                   <span class="toggle-slider"></span>
                 </label>
@@ -763,12 +593,13 @@ if ($r) {
         </form>
       </div>
       </section>
+      <?php endif; ?>
 
       <section id="stock-panel-photos" class="tab-content stock-tab-panel<?= $activeTab === 'photos' ? ' active' : '' ?>" data-tab-target="stock-availability">
       <div class="card">
         <div class="card-title">Product Colour Photos</div>
         <p class="text-sm text-muted" style="margin-bottom:20px">
-          Upload product photos per colour. These appear on the storefront when the customer selects a colour.
+          Upload product photos per colour. The colour list comes automatically from the product yarn type.
         </p>
 
         <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px">
@@ -870,23 +701,17 @@ if ($r) {
       <div class="card">
         <div class="card-title">Add Yarn Colour</div>
         <p class="text-sm text-muted mb-4">
-          Add a new colour to the inventory. Reused yarn codes should have separate internal IDs and the same display code.
+          Add a new colour to the inventory. The internal ID is the only code shown in admin; products using this yarn type receive the colour automatically.
         </p>
         <form method="POST" enctype="multipart/form-data" id="add-color-form">
           <input type="hidden" name="action" value="add_color">
           <input type="hidden" name="active_tab" value="add" data-active-tab-input="stock-availability">
-          <div style="display:grid;grid-template-columns:120px 120px 1fr 1fr 90px;gap:12px;align-items:end;flex-wrap:wrap">
+          <div style="display:grid;grid-template-columns:120px 1fr 1fr 90px;gap:12px;align-items:end;flex-wrap:wrap">
 
             <div>
               <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Internal ID *</label>
               <input type="number" name="colorID" min="1" placeholder="e.g. 300055"
                 class="form-input" style="width:100%" required>
-            </div>
-
-            <div>
-              <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Display Code</label>
-              <input type="text" name="displayCode" maxlength="32" placeholder="e.g. 55"
-                class="form-input" style="width:100%">
             </div>
 
             <div>
@@ -945,15 +770,25 @@ if ($r) {
       <div class="card">
         <div class="stock-panel-tools">
           <div class="card-title" style="margin:0">Yarn Colour Inventory</div>
-          <div style="position:relative;width:220px">
-            <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#9ca3af;font-size:13px;pointer-events:none"></i>
-            <input type="text" id="colour-inventory-search" placeholder="Search internal ID, code, or colour"
-              style="width:100%;padding:7px 10px 7px 30px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;box-sizing:border-box"
-              autocomplete="off">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <form method="GET" style="display:flex;gap:8px;align-items:center;margin:0">
+              <input type="hidden" name="tab" value="inventory">
+              <select name="type_id" class="form-input" style="width:190px;padding:7px 10px" onchange="this.form.submit()">
+                <?php foreach ($yarnTypes as $yt): ?>
+                  <option value="<?= (int)$yt['typeID'] ?>" <?= $selectedInventoryTypeID === (int)$yt['typeID'] ? 'selected' : '' ?>><?= htmlspecialchars((string)$yt['typeName']) ?></option>
+                <?php endforeach; ?>
+              </select>
+            </form>
+            <div style="position:relative;width:220px">
+              <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#9ca3af;font-size:13px;pointer-events:none"></i>
+              <input type="text" id="colour-inventory-search" placeholder="Search internal ID or colour"
+                style="width:100%;padding:7px 10px 7px 30px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;box-sizing:border-box"
+                autocomplete="off">
+            </div>
           </div>
         </div>
         <p class="text-sm text-muted mb-4">
-          Track how many units of each yarn colour you have in stock. Disabling a colour globally removes it from all product pages.
+          Select a yarn type first, then mark colours available or unavailable. Unavailable or zero-stock colours keep showing on product pages with the red diagonal line.
         </p>
         <table class="data-table">
           <thead>
@@ -983,9 +818,6 @@ if ($r) {
               <td class="text-muted" style="font-size:13px"><?= (int)$c['colorID'] ?></td>
               <td class="font-600">
                 <?= htmlspecialchars($c['displayName'] ?? $c['colorName']) ?>
-                <?php if (!empty($c['displayCode'])): ?>
-                  <div class="text-muted" style="font-size:11px;font-weight:400">Code <?= htmlspecialchars($c['displayCode']) ?></div>
-                <?php endif; ?>
               </td>
               <td class="text-muted" style="font-size:12px"><?= htmlspecialchars($c['typeNames'] ?? '—') ?></td>
               <td><?= (int)$c['globalInventoryAvailable'] ?></td>
@@ -1000,6 +832,7 @@ if ($r) {
                 <form method="POST" style="display:flex;gap:6px;align-items:center" data-ignore-unsaved-warning data-stock-warning>
                   <input type="hidden" name="action"  value="update_color_stock">
                   <input type="hidden" name="active_tab" value="inventory" data-active-tab-input="stock-availability">
+                  <input type="hidden" name="inventory_type_id" value="<?= (int)$selectedInventoryTypeID ?>">
                   <input type="hidden" name="colorID" value="<?= $c['colorID'] ?>">
                   <?php foreach ($c['typeIDsArray'] as $tid): ?>
                   <input type="hidden" name="typeIDs[]" value="<?= (int)$tid ?>">
@@ -1032,6 +865,7 @@ if ($r) {
                   <form method="POST" class="colour-delete-form" style="margin:0">
                     <input type="hidden" name="action" value="delete_color">
                     <input type="hidden" name="active_tab" value="inventory" data-active-tab-input="stock-availability">
+                    <input type="hidden" name="inventory_type_id" value="<?= (int)$selectedInventoryTypeID ?>">
                     <input type="hidden" name="colorID" value="<?= (int)$c['colorID'] ?>">
                     <button type="submit" class="btn-danger"
                       style="padding:5px 10px;font-size:12px"
@@ -1063,6 +897,7 @@ if ($r) {
           <form method="POST" enctype="multipart/form-data" id="colour-edit-form">
             <input type="hidden" name="action" value="update_color_stock">
             <input type="hidden" name="active_tab" value="inventory" data-active-tab-input="stock-availability">
+            <input type="hidden" name="inventory_type_id" value="<?= (int)$selectedInventoryTypeID ?>">
             <input type="hidden" name="colorID" id="modal-input-id">
 
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
@@ -1265,14 +1100,14 @@ function mcsRenderColourSummary(pid) {
   var colors = mcsAssignedColours(pid);
   summary.style.display = 'block';
   if (!colors.length) {
-    summary.textContent = 'No assigned colours yet. Assign colours first in Assign Colours.';
+    summary.textContent = 'No colours found for this product yarn type. Add colours to that yarn type first.';
     return 0;
   }
 
   var usableCount = 0;
   var label = document.createElement('span');
   label.style.cssText = 'font-weight:600;margin-right:8px;color:#111827';
-  label.textContent = 'Assigned colours:';
+  label.textContent = 'Yarn type colours:';
   summary.appendChild(label);
 
   colors.forEach(function (color) {
@@ -1339,7 +1174,7 @@ function mcsSyncColourControls(pid) {
   if (!pid) {
     mcsSetWarning('');
   } else if (!canEnable) {
-    mcsSetWarning('Assign at least 2 available colours before enabling multi-colour selection. Unavailable or out-of-stock colours cannot be used by customers.');
+    mcsSetWarning('This product yarn type needs at least 2 available colours before enabling multi-colour selection. Unavailable or out-of-stock colours cannot be used by customers.');
   } else {
     mcsSetWarning('');
   }
@@ -1403,7 +1238,7 @@ function mcsSaveConfig() {
   var selectedCount = parseInt(colorsEl.value, 10) || 2;
   var usableCount = mcsUsableColourCount(pid);
   if (enabledEl.checked && selectedCount > usableCount) {
-    mcsSetWarning('This product only has ' + usableCount + ' available assigned colour(s). Assign more available colours or choose a lower number.');
+    mcsSetWarning('This product only has ' + usableCount + ' available yarn type colour(s). Add more available colours or choose a lower number.');
     return;
   }
   var fd = new FormData();
@@ -1529,38 +1364,24 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
-  var productColorMap = <?= json_encode($productColorMap, JSON_FORCE_OBJECT) ?>;
   var productColorAvailabilityMap = <?= json_encode($productColorAvailabilityMap, JSON_FORCE_OBJECT) ?>;
   var assignSelect = document.getElementById('assign-product-select');
   var colourCards  = document.querySelectorAll('.colour-assign-card');
 
-  function paintAssignCard(card, assigned, available) {
-    if (!assigned) {
-      card.style.borderColor = '#e5e7eb';
-      card.style.opacity = '0.62';
-    } else if (!available) {
-      card.style.borderColor = '#dc2626';
-      card.style.opacity = '1';
-    } else {
-      card.style.borderColor = '#111827';
-      card.style.opacity = '1';
-    }
+  function paintAssignCard(card, available) {
+    card.style.opacity      = '1';
+    card.style.borderColor  = available ? '#111827' : '#dc2626';
   }
 
   function syncCheckboxes(productID) {
-    var assigned = productColorMap[productID];
-    var availability = productColorAvailabilityMap[productID] || {};
-    var neverAssigned = assigned === undefined;
+    var availability = productColorAvailabilityMap[productID];
+    var neverSaved   = availability === undefined;
     colourCards.forEach(function (card) {
-      var colorID  = String(card.dataset.colorId);
-      var checkbox = card.querySelector('.colour-checkbox');
+      var colorID           = String(card.dataset.colorId);
       var availableCheckbox = card.querySelector('.colour-available-checkbox');
-      var isChecked = neverAssigned ? true : !!assigned[colorID];
-      var isAvailable = isChecked && (availability[colorID] === undefined || Number(availability[colorID]) === 1);
-      checkbox.checked = isChecked;
+      var isAvailable       = neverSaved ? true : Number((availability || {})[colorID] ?? 0) === 1;
       availableCheckbox.checked = isAvailable;
-      availableCheckbox.disabled = !isChecked;
-      paintAssignCard(card, isChecked, isAvailable);
+      paintAssignCard(card, isAvailable);
     });
   }
 
@@ -1573,30 +1394,13 @@ document.addEventListener('DOMContentLoaded', function () {
   colourCards.forEach(function (card) {
     card.addEventListener('click', function (e) {
       if (e.target.closest('input, label, .assign-switch-row, .toggle-wrap')) return;
-      var checkbox = card.querySelector('.colour-checkbox');
       var availableCheckbox = card.querySelector('.colour-available-checkbox');
-      checkbox.checked = !checkbox.checked;
-      if (checkbox.checked && !availableCheckbox.checked) {
-        availableCheckbox.checked = true;
-      }
-      availableCheckbox.disabled = !checkbox.checked;
-      paintAssignCard(card, checkbox.checked, availableCheckbox.checked);
+      availableCheckbox.checked = !availableCheckbox.checked;
+      paintAssignCard(card, availableCheckbox.checked);
     });
-    var checkbox = card.querySelector('.colour-checkbox');
     var availableCheckbox = card.querySelector('.colour-available-checkbox');
-    checkbox.addEventListener('change', function () {
-      if (checkbox.checked && !availableCheckbox.checked) {
-        availableCheckbox.checked = true;
-      }
-      availableCheckbox.disabled = !checkbox.checked;
-      paintAssignCard(card, checkbox.checked, availableCheckbox.checked);
-    });
     availableCheckbox.addEventListener('change', function () {
-      if (availableCheckbox.checked) {
-        checkbox.checked = true;
-      }
-      availableCheckbox.disabled = !checkbox.checked;
-      paintAssignCard(card, checkbox.checked, availableCheckbox.checked);
+      paintAssignCard(card, availableCheckbox.checked);
     });
   });
 

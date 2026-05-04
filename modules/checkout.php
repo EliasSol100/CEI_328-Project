@@ -234,21 +234,12 @@ function checkoutValidPhone(string $value): bool {
 function checkoutShippingCost(
     string $country,
     string $courier,
-    string $speed,
+    string $mode,
     float $cartTotal,
     float $freeShippingThreshold,
-    array $cartShippingProfile,
-    array $shippingRateTable
+    array $flatRates
 ): float {
-    return app_shipping_calculate_cost(
-        $country,
-        $courier,
-        $speed,
-        $cartTotal,
-        $freeShippingThreshold,
-        $cartShippingProfile,
-        $shippingRateTable
-    );
+    return app_shipping_calculate_cost($country, $courier, $mode, $cartTotal, $freeShippingThreshold, $flatRates);
 }
 
 function checkoutTableExists(mysqli $conn, string $tableName): bool {
@@ -447,9 +438,8 @@ $estimatedEarnedPoints = (($isLoggedIn && $userId > 0) || (!empty($_POST['create
     ? loyaltyCalculateEarnedPoints(max(0, round($loyaltyEligibleSubtotal - $loyaltyDiscount, 2)))
     : 0;
 
-$countryCouriers = app_shipping_country_couriers();
-$shippingRateTable = app_shipping_rate_table();
-$cartShippingProfile = app_shipping_cart_profile($conn, $cartItems);
+$countryCouriers = app_shipping_courier_labels();
+$shippingFlatRates = app_shipping_flat_rates();
 $fulfillmentModes = ['delivery', 'pickup'];
 $shippingSpeeds = ['standard', 'express'];
 $shippingModeLabels = [
@@ -531,6 +521,7 @@ if ($isLoggedIn) {
 $selectedCountry = checkoutNormalizeCountry((string)($formData['shipping_country'] ?? ''), $availableCountries);
 $formData['shipping_country'] = $selectedCountry;
 $selectedSpeed = (string)$formData['shipping_speed'];
+$selectedMode = ($formData['fulfillment_mode'] ?? 'delivery') === 'pickup' ? 'pickup' : 'home';
 $countryCourierOptions = checkoutCountryCouriers($selectedCountry, $countryCouriers);
 $selectedCourier = (string)($formData['courier'] ?? '');
 if (!checkoutIsCourierAllowed($selectedCountry, $selectedCourier, $countryCouriers)) {
@@ -540,11 +531,10 @@ $formData['courier'] = $selectedCourier;
 $displayShippingCost = checkoutShippingCost(
     $selectedCountry,
     $selectedCourier,
-    $selectedSpeed,
+    $selectedMode,
     (float)$cartTotal,
     (float)$freeShippingThreshold,
-    $cartShippingProfile,
-    $shippingRateTable
+    $shippingFlatRates
 );
 $displayTotal = max(0, ($cartTotal - $couponDiscount - $loyaltyDiscount) + $displayShippingCost);
 
@@ -818,11 +808,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $shippingCost = checkoutShippingCost(
                     $shippingCountry,
                     $courier,
-                    $shippingSpeed,
+                    $fulfillmentMode === 'pickup' ? 'pickup' : 'home',
                     (float)$cartTotal,
                     (float)$freeShippingThreshold,
-                    $cartShippingProfile,
-                    $shippingRateTable
+                    $shippingFlatRates
                 );
                 $previewLoyaltyRedemption = loyaltyBuildRedemptionPreview(
                     $selectedLoyaltyPoints,
@@ -1034,7 +1023,7 @@ if (file_exists($headerPath)) {
                             <label><span data-translate="checkoutDeliveryOption">Delivery Option</span> *</label>
                         <div class="form-options">
                             <?php foreach ($shippingModeLabels as $modeKey => $modeLabel): ?>
-                                <label class="option-label"><input type="radio" name="fulfillment_mode" value="<?= htmlspecialchars($modeKey) ?>" <?= (($formData['fulfillment_mode'] ?? 'delivery') === $modeKey) ? 'checked' : '' ?>> <span<?= $modeKey === 'delivery' ? app_translate_text_attrs('Deliver to my address', 'Παράδοση στη διεύθυνσή μου') : app_translate_text_attrs('Pickup from courier point', 'Παραλαβή από σημείο courier') ?>><?= htmlspecialchars($modeLabel) ?></span></label>
+                                <label class="option-label"<?= $modeKey === 'delivery' ? ' id="fulfillment-delivery-option"' : '' ?>><input type="radio" name="fulfillment_mode" value="<?= htmlspecialchars($modeKey) ?>" <?= (($formData['fulfillment_mode'] ?? 'delivery') === $modeKey) ? 'checked' : '' ?>> <span<?= $modeKey === 'delivery' ? app_translate_text_attrs('Deliver to my address', 'Παράδοση στη διεύθυνσή μου') : app_translate_text_attrs('Pickup from courier point', 'Παραλαβή από σημείο courier') ?>><?= htmlspecialchars($modeLabel) ?></span></label>
                             <?php endforeach; ?>
                         </div>
                         <?php if (isset($errors['fulfillment_mode'])): ?><span class="error"><?= $errors['fulfillment_mode'] ?></span><?php endif; ?>
@@ -1285,8 +1274,7 @@ if (file_exists($headerPath)) {
     var subtotal = <?= json_encode((float)$cartTotal) ?>;
     var couponDiscount = <?= json_encode((float)$couponDiscount) ?>;
     var loyaltyDiscount = <?= json_encode((float)$loyaltyDiscount) ?>;
-    var shippingRateTable = <?= json_encode($shippingRateTable) ?>;
-    var cartShippingProfile = <?= json_encode($cartShippingProfile) ?>;
+    var flatRates = <?= json_encode($shippingFlatRates) ?>;
     var countryCouriers = <?= json_encode($countryCouriers) ?>;
     var defaultAddress = <?= json_encode($defaultAddress) ?>;
 
@@ -1502,57 +1490,31 @@ if (file_exists($headerPath)) {
         return Object.keys(options)[0] || '';
     }
 
-    function sizeSurcharge() {
-        var sizeCode = String((cartShippingProfile && cartShippingProfile.size_code) || 'small').toLowerCase();
-        var surcharges = { small: 0, medium: 0.75, large: 1.5, oversized: 3 };
-        return Number(surcharges[sizeCode] || 0);
-    }
-
-    function rateFor(country, courier, speed) {
-        var tiers = (((shippingRateTable || {})[country] || {})[courier] || {})[speed] || [];
-        var weight = Math.max(0.1, Number((cartShippingProfile && cartShippingProfile.weight_kg) || 0.1));
-        for (var i = 0; i < tiers.length; i++) {
-            var max = tiers[i].max;
-            if (max === null || typeof max === 'undefined' || weight <= Number(max)) {
-                return Number(tiers[i].price || 0) + sizeSurcharge();
-            }
-        }
-        return 0;
+    function rateFor(country, courier, mode) {
+        return Number(((flatRates[country] || {})[courier] || {})[mode] || 0);
     }
 
     function formatMoney(value) {
         return '\u20AC' + Number(value || 0).toFixed(2);
     }
 
-    function shippingCost(country, courier, speed) {
-        if (subtotal >= freeThreshold) {
-            return 0;
-        }
-        return rateFor(country, courier, speed);
+    function shippingCost(country, courier, mode) {
+        if (subtotal >= freeThreshold) return 0;
+        return rateFor(country, courier, mode);
     }
 
     function updateTotals() {
         var country = selectedCountry();
         var courier = selectedCourier();
-        var speed = selectedSpeed();
-        var currentShippingCost = shippingCost(country, courier, speed);
+        var mode = selectedMode() === 'pickup' ? 'pickup' : 'home';
+        var currentShippingCost = shippingCost(country, courier, mode);
         if (shippingOut) shippingOut.textContent = currentShippingCost === 0 ? t('freeLabel') : formatMoney(currentShippingCost);
         var total = Math.max(0, subtotal - couponDiscount - loyaltyDiscount + currentShippingCost);
         if (totalOut) totalOut.textContent = total.toFixed(2);
         if (btnTotalOut) btnTotalOut.textContent = total.toFixed(2);
     }
 
-    function updateSpeedLabels() {
-        var country = selectedCountry();
-        var courier = selectedCourier();
-        var freeText = '(' + t('checkoutFreeOverAmount', { amount: Number(freeThreshold).toFixed(0) }) + ')';
-        if (standardCostLabelEl) {
-            standardCostLabelEl.textContent = subtotal >= freeThreshold ? freeText : '(' + formatMoney(rateFor(country, courier, 'standard')) + ')';
-        }
-        if (expressCostLabelEl) {
-            expressCostLabelEl.textContent = subtotal >= freeThreshold ? freeText : '(' + formatMoney(rateFor(country, courier, 'express')) + ')';
-        }
-    }
+    function updateSpeedLabels() {}
 
     function refreshCourierOptions() {
         if (!courierEl) {
@@ -1946,8 +1908,25 @@ if (file_exists($headerPath)) {
         }
     }
 
+    function toggleDeliveryOption() {
+        var courier = courierEl ? courierEl.value : '';
+        var deliveryOptionEl = document.getElementById('fulfillment-delivery-option');
+        if (!deliveryOptionEl) return;
+
+        var isBoxNow = courier === 'boxnow';
+        deliveryOptionEl.style.display = isBoxNow ? 'none' : '';
+
+        if (isBoxNow) {
+            var pickupRadio = document.querySelector('input[name="fulfillment_mode"][value="pickup"]');
+            if (pickupRadio && !pickupRadio.checked) {
+                pickupRadio.checked = true;
+            }
+        }
+    }
+
     if (courierEl) {
         courierEl.addEventListener('change', function () {
+            toggleDeliveryOption();
             updateSpeedLabels();
             updateTotals();
             updateCourierMap();
@@ -1964,6 +1943,7 @@ if (file_exists($headerPath)) {
 
     modeEls.forEach(function (el) {
         el.addEventListener('change', function () {
+            updateTotals();
             updateCourierMap();
             togglePickupPointWrappers();
         });
@@ -1987,6 +1967,7 @@ if (file_exists($headerPath)) {
     }
 
     refreshCourierOptions();
+    toggleDeliveryOption();
     updateSpeedLabels();
     applyPostalRule();
     updateTotals();

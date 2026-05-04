@@ -510,7 +510,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 $product = null;
 $productStmt = $conn->prepare(
     "SELECT p.productID, p.sku, p.nameEN, p.nameGR, p.descriptionEN, p.descriptionGR,
-            p.basePrice, p.inventory, p.cartStatus, p.hasVariants, p.category,
+            p.basePrice, p.inventory, p.cartStatus, p.hasVariants, p.category, p.materialType, p.yarnTypeID,
+            p.privateCustomerEmail, p.privateAccessToken,
             p.availableSizes,
             p.productWarningEN, p.productWarningGR,
             p.customColorFields, p.customColorLabel1, p.customColorLabel2,
@@ -553,11 +554,11 @@ $globalProductWarnings = app_product_global_warning_texts($conn);
 $product["_globalProductWarningEN"] = $globalProductWarnings['en'] ?? '';
 $product["_globalProductWarningGR"] = $globalProductWarnings['gr'] ?? '';
 
-$publicProductStatuses = ["active", "low_stock", "out_of_stock"];
+$publicProductStatuses = ["active", "low_stock", "out_of_stock", "made_to_order"];
 $madeToOrderAccessRequired = false;
 $madeToOrderAccessError = '';
 $productStatus = (string)($product["cartStatus"] ?? "");
-if ($productStatus === 'made_to_order') {
+if ($productStatus === 'made_to_order' && app_product_is_private_made_to_order_row($product)) {
     if (!isMadeToOrderProductAccessible($conn, $productId)) {
         $accessRow = loadMadeToOrderProductAccessRow($conn, $productId);
         $targetEmail = normalizeCustomerEmail((string)($accessRow['privateCustomerEmail'] ?? ''));
@@ -666,12 +667,12 @@ if ($photoStmt) {
     $photoStmt->execute();
     $photoRes = $photoStmt->get_result();
     while ($photoRes && ($row = $photoRes->fetch_assoc())) {
-        $photos[] = "modules/admin/ajax/product_image.php?id=" . (int)$row["imageID"];
+        $photos[] = app_image_asset_url("modules/admin/ajax/product_image.php?id=" . (int)$row["imageID"]);
     }
     $photoStmt->close();
 }
 
-if (empty($photos) && productPageCanQueryCustomOrderPhoto($conn)) {
+if (productPageCanQueryCustomOrderPhoto($conn)) {
     $customPhotoStmt = $conn->prepare("
         SELECT photoReferencePath
         FROM custom_orders
@@ -693,81 +694,86 @@ if (empty($photos) && productPageCanQueryCustomOrderPhoto($conn)) {
             $relativePhotoPath = app_image_prefer_optimized_asset_path(ltrim(str_replace("\\", "/", $customPhotoPath), "/"));
             $absolutePhotoPath = __DIR__ . "/" . $relativePhotoPath;
             if (is_file($absolutePhotoPath)) {
-                $photos[] = $relativePhotoPath;
+                $customPhotoUrl = app_image_asset_url($relativePhotoPath);
+                if ($customPhotoUrl !== '') {
+                    // For private custom-order products, prefer the uploaded reference file as the primary gallery image.
+                    if ((string)($product['cartStatus'] ?? '') === 'made_to_order') {
+                        array_unshift($photos, $customPhotoUrl);
+                    } else {
+                        $photos[] = $customPhotoUrl;
+                    }
+                }
             }
         }
     }
 }
 
 if (empty($photos)) {
-    $photos[] = "assets/images/athina-eshop-logo.png";
+    $photos[] = app_image_asset_url("assets/images/athina-eshop-logo.png");
 }
+$photos = array_values(array_unique(array_filter($photos, static function ($src) {
+    return trim((string)$src) !== '';
+})));
 
 $colorPhotos = [];
 $productColorChoices = [];
 $colorDisplaySql = app_color_display_sql('c');
-$cpStmt = $conn->prepare(
-    "SELECT pcp.colorID,
-            pcp.photoPath AS productPhotoPath,
-            {$colorDisplaySql} AS colorName,
-            c.hexCode,
-            c.globalInventoryAvailable,
-            c.isActive,
-            COALESCE(pca.isAvailable, 1) AS productColorAvailable,
-            cyt.photoPath AS swatchPhotoPath
-     FROM product_color_photos pcp
-     JOIN colors c ON c.colorID = pcp.colorID
-     LEFT JOIN product_color_availability pca ON pca.productID = pcp.productID AND pca.colorID = pcp.colorID
-     LEFT JOIN (
-         SELECT colorID, MIN(photoPath) AS photoPath
-         FROM color_yarn_types
-         WHERE photoPath IS NOT NULL AND TRIM(photoPath) <> ''
-         GROUP BY colorID
-     ) cyt ON cyt.colorID = pcp.colorID
-     WHERE pcp.productID = ?
-     ORDER BY pcp.sortOrder ASC, pcp.id ASC"
-);
-if ($cpStmt) {
-    $cpStmt->bind_param("i", $productId);
-    $cpStmt->execute();
-    $cpRes = $cpStmt->get_result();
-    while ($cpRes && ($row = $cpRes->fetch_assoc())) {
+$productYarnColourRows = app_product_colours_for_product($conn, $productId, false);
+foreach ($productYarnColourRows as $row) {
+    $colorId = (int)($row['colorID'] ?? 0);
+    if ($colorId <= 0) {
+        continue;
+    }
+    $productPhotoPath = trim((string)($row['productPhotoPath'] ?? ''));
+    if ($productPhotoPath !== '') {
+        $colorPhotos[$colorId][] = $productPhotoPath;
+    }
+    $colorName = trim((string)($row['colorName'] ?? ''));
+    $productColorChoices[$colorId] = [
+        'id' => $colorId,
+        'name' => $colorName !== '' ? $colorName : ('Color ' . $colorId),
+        'hex' => (string)($row['hexCode'] ?? '#ece6f6'),
+        'photoPath' => (string)($row['photoPath'] ?? ''),
+        'productPhotoPath' => $productPhotoPath,
+        'isActive' => (int)($row['isActive'] ?? 0),
+        'stock' => (int)($row['globalInventoryAvailable'] ?? 0),
+        'typeId' => (int)($row['typeID'] ?? 0),
+        'typeName' => (string)($row['typeName'] ?? ''),
+    ];
+}
+$productColorChoiceIDs = array_fill_keys(array_map('intval', array_keys($productColorChoices)), true);
+
+$cpPhotoStmt = $conn->prepare("
+    SELECT colorID, photoPath
+    FROM product_color_photos
+    WHERE productID = ?
+    ORDER BY sortOrder ASC, id ASC
+");
+if ($cpPhotoStmt) {
+    $cpPhotoStmt->bind_param('i', $productId);
+    $cpPhotoStmt->execute();
+    $cpPhotoRes = $cpPhotoStmt->get_result();
+    while ($cpPhotoRes && ($row = $cpPhotoRes->fetch_assoc())) {
         $colorId = (int)($row['colorID'] ?? 0);
-        $productPhotoPath = trim(app_image_prefer_optimized_asset_path((string)($row['productPhotoPath'] ?? '')));
-        $swatchPhotoPath = trim(app_image_prefer_optimized_asset_path((string)($row['swatchPhotoPath'] ?? '')));
-        $colorName = trim((string)($row['colorName'] ?? ''));
-        if ($colorId <= 0 || ($productPhotoPath === '' && $swatchPhotoPath === '')) {
+        if (!isset($productColorChoices[$colorId])) {
             continue;
         }
-        if ($productPhotoPath !== '') {
+        $productPhotoPath = trim(app_image_prefer_optimized_asset_path((string)($row['photoPath'] ?? '')));
+        if ($colorId > 0 && $productPhotoPath !== '') {
             $colorPhotos[$colorId][] = $productPhotoPath;
         }
-        if (!isset($productColorChoices[$colorId])) {
-            $hexCode = trim((string)($row['hexCode'] ?? ''));
-            $productColorChoices[$colorId] = [
-                'id' => $colorId,
-                'name' => $colorName !== '' ? $colorName : ('Color ' . $colorId),
-                'hex' => preg_match('/^#[0-9a-fA-F]{6}$/', $hexCode) ? $hexCode : '#ece6f6',
-                'photoPath' => $swatchPhotoPath !== '' ? $swatchPhotoPath : $productPhotoPath,
-                'productPhotoPath' => $productPhotoPath,
-                'isActive' => ((int)($row['isActive'] ?? 1) === 1 && (int)($row['productColorAvailable'] ?? 1) === 1) ? 1 : 0,
-                'stock' => (int)($row['globalInventoryAvailable'] ?? 0),
-            ];
-        }
     }
-    $cpStmt->close();
+    $cpPhotoStmt->close();
 }
 
 $variations = [];
 $variationStmt = $conn->prepare(
     "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, pv.price,
             {$colorDisplaySql} AS colorName, c.hexCode, c.isActive, c.globalInventoryAvailable,
-            COALESCE(pca.isAvailable, 1) AS productColorAvailable,
             COALESCE(vs.quantityAvailable, p.inventory, 0) AS stock,
             cyt.photoPath
      FROM product_variations pv
      LEFT JOIN colors c ON c.colorID = pv.colorID
-     LEFT JOIN product_color_availability pca ON pca.productID = pv.productID AND pca.colorID = pv.colorID
      LEFT JOIN variation_stock vs ON vs.variationID = pv.variationID
      JOIN products p ON p.productID = pv.productID
      LEFT JOIN (
@@ -777,6 +783,12 @@ $variationStmt = $conn->prepare(
      ) cyt ON cyt.colorID = pv.colorID
      WHERE pv.productID = ?
        AND (pv.colorID IS NULL OR c.colorID IS NOT NULL)
+       AND NOT (
+            pv.colorID IS NOT NULL
+            AND (pv.size IS NULL OR TRIM(pv.size) = '')
+            AND (pv.yarnType IS NULL OR TRIM(pv.yarnType) = '')
+            AND pv.price IS NULL
+       )
      ORDER BY pv.variationID ASC"
 );
 if ($variationStmt) {
@@ -784,19 +796,24 @@ if ($variationStmt) {
     $variationStmt->execute();
     $variationRes = $variationStmt->get_result();
     while ($variationRes && ($row = $variationRes->fetch_assoc())) {
+        $rowColorId = isset($row["colorID"]) ? (int)$row["colorID"] : 0;
+        if ($rowColorId > 0 && !isset($productColorChoiceIDs[$rowColorId])) {
+            continue;
+        }
+        $choiceMeta = $rowColorId > 0 ? ($productColorChoices[$rowColorId] ?? null) : null;
         $varHex = trim((string)($row["hexCode"] ?? ''));
         $variations[] = [
             "variationID" => (int)$row["variationID"],
             "size" => trim((string)($row["size"] ?? "")),
             "yarnType" => trim((string)($row["yarnType"] ?? "")),
-            "colorID" => isset($row["colorID"]) ? (int)$row["colorID"] : null,
-            "colorName" => trim((string)($row["colorName"] ?? "")),
-            "hexCode" => preg_match('/^#[0-9a-fA-F]{6}$/', $varHex) ? $varHex : '#ece6f6',
+            "colorID" => $rowColorId > 0 ? $rowColorId : null,
+            "colorName" => $choiceMeta ? (string)$choiceMeta["name"] : trim((string)($row["colorName"] ?? "")),
+            "hexCode" => $choiceMeta ? (string)$choiceMeta["hex"] : (preg_match('/^#[0-9a-fA-F]{6}$/', $varHex) ? $varHex : '#ece6f6'),
             "price" => isset($row["price"]) ? (float)$row["price"] : null,
             "stock" => (int)($row["stock"] ?? 0),
-            "photoPath" => app_image_prefer_optimized_asset_path((string)($row["photoPath"] ?? '')),
-            "isActive" => ((int)($row["isActive"] ?? 1) === 1 && (int)($row["productColorAvailable"] ?? 1) === 1) ? 1 : 0,
-            "globalStock" => (int)($row["globalInventoryAvailable"] ?? 0),
+            "photoPath" => $choiceMeta ? (string)$choiceMeta["photoPath"] : app_image_prefer_optimized_asset_path((string)($row["photoPath"] ?? '')),
+            "isActive" => $choiceMeta ? (int)$choiceMeta["isActive"] : (int)($row["isActive"] ?? 1),
+            "globalStock" => $choiceMeta ? (int)$choiceMeta["stock"] : (int)($row["globalInventoryAvailable"] ?? 0),
         ];
     }
     $variationStmt->close();
@@ -804,12 +821,18 @@ if ($variationStmt) {
 
 $variationPhotos = [];
 $variationPhotoStmt = $conn->prepare(
-    "SELECT variationID, photoPath
-     FROM product_variation_photos
-     WHERE variationID IN (
-         SELECT variationID FROM product_variations WHERE productID = ?
-     )
-     ORDER BY sortOrder ASC, variationPhotoID ASC"
+    "SELECT pvp.variationID, pvp.photoPath
+     FROM product_variation_photos pvp
+     JOIN product_variations pv ON pv.variationID = pvp.variationID
+     JOIN products p ON p.productID = pv.productID
+     LEFT JOIN yarn_types fallback_yt
+       ON LOWER(TRIM(fallback_yt.typeName)) = LOWER(TRIM(COALESCE(p.materialType, '')))
+     LEFT JOIN color_yarn_types selected_cyt
+       ON selected_cyt.colorID = pv.colorID
+      AND selected_cyt.typeID = COALESCE(NULLIF(p.yarnTypeID, 0), fallback_yt.typeID)
+     WHERE pv.productID = ?
+       AND (pv.colorID IS NULL OR selected_cyt.colorID IS NOT NULL)
+     ORDER BY pvp.sortOrder ASC, pvp.variationPhotoID ASC"
 );
 if ($variationPhotoStmt) {
     $variationPhotoStmt->bind_param("i", $productId);
@@ -840,7 +863,7 @@ foreach ($variations as $variation) {
     }
 
     $colorId = (int)($variation["colorID"] ?? 0);
-    if ($colorId <= 0 || isset($uniqueColors[$colorId])) {
+    if ($colorId <= 0 || isset($uniqueColors[$colorId]) || !isset($productColorChoiceIDs[$colorId])) {
         continue;
     }
     $colorName = trim((string)($variation["colorName"] ?? ""));
@@ -871,13 +894,10 @@ if ($sizesAreInformational) {
 }
 $sizePriceMap = app_product_size_prices_for_product($conn, $productId);
 
-$variationHasColors = !empty(array_filter($variations, static fn($v) => ($v['colorID'] ?? 0) > 0));
-
 foreach ($productColorChoices as $colorId => $colorChoice) {
     if (isset($uniqueColors[$colorId])) {
-        continue;
-    }
-    if ($variationHasColors) {
+        $uniqueColors[$colorId]['typeId'] = (int)($colorChoice['typeId'] ?? ($uniqueColors[$colorId]['typeId'] ?? 0));
+        $uniqueColors[$colorId]['typeName'] = (string)($colorChoice['typeName'] ?? ($uniqueColors[$colorId]['typeName'] ?? ''));
         continue;
     }
     $colorName = trim((string)($colorChoice['name'] ?? ''));
@@ -888,6 +908,8 @@ foreach ($productColorChoices as $colorId => $colorChoice) {
         "photoPath" => $colorChoice["photoPath"] ?? null,
         "isActive" => (int)($colorChoice["isActive"] ?? 1),
         "stock" => (int)($colorChoice["stock"] ?? 0),
+        "typeId" => (int)($colorChoice["typeId"] ?? 0),
+        "typeName" => (string)($colorChoice["typeName"] ?? ''),
     ];
 }
 
@@ -903,6 +925,12 @@ foreach ($uniqueColors as $colorId => &$uniqueColor) {
     if (!isset($uniqueColor['stock']) && isset($productColorChoices[(int)$colorId]['stock'])) {
         $uniqueColor['stock'] = (int)$productColorChoices[(int)$colorId]['stock'];
     }
+    if (empty($uniqueColor['typeId']) && isset($productColorChoices[(int)$colorId]['typeId'])) {
+        $uniqueColor['typeId'] = (int)$productColorChoices[(int)$colorId]['typeId'];
+    }
+    if (empty($uniqueColor['typeName']) && isset($productColorChoices[(int)$colorId]['typeName'])) {
+        $uniqueColor['typeName'] = (string)$productColorChoices[(int)$colorId]['typeName'];
+    }
 }
 unset($uniqueColor);
 
@@ -910,52 +938,17 @@ $uniqueColors = array_values($uniqueColors);
 
 $colorsByYarnType = [];
 if (!empty($uniqueColors)) {
-    $ucIds = array_filter(array_map(static fn($c) => (int)($c['id'] ?? 0), $uniqueColors), static fn($id) => $id > 0);
-    if (!empty($ucIds)) {
-        $ctPlaceholders = implode(',', array_fill(0, count($ucIds), '?'));
-        $ctStmt = $conn->prepare("
-            SELECT cyt.colorID, yt.typeID, yt.typeName
-            FROM color_yarn_types cyt
-            JOIN yarn_types yt ON yt.typeID = cyt.typeID
-            WHERE cyt.colorID IN ($ctPlaceholders)
-            ORDER BY yt.typeName ASC
-        ");
-        if ($ctStmt) {
-            $ctTypes = str_repeat('i', count($ucIds));
-            $ctParams = [$ctTypes];
-            $ucIdsValues = array_values($ucIds);
-            foreach ($ucIdsValues as $idx => $cid) {
-                $ctParams[] = &$ucIdsValues[$idx];
-            }
-            call_user_func_array([$ctStmt, 'bind_param'], $ctParams);
-            $ctStmt->execute();
-            $ctRes = $ctStmt->get_result();
-            $colorTypeMap = [];
-            while ($ctRes && ($row = $ctRes->fetch_assoc())) {
-                $colorTypeMap[(int)$row['colorID']][] = ['typeId' => (int)$row['typeID'], 'typeName' => (string)$row['typeName']];
-            }
-            $ctStmt->close();
-
-            foreach ($uniqueColors as $color) {
-                $cid = (int)($color['id'] ?? 0);
-                $types = $colorTypeMap[$cid] ?? [];
-                if (empty($types)) {
-                    $colorsByYarnType[''][$cid] = $color;
-                } else {
-                    foreach ($types as $type) {
-                        $colorsByYarnType[$type['typeName']][$cid] = array_merge($color, [
-                            'typeId' => $type['typeId'],
-                            'typeName' => $type['typeName'],
-                        ]);
-                    }
-                }
-            }
+    foreach ($uniqueColors as $color) {
+        $cid = (int)($color['id'] ?? 0);
+        if ($cid <= 0) {
+            continue;
         }
-    }
-    if (empty($colorsByYarnType)) {
-        foreach ($uniqueColors as $color) {
-            $colorsByYarnType[''][(int)$color['id']] = $color;
-        }
+        $typeName = trim((string)($color['typeName'] ?? $product['materialType'] ?? ''));
+        $typeId = (int)($color['typeId'] ?? $product['yarnTypeID'] ?? 0);
+        $colorsByYarnType[$typeName][$cid] = array_merge($color, [
+            'typeId' => $typeId,
+            'typeName' => $typeName,
+        ]);
     }
 }
 
@@ -974,52 +967,20 @@ foreach ($colorsByYarnType as $typeName => $typeColors) {
 }
 
 $colorCatalogue = [];
-$catalogueColorIds = array_values(array_unique(array_map(static function (array $color): int {
-    return (int)($color['id'] ?? 0);
-}, $uniqueColors)));
-$catalogueColorIds = array_values(array_filter($catalogueColorIds, static fn(int $id): bool => $id > 0));
-
-if (!empty($catalogueColorIds)) {
-    $cataloguePlaceholders = implode(',', array_fill(0, count($catalogueColorIds), '?'));
-    $catalogStmt = $conn->prepare("
-        SELECT c.colorID, {$colorDisplaySql} AS colorName, c.hexCode, c.globalInventoryAvailable, c.isActive,
-               COALESCE(yt.typeName, 'General') AS typeName,
-               MIN(cyt.photoPath) AS photoPath
-        FROM colors c
-        LEFT JOIN color_yarn_types cyt ON cyt.colorID = c.colorID
-        LEFT JOIN yarn_types yt ON yt.typeID = cyt.typeID
-        WHERE c.colorID IN ($cataloguePlaceholders)
-        GROUP BY c.colorID, c.colorName, c.displayCode, c.hexCode, c.globalInventoryAvailable, c.isActive, yt.typeName
-        ORDER BY typeName ASC, c.colorName ASC
-    ");
-    if ($catalogStmt) {
-        $catalogTypes = str_repeat('i', count($catalogueColorIds));
-        $catalogParams = [$catalogTypes];
-        foreach ($catalogueColorIds as $idx => $colorId) {
-            $catalogParams[] = &$catalogueColorIds[$idx];
-        }
-        call_user_func_array([$catalogStmt, 'bind_param'], $catalogParams);
-        $catalogStmt->execute();
-        $catalogRes = $catalogStmt->get_result();
-        while ($catalogRes && ($row = $catalogRes->fetch_assoc())) {
-            $catHex = trim((string)($row['hexCode'] ?? ''));
-            $catalogColorId = (int)$row['colorID'];
-            $catalogPhotoPath = trim(app_image_prefer_optimized_asset_path((string)($row['photoPath'] ?? '')));
-            if ($catalogPhotoPath === '') {
-                $catalogPhotoPath = trim((string)($productColorChoices[$catalogColorId]['photoPath'] ?? ''));
-            }
-            $colorCatalogue[] = [
-                'id' => $catalogColorId,
-                'name' => (string)$row['colorName'],
-                'hex' => preg_match('/^#[0-9a-fA-F]{6}$/', $catHex) ? $catHex : '#ece6f6',
-                'typeName' => (string)$row['typeName'],
-                'available' => (int)($row['isActive'] ?? 0) === 1 && (int)($row['globalInventoryAvailable'] ?? 0) > 0,
-                'stock' => (int)($row['globalInventoryAvailable'] ?? 0),
-                'photoPath' => $catalogPhotoPath,
-            ];
-        }
-        $catalogStmt->close();
+foreach ($uniqueColors as $catalogColor) {
+    $catalogColorId = (int)($catalogColor['id'] ?? 0);
+    if ($catalogColorId <= 0) {
+        continue;
     }
+    $colorCatalogue[] = [
+        'id' => $catalogColorId,
+        'name' => (string)($catalogColor['name'] ?? ('Color ' . $catalogColorId)),
+        'hex' => (string)($catalogColor['hex'] ?? '#ece6f6'),
+        'typeName' => (string)($catalogColor['typeName'] ?? $product['materialType'] ?? 'General'),
+        'available' => (int)($catalogColor['isActive'] ?? 0) === 1 && (int)($catalogColor['stock'] ?? 0) > 0,
+        'stock' => (int)($catalogColor['stock'] ?? 0),
+        'photoPath' => trim((string)($catalogColor['photoPath'] ?? '')),
+    ];
 }
 $displayPriceCandidates = !empty($variationPrices)
     ? $variationPrices
@@ -1080,35 +1041,13 @@ if ($csRow) {
         $csPhotoStmt->close();
     }
 
-    $csColorsStmt = $conn->prepare(
-        "SELECT DISTINCT c.colorID, {$colorDisplaySql} AS colorName
-         FROM (
-            SELECT productID, colorID
-            FROM product_variations
-            WHERE colorID IS NOT NULL
-              AND (size IS NULL OR size = '')
-              AND (yarnType IS NULL OR yarnType = '')
-            UNION
-            SELECT productID, colorID
-            FROM product_color_photos
-            WHERE colorID IS NOT NULL
-         ) product_colours
-         JOIN colors c ON c.colorID = product_colours.colorID
-         LEFT JOIN product_color_availability pca ON pca.productID = product_colours.productID AND pca.colorID = product_colours.colorID
-         WHERE product_colours.productID = ?
-           AND c.isActive = 1
-           AND c.globalInventoryAvailable > 0
-           AND COALESCE(pca.isAvailable, 1) = 1
-         ORDER BY colorName ASC"
-    );
-    if ($csColorsStmt) {
-        $csColorsStmt->bind_param('i', $productId);
-        $csColorsStmt->execute();
-        $csColorsRes = $csColorsStmt->get_result();
-        while ($csColorsRes && ($csColorRow = $csColorsRes->fetch_assoc())) {
-            $colorSchemeColors[] = $csColorRow;
-        }
-        $csColorsStmt->close();
+    foreach (app_product_colours_for_product($conn, $productId, true) as $csColorRow) {
+        $colorSchemeColors[] = [
+            'colorID' => (int)$csColorRow['colorID'],
+            'colorName' => (string)$csColorRow['colorName'],
+            'hexCode' => (string)$csColorRow['hexCode'],
+            'photoPath' => (string)$csColorRow['photoPath'],
+        ];
     }
 
     if (count($colorSchemeColors) < $colorSchemeNumColors) {
@@ -1116,6 +1055,21 @@ if ($csRow) {
         $colorSchemePhotos = [];
         $colorSchemeColors = [];
     }
+}
+
+$colorSchemeColorMeta = [];
+foreach ($colorSchemeColors as $csColor) {
+    $csColorID = (int)($csColor['colorID'] ?? 0);
+    if ($csColorID <= 0) {
+        continue;
+    }
+    $colorSchemeColorMeta[$csColorID] = [
+        'id' => $csColorID,
+        'name' => (string)($csColor['colorName'] ?? ''),
+        'hex' => (string)($csColor['hexCode'] ?? '#ece6f6'),
+        'photoPath' => (string)($csColor['photoPath'] ?? ''),
+        'photoUrl' => trim((string)($csColor['photoPath'] ?? '')) !== '' ? app_image_asset_url((string)$csColor['photoPath']) : '',
+    ];
 }
 
 $reviews = [];
@@ -1447,6 +1401,29 @@ include __DIR__ . "/include/header.php";
             <?php if ($colorSchemeEnabled): ?>
             <div class="gift-box custom-request-box" id="colour-scheme-box">
                 <h3 data-translate="productColourSelection">Colour Selection</h3>
+                <?php if (count($colorSchemeColors) >= 3): ?>
+                <div class="cs-selection-summary" id="cs-selection-summary">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th data-translate="colourSchemeSlot">Slot</th>
+                                <th data-translate="colourSchemeSelected">Selected Colour</th>
+                                <th data-translate="colourSchemePreview">Preview</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach (['A', 'B', 'C'] as $slot): ?>
+                                <?php if ($slot === 'C' && $colorSchemeNumColors < 3) continue; ?>
+                                <tr data-cs-summary-row="<?= $slot ?>">
+                                    <td>Colour <?= $slot ?></td>
+                                    <td data-cs-summary-name>Not selected</td>
+                                    <td data-cs-summary-preview><span class="cs-summary-empty"></span></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <?php endif; ?>
 
                 <?php if (!empty($colorSchemePhotos)): ?>
                 <div id="cs-carousel" style="position:relative;margin-bottom:16px;border-radius:12px;overflow:hidden;background:#f3f4f6">
@@ -1475,7 +1452,11 @@ include __DIR__ . "/include/header.php";
                         <select id="cs-color-a" class="custom-request-input" style="appearance:auto">
                             <option value="">&mdash; Select Colour A &mdash;</option>
                             <?php foreach ($colorSchemeColors as $csColor): ?>
-                            <option value="<?= (int)$csColor['colorID'] ?>"><?= htmlspecialchars($csColor['colorName']) ?></option>
+                            <option
+                                value="<?= (int)$csColor['colorID'] ?>"
+                                data-color-name="<?= htmlspecialchars((string)$csColor['colorName'], ENT_QUOTES, 'UTF-8') ?>"
+                                data-hex="<?= htmlspecialchars((string)($csColor['hexCode'] ?? '#ece6f6'), ENT_QUOTES, 'UTF-8') ?>"
+                                data-photo="<?= htmlspecialchars(trim((string)($csColor['photoPath'] ?? '')) !== '' ? app_image_asset_url((string)$csColor['photoPath']) : '', ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($csColor['colorName']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -1484,7 +1465,11 @@ include __DIR__ . "/include/header.php";
                         <select id="cs-color-b" class="custom-request-input" style="appearance:auto">
                             <option value="">&mdash; Select Colour B &mdash;</option>
                             <?php foreach ($colorSchemeColors as $csColor): ?>
-                            <option value="<?= (int)$csColor['colorID'] ?>"><?= htmlspecialchars($csColor['colorName']) ?></option>
+                            <option
+                                value="<?= (int)$csColor['colorID'] ?>"
+                                data-color-name="<?= htmlspecialchars((string)$csColor['colorName'], ENT_QUOTES, 'UTF-8') ?>"
+                                data-hex="<?= htmlspecialchars((string)($csColor['hexCode'] ?? '#ece6f6'), ENT_QUOTES, 'UTF-8') ?>"
+                                data-photo="<?= htmlspecialchars(trim((string)($csColor['photoPath'] ?? '')) !== '' ? app_image_asset_url((string)$csColor['photoPath']) : '', ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($csColor['colorName']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -1494,11 +1479,28 @@ include __DIR__ . "/include/header.php";
                         <select id="cs-color-c" class="custom-request-input" style="appearance:auto">
                             <option value="">&mdash; Select Colour C &mdash;</option>
                             <?php foreach ($colorSchemeColors as $csColor): ?>
-                            <option value="<?= (int)$csColor['colorID'] ?>"><?= htmlspecialchars($csColor['colorName']) ?></option>
+                            <option
+                                value="<?= (int)$csColor['colorID'] ?>"
+                                data-color-name="<?= htmlspecialchars((string)$csColor['colorName'], ENT_QUOTES, 'UTF-8') ?>"
+                                data-hex="<?= htmlspecialchars((string)($csColor['hexCode'] ?? '#ece6f6'), ENT_QUOTES, 'UTF-8') ?>"
+                                data-photo="<?= htmlspecialchars(trim((string)($csColor['photoPath'] ?? '')) !== '' ? app_image_asset_url((string)$csColor['photoPath']) : '', ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($csColor['colorName']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
                     <?php endif; ?>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <?php if ($colorSchemeEnabled): ?>
+            <div class="cs-preview-modal" id="cs-preview-modal" aria-hidden="true">
+                <div class="cs-preview-card" role="dialog" aria-modal="true" aria-labelledby="cs-preview-title">
+                    <button type="button" class="cs-preview-close" id="cs-preview-close" aria-label="Close colour preview">&times;</button>
+                    <div class="cs-preview-media" id="cs-preview-media"></div>
+                    <div>
+                        <span class="cs-preview-slot" id="cs-preview-slot"></span>
+                        <strong id="cs-preview-title"></strong>
+                    </div>
                 </div>
             </div>
             <?php endif; ?>
@@ -1539,16 +1541,8 @@ include __DIR__ . "/include/header.php";
                 <div><span data-translate="productCategoryLabel">Category:</span><strong><?= htmlspecialchars((string)($product["category"] ?: "-")) ?></strong></div>
                 <div>
                     <span data-translate="productAvailabilityLabel">Availability:</span>
-                    <strong class="<?= ((int)$product["inventory"] > 0 || (string)$product["cartStatus"] === "made_to_order") ? "in-stock" : "out-stock" ?>">
-                        <?php if ((string)$product["cartStatus"] === "made_to_order"): ?>
-                            <span data-translate="madeToOrder">Made to Order</span>
-                        <?php elseif ((string)$product["cartStatus"] === "low_stock" || ((int)$product["inventory"] > 0 && (int)$product["inventory"] <= 3)): ?>
-                            <span<?= app_translate_text_attrs('Only ' . (int)$product["inventory"] . ' left', 'Μόνο ' . (int)$product["inventory"] . ' έμειναν') ?>>Only <?= (int)$product["inventory"] ?> left</span>
-                        <?php elseif ((int)$product["inventory"] > 0): ?>
-                            <span data-translate="inStock">In Stock</span>
-                        <?php else: ?>
-                            <span data-translate="outOfStock">Out of Stock</span>
-                        <?php endif; ?>
+                    <strong class="in-stock">
+                        <span data-translate="madeToOrder">Made to Order</span>
                     </strong>
                 </div>
             </div>
@@ -1769,6 +1763,7 @@ include __DIR__ . "/include/header.php";
     var sizePriceMap = <?= json_encode($sizePriceMap, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
     var sizeSelectionRequired = sizesAreInformational && sizePriceMap && Object.keys(sizePriceMap).length > 0;
     var cartStatus = <?= json_encode((string)$product["cartStatus"], JSON_UNESCAPED_UNICODE) ?>;
+    var productIsMadeToOrder = <?= app_product_is_stockless_made_to_order_row($product) ? 'true' : 'false' ?>;
     var productInventory = <?= (int)$product["inventory"] ?>;
 
     var qty = 1;
@@ -1784,7 +1779,7 @@ include __DIR__ . "/include/header.php";
     var qtyMinus = document.getElementById("qty-minus");
     var qtyPlus = document.getElementById("qty-plus");
     function getSelectedStock() {
-        if (cartStatus === "made_to_order") {
+        if (productIsMadeToOrder) {
             return 999;
         }
         if (hasSelectableVariations) {
@@ -1863,6 +1858,7 @@ include __DIR__ . "/include/header.php";
     var customField2Input = document.getElementById("custom-colour-field-2");
     var csColorSchemeEnabled  = <?= $colorSchemeEnabled ? 'true' : 'false' ?>;
     var csNumColors           = <?= (int)$colorSchemeNumColors ?>;
+    var csColorMeta           = <?= json_encode($colorSchemeColorMeta, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
     var csSelectA = document.getElementById("cs-color-a");
     var csSelectB = document.getElementById("cs-color-b");
     var csSelectC = document.getElementById("cs-color-c");
@@ -1919,6 +1915,91 @@ include __DIR__ . "/include/header.php";
         });
     }
 
+    function csOptionData(selectEl) {
+        if (!selectEl || !selectEl.value) {
+            return null;
+        }
+        var option = selectEl.options[selectEl.selectedIndex];
+        var id = Number(selectEl.value || 0);
+        var meta = csColorMeta[String(id)] || csColorMeta[id] || {};
+        return {
+            id: id,
+            name: (option && (option.getAttribute("data-color-name") || option.textContent)) || meta.name || "",
+            hex: (option && option.getAttribute("data-hex")) || meta.hex || "#ece6f6",
+            photoUrl: (option && option.getAttribute("data-photo")) || meta.photoUrl || ""
+        };
+    }
+
+    function csPreviewMarkup(data) {
+        if (!data) {
+            return '<span class="cs-summary-empty"></span>';
+        }
+        if (data.photoUrl) {
+            return '<img src="' + data.photoUrl.replace(/"/g, '&quot;') + '" alt="">';
+        }
+        return '<span class="cs-summary-swatch" style="background:' + String(data.hex || "#ece6f6").replace(/"/g, '&quot;') + '"></span>';
+    }
+
+    function updateColorSchemeSummary() {
+        [["A", csSelectA], ["B", csSelectB], ["C", csSelectC]].forEach(function (pair) {
+            var slot = pair[0];
+            var selectEl = pair[1];
+            var row = document.querySelector('[data-cs-summary-row="' + slot + '"]');
+            if (!row) return;
+            var data = csOptionData(selectEl);
+            var nameCell = row.querySelector("[data-cs-summary-name]");
+            var previewCell = row.querySelector("[data-cs-summary-preview]");
+            if (nameCell) nameCell.textContent = data ? data.name : "Not selected";
+            if (previewCell) previewCell.innerHTML = csPreviewMarkup(data);
+        });
+    }
+
+    function showColorSchemePreview(slot, data) {
+        var modal = document.getElementById("cs-preview-modal");
+        var media = document.getElementById("cs-preview-media");
+        var title = document.getElementById("cs-preview-title");
+        var slotEl = document.getElementById("cs-preview-slot");
+        if (!modal || !media || !title || !data) return;
+        media.innerHTML = csPreviewMarkup(data);
+        title.textContent = data.name || "";
+        if (slotEl) slotEl.textContent = "Colour " + slot;
+        modal.classList.add("is-open");
+        modal.setAttribute("aria-hidden", "false");
+    }
+
+    function closeColorSchemePreview() {
+        var modal = document.getElementById("cs-preview-modal");
+        if (!modal) return;
+        modal.classList.remove("is-open");
+        modal.setAttribute("aria-hidden", "true");
+    }
+
+    [["A", csSelectA], ["B", csSelectB], ["C", csSelectC]].forEach(function (pair) {
+        var slot = pair[0];
+        var selectEl = pair[1];
+        if (!selectEl) return;
+        selectEl.addEventListener("change", function () {
+            var data = csOptionData(selectEl);
+            updateColorSchemeSummary();
+            if (data) showColorSchemePreview(slot, data);
+        });
+    });
+    updateColorSchemeSummary();
+
+    var csPreviewClose = document.getElementById("cs-preview-close");
+    var csPreviewModal = document.getElementById("cs-preview-modal");
+    if (csPreviewClose) {
+        csPreviewClose.addEventListener("click", closeColorSchemePreview);
+    }
+    if (csPreviewModal) {
+        csPreviewModal.addEventListener("click", function (event) {
+            if (event.target === csPreviewModal) closeColorSchemePreview();
+        });
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") closeColorSchemePreview();
+        });
+    }
+
     if (hasSelectableVariations) {
         variations.forEach(function (item) {
             var colorId = Number(item.colorID || 0);
@@ -1957,7 +2038,7 @@ include __DIR__ . "/include/header.php";
         colorChips.forEach(function (chip) {
             var colorId = parseInt(chip.getAttribute("data-color-id") || "0", 10) || 0;
             var isUnavailable = chip.getAttribute("data-available") !== "1";
-            if (variationUsesColor && cartStatus !== "made_to_order") {
+            if (variationUsesColor && !productIsMadeToOrder) {
                 isUnavailable = isUnavailable || Number(colorStockMap[colorId] || 0) <= 0;
             }
             chip.disabled = isUnavailable;
@@ -2170,7 +2251,7 @@ include __DIR__ . "/include/header.php";
         var statusIsError = false;
 
         if (hasSelectableVariations) {
-            if (requireVariationColorChoice && selectedColorId && cartStatus !== "made_to_order") {
+            if (requireVariationColorChoice && selectedColorId && !productIsMadeToOrder) {
                 var colorStock = Number(colorStockMap[selectedColorId] || 0);
                 if (colorStock <= 0) {
                     available = false;
@@ -2190,11 +2271,11 @@ include __DIR__ . "/include/header.php";
                 missingSelectionMessage = t("productSelectValidSizeColor");
             } else if (selectedVariation) {
                 var stock = Number(selectedVariation.stock || 0);
-                if (cartStatus !== "made_to_order" && stock <= 0) {
+                if (!productIsMadeToOrder && stock <= 0) {
                     available = false;
                     statusText = t("productSelectedVariationOutOfStock");
                     statusIsError = true;
-                } else if (cartStatus === "made_to_order") {
+                } else if (productIsMadeToOrder) {
                     statusText = t("madeToOrder");
                 } else {
                     statusText = t("inStock");
@@ -2204,11 +2285,11 @@ include __DIR__ . "/include/header.php";
             if (sizeSelectionRequired && !selectedSize) {
                 available = false;
                 missingSelectionMessage = t("productSelectSizeFirst");
-            } else if (cartStatus !== "made_to_order" && Number(productInventory) <= 0) {
+            } else if (!productIsMadeToOrder && Number(productInventory) <= 0) {
                 available = false;
                 statusText = t("outOfStock");
                 statusIsError = true;
-            } else if (cartStatus === "made_to_order") {
+            } else if (productIsMadeToOrder) {
                 statusText = t("madeToOrder");
             } else if (!requirePresetColorChoice || selectedColorId) {
                 statusText = t("inStock");
@@ -2480,6 +2561,7 @@ include __DIR__ . "/include/header.php";
             var payload = {
                 product_id: productId,
                 quantity: qty,
+                selected_color_id: selectedColorId || "",
                 addons: {
                     gift_wrapping: !!(document.getElementById("gift-wrap") && document.getElementById("gift-wrap").checked),
                     gift_bag: !!(document.getElementById("gift-bag") && document.getElementById("gift-bag").checked),
@@ -2489,9 +2571,13 @@ include __DIR__ . "/include/header.php";
                     field1: customizationField1,
                     field2: customField2Input ? String(customField2Input.value || "").trim() : "",
                     selectedSize: selectedSize || "",
+                    selectedColorID: selectedColorId || "",
                     colorSchemeA: csColorSchemeEnabled && csSelectA ? csSelectA.options[csSelectA.selectedIndex]?.text || "" : "",
                     colorSchemeB: csColorSchemeEnabled && csSelectB ? csSelectB.options[csSelectB.selectedIndex]?.text || "" : "",
-                    colorSchemeC: (csColorSchemeEnabled && csNumColors >= 3 && csSelectC) ? csSelectC.options[csSelectC.selectedIndex]?.text || "" : ""
+                    colorSchemeC: (csColorSchemeEnabled && csNumColors >= 3 && csSelectC) ? csSelectC.options[csSelectC.selectedIndex]?.text || "" : "",
+                    colorSchemeAId: csColorSchemeEnabled && csSelectA ? csSelectA.value || "" : "",
+                    colorSchemeBId: csColorSchemeEnabled && csSelectB ? csSelectB.value || "" : "",
+                    colorSchemeCId: (csColorSchemeEnabled && csNumColors >= 3 && csSelectC) ? csSelectC.value || "" : ""
                 }
             };
             if (hasSelectableVariations) {

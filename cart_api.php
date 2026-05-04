@@ -121,11 +121,13 @@ try {
     $hasVariants = ((int)$product['hasVariants'] === 1);
     $customColorFields = (int)($product['customColorFields'] ?? 0);
     $hasStoredVariations = $hasVariants ? productHasVariationRows($conn, $productId) : false;
+    $isPrivateMadeToOrder = app_product_is_private_made_to_order_row($product);
+    $isStocklessMadeToOrder = app_product_is_stockless_made_to_order_row($product);
 
-    if ($cartStatus !== 'active' && $cartStatus !== 'made_to_order' && $cartStatus !== 'low_stock') {
+    if (!$isStocklessMadeToOrder) {
         badRequest('Product is not available for cart.');
     }
-    if ($cartStatus === 'made_to_order' && !isMadeToOrderProductAccessible($conn, $productId)) {
+    if ($isPrivateMadeToOrder && !isMadeToOrderProductAccessible($conn, $productId)) {
         badRequest('This made-to-order product is private to another customer.');
     }
 
@@ -177,6 +179,31 @@ try {
     }
 
     $customization = normalizeCustomization($customizationInput, $product);
+    $selectedColorId = toInt($payload['selected_color_id'] ?? $customizationInput['selectedColorID'] ?? null);
+    $resolvedVariationForColorCheck = $variation ?? $customVariation;
+    $resolvedVariationColorId = toInt($resolvedVariationForColorCheck['colorID'] ?? null);
+    $colorIdsToValidate = [];
+    if ($resolvedVariationColorId !== null && $resolvedVariationColorId > 0) {
+        $colorIdsToValidate[] = $resolvedVariationColorId;
+    }
+    if ($colorId !== null && $colorId > 0) {
+        $colorIdsToValidate[] = $colorId;
+    }
+    if ($selectedColorId !== null && $selectedColorId > 0) {
+        $colorIdsToValidate[] = $selectedColorId;
+    }
+    foreach (['colorSchemeAId', 'colorSchemeBId', 'colorSchemeCId'] as $schemeKey) {
+        $schemeColorId = toInt($customizationInput[$schemeKey] ?? null);
+        if ($schemeColorId !== null && $schemeColorId > 0) {
+            $colorIdsToValidate[] = $schemeColorId;
+        }
+    }
+    foreach (array_values(array_unique($colorIdsToValidate)) as $validateColorId) {
+        if (!app_product_colour_is_available($conn, $productId, (int)$validateColorId)) {
+            badRequest('This colour is currently unavailable.');
+        }
+    }
+
     if ($customColorFields > 0) {
         if ($customization['field1'] === '') {
             badRequest('Please enter your custom colour request.');
@@ -186,7 +213,7 @@ try {
         }
     }
 
-    if ($cartStatus === 'made_to_order') {
+    if ($isStocklessMadeToOrder) {
         $availableStock = PHP_INT_MAX;
     } else {
         if ($effectiveHasVariants) {
@@ -296,7 +323,7 @@ try {
     app_cart_persist_for_current_user($conn);
 
     $notice = null;
-    if ($cartStatus !== 'made_to_order' && $availableStock <= 3) {
+    if (!$isStocklessMadeToOrder && $availableStock <= 3) {
         $notice = 'Low stock: only ' . $availableStock . ' left.';
     }
 
@@ -468,6 +495,7 @@ function recalcCartTotals(array $items): array {
 
 function fetchProduct(mysqli $conn, int $productId): ?array {
     $sql = "SELECT productID, sku, nameGR, nameEN, inventory, basePrice, cartStatus, hasVariants,
+                   yarnTypeID, materialType, privateCustomerEmail, privateAccessToken,
                    availableSizes, customColorFields, customColorLabel1, customColorLabel2
             FROM products WHERE productID = ? LIMIT 1";
     $st = $conn->prepare($sql);
@@ -478,24 +506,59 @@ function fetchProduct(mysqli $conn, int $productId): ?array {
     $st->close();
     return $row ?: null;
 }
+function app_cart_product_color_id_lookup(mysqli $conn, int $productId, bool $availableOnly): array {
+    static $cache = [];
+    $cacheKey = $productId . ':' . ($availableOnly ? 'available' : 'all');
+    if (isset($cache[$cacheKey])) {
+        return $cache[$cacheKey];
+    }
+    $lookup = [];
+    foreach (app_product_colours_for_product($conn, $productId, $availableOnly) as $row) {
+        $colorId = (int)($row['colorID'] ?? 0);
+        if ($colorId > 0) {
+            $lookup[$colorId] = true;
+        }
+    }
+    $cache[$cacheKey] = $lookup;
+    return $lookup;
+}
 function productHasVariationRows(mysqli $conn, int $productId): bool {
-    $sql = "SELECT 1 FROM product_variations WHERE productID = ? LIMIT 1";
+    $validColorIds = app_cart_product_color_id_lookup($conn, $productId, false);
+    $sql = "SELECT colorID, size, yarnType, price
+            FROM product_variations
+            WHERE productID = ?
+            ORDER BY variationID ASC";
     $st = $conn->prepare($sql);
     if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
     $st->bind_param("i", $productId);
     $st->execute();
-    $row = $st->get_result()->fetch_assoc();
+    $res = $st->get_result();
+    while ($row = $res->fetch_assoc()) {
+        $rowColorId = toInt($row['colorID'] ?? null);
+        $isLegacyColourOnly = $rowColorId !== null
+            && $rowColorId > 0
+            && trim((string)($row['size'] ?? '')) === ''
+            && trim((string)($row['yarnType'] ?? '')) === ''
+            && $row['price'] === null;
+        if ($isLegacyColourOnly) {
+            continue;
+        }
+        if ($rowColorId !== null && $rowColorId > 0 && !isset($validColorIds[$rowColorId])) {
+            continue;
+        }
+        $st->close();
+        return true;
+    }
     $st->close();
-    return (bool)$row;
+    return false;
 }
 function fetchVariationById(mysqli $conn, int $variationId, int $productId): ?array {
     $colorDisplaySql = app_color_display_sql('c');
     $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, pv.price, {$colorDisplaySql} AS colorName
             FROM product_variations pv
             LEFT JOIN colors c ON c.colorID = pv.colorID
-            LEFT JOIN product_color_availability pca ON pca.productID = pv.productID AND pca.colorID = pv.colorID
             WHERE pv.variationID = ? AND pv.productID = ?
-              AND (pv.colorID IS NULL OR (c.isActive = 1 AND COALESCE(pca.isAvailable, 1) = 1)) LIMIT 1";
+              AND (pv.colorID IS NULL OR (c.isActive = 1 AND c.globalInventoryAvailable > 0)) LIMIT 1";
     $st = $conn->prepare($sql);
     if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
     $st->bind_param("ii", $variationId, $productId);
@@ -509,9 +572,8 @@ function fetchVariationByFields(mysqli $conn, int $productId, string $size, stri
     $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, pv.price, {$colorDisplaySql} AS colorName
             FROM product_variations pv
             LEFT JOIN colors c ON c.colorID = pv.colorID
-            LEFT JOIN product_color_availability pca ON pca.productID = pv.productID AND pca.colorID = pv.colorID
             WHERE pv.productID=? AND pv.size=? AND pv.yarnType=? AND pv.colorID=?
-              AND (pv.colorID IS NULL OR (c.isActive = 1 AND COALESCE(pca.isAvailable, 1) = 1)) LIMIT 1";
+              AND (pv.colorID IS NULL OR (c.isActive = 1 AND c.globalInventoryAvailable > 0)) LIMIT 1";
     $st = $conn->prepare($sql);
     if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
     $st->bind_param("issi", $productId, $size, $yarnType, $colorId);
@@ -525,9 +587,8 @@ function fetchVariationByColorAndSize(mysqli $conn, int $productId, string $size
     $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, pv.price, {$colorDisplaySql} AS colorName
             FROM product_variations pv
             LEFT JOIN colors c ON c.colorID = pv.colorID
-            LEFT JOIN product_color_availability pca ON pca.productID = pv.productID AND pca.colorID = pv.colorID
             WHERE pv.productID=? AND pv.size=? AND pv.colorID=?
-              AND (pv.colorID IS NULL OR (c.isActive = 1 AND COALESCE(pca.isAvailable, 1) = 1))
+              AND (pv.colorID IS NULL OR (c.isActive = 1 AND c.globalInventoryAvailable > 0))
             ORDER BY pv.variationID ASC LIMIT 1";
     $st = $conn->prepare($sql);
     if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
@@ -542,9 +603,8 @@ function fetchVariationBySize(mysqli $conn, int $productId, string $size): ?arra
     $sql = "SELECT pv.variationID, pv.productID, pv.size, pv.yarnType, pv.colorID, pv.price, {$colorDisplaySql} AS colorName
             FROM product_variations pv
             LEFT JOIN colors c ON c.colorID = pv.colorID
-            LEFT JOIN product_color_availability pca ON pca.productID = pv.productID AND pca.colorID = pv.colorID
             WHERE pv.productID=? AND pv.size=?
-              AND (pv.colorID IS NULL OR (c.isActive = 1 AND COALESCE(pca.isAvailable, 1) = 1))
+              AND (pv.colorID IS NULL OR (c.isActive = 1 AND c.globalInventoryAvailable > 0))
             ORDER BY pv.variationID ASC LIMIT 1";
     $st = $conn->prepare($sql);
     if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
@@ -567,15 +627,21 @@ function fetchColorName(mysqli $conn, int $colorId): string {
 }
 function fetchAllVariations(mysqli $conn, int $productId): array {
     $colorDisplaySql = app_color_display_sql('c');
+    $validColorIds = app_cart_product_color_id_lookup($conn, $productId, false);
     $sql = "SELECT pv.variationID, pv.size, pv.yarnType, pv.colorID, pv.price, {$colorDisplaySql} AS colorName,
                    COALESCE(vs.quantityAvailable, p.inventory, 0) AS stock
             FROM product_variations pv
             LEFT JOIN colors c ON c.colorID = pv.colorID
-            LEFT JOIN product_color_availability pca ON pca.productID = pv.productID AND pca.colorID = pv.colorID
             LEFT JOIN variation_stock vs ON vs.variationID = pv.variationID
             JOIN products p ON p.productID = pv.productID
             WHERE pv.productID = ?
-              AND (pv.colorID IS NULL OR (c.isActive = 1 AND COALESCE(pca.isAvailable, 1) = 1))
+              AND (pv.colorID IS NULL OR (c.isActive = 1 AND c.globalInventoryAvailable > 0))
+              AND NOT (
+                pv.colorID IS NOT NULL
+                AND (pv.size IS NULL OR TRIM(pv.size) = '')
+                AND (pv.yarnType IS NULL OR TRIM(pv.yarnType) = '')
+                AND pv.price IS NULL
+              )
             ORDER BY pv.variationID ASC";
     $st = $conn->prepare($sql);
     if (!$st) throw new RuntimeException("SQL prepare failed: " . $conn->error);
@@ -584,11 +650,15 @@ function fetchAllVariations(mysqli $conn, int $productId): array {
     $res  = $st->get_result();
     $rows = [];
     while ($row = $res->fetch_assoc()) {
+        $rowColorId = toInt($row['colorID'] ?? null);
+        if ($rowColorId !== null && $rowColorId > 0 && !isset($validColorIds[$rowColorId])) {
+            continue;
+        }
         $rows[] = [
             'variationID' => (int)$row['variationID'],
             'size'        => (string)$row['size'],
             'yarnType'    => (string)$row['yarnType'],
-            'colorID'     => toInt($row['colorID'] ?? null),
+            'colorID'     => $rowColorId,
             'colorName'   => (string)($row['colorName'] ?? ''),
             'price'       => isset($row['price']) ? (float)$row['price'] : null,
             'stock'       => (int)$row['stock'],

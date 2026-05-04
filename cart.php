@@ -5,6 +5,7 @@ require_once "include/security.php";
 require_once "include/translation_helpers.php";
 require_once "include/coupon_helpers.php";
 require_once "include/cart_persistence.php";
+require_once "include/product_option_helpers.php";
 
 app_coupon_ensure_schema($conn);
 app_cart_restore_for_current_user($conn);
@@ -13,7 +14,7 @@ function getCartLineAvailableStock(mysqli $conn, array $item): int {
     $productId = (int)($item['product']['id'] ?? $item['productID'] ?? 0);
     if ($productId <= 0) return 0;
 
-    $st = $conn->prepare("SELECT inventory, cartStatus FROM products WHERE productID = ? LIMIT 1");
+    $st = $conn->prepare("SELECT inventory, cartStatus, privateCustomerEmail, privateAccessToken FROM products WHERE productID = ? LIMIT 1");
     if (!$st) return 0;
     $st->bind_param("i", $productId);
     $st->execute();
@@ -22,7 +23,7 @@ function getCartLineAvailableStock(mysqli $conn, array $item): int {
     $st->close();
     if (!$product) return 0;
 
-    if (($product['cartStatus'] ?? '') === 'made_to_order') {
+    if (app_product_is_stockless_made_to_order_row($product)) {
         return PHP_INT_MAX;
     }
 
