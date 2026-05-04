@@ -1255,11 +1255,13 @@ foreach ($products as $p) {
                                             &euro;<?= number_format($displayMinPrice, 2) ?>
                                         <?php endif; ?>
                                     </span>
-                                    <span class="shop-stock" style="color:#a066f0;" data-translate="madeToOrder">Made to Order</span>
                                 </div>
                                 <div class="shop-rating">
-                                    <?= $stars ?>
-                                    <span class="shop-review-count">(<?= $rev['cnt'] ?>)</span>
+                                    <span class="shop-review-summary">
+                                        <span class="shop-rating-stars"><?= $stars ?></span>
+                                        <span class="shop-review-count">(<?= $rev['cnt'] ?>)</span>
+                                    </span>
+                                    <span class="shop-made-to-order-badge" data-translate="madeToOrder">Made to Order</span>
                                 </div>
                                 <div class="shop-review-count" style="margin-top:4px;display:block;">
                                     <span<?= app_translate_text_attrs((int)($p['totalSales'] ?? 0) . ' sold', (int)($p['totalSales'] ?? 0) . ' πωλήθηκαν') ?>><?= (int)($p['totalSales'] ?? 0) ?> sold</span>
