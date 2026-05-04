@@ -4,6 +4,8 @@ if (!defined('INCLUDE_CHECK') && !defined('STOCK_MANAGEMENT_DIRECT')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/../include/product_option_helpers.php';
+
 function deductStockAfterOrderCompletion($orderId, $conn) {
 
     $stmt = $conn->prepare("SELECT status FROM orders WHERE orderID = ?");
@@ -41,25 +43,25 @@ function deductStockAfterOrderCompletion($orderId, $conn) {
         $variationId = (int)$item['variationID'];
         $qtyOrdered  = (int)$item['quantity'];
 
+        $pStmt = $conn->prepare("SELECT inventory, cartStatus, privateCustomerEmail, privateAccessToken FROM products WHERE productID = ? FOR UPDATE");
+        if (!$pStmt) {
+            throw new Exception("Failed to prepare product stock select: " . $conn->error);
+        }
+        $pStmt->bind_param("i", $productId);
+        $pStmt->execute();
+        $pRes = $pStmt->get_result();
+        $pRow = $pRes ? $pRes->fetch_assoc() : null;
+        $pStmt->close();
+
+        if (!$pRow) {
+            throw new Exception("Product not found for product ID: $productId");
+        }
+
+        if (app_product_is_stockless_made_to_order_row($pRow)) {
+            continue;
+        }
+
         if (!$variationId) {
-            $pStmt = $conn->prepare("SELECT inventory, cartStatus FROM products WHERE productID = ? FOR UPDATE");
-            if (!$pStmt) {
-                throw new Exception("Failed to prepare product stock select: " . $conn->error);
-            }
-            $pStmt->bind_param("i", $productId);
-            $pStmt->execute();
-            $pRes = $pStmt->get_result();
-            $pRow = $pRes ? $pRes->fetch_assoc() : null;
-            $pStmt->close();
-
-            if (!$pRow) {
-                throw new Exception("Product not found for product ID: $productId");
-            }
-
-            if ((string)($pRow['cartStatus'] ?? '') === 'made_to_order') {
-                continue;
-            }
-
             $oldStock = (int)$pRow['inventory'];
             $newStock = $oldStock - $qtyOrdered;
             if ($newStock < 0) {

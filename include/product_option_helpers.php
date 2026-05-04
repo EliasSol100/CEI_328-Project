@@ -22,6 +22,20 @@ if (!function_exists('app_product_options_column_exists')) {
     }
 }
 
+if (!function_exists('app_product_options_index_exists')) {
+    function app_product_options_index_exists(mysqli $conn, string $tableName, string $indexName): bool
+    {
+        if (!app_product_options_table_exists($conn, $tableName)) {
+            return false;
+        }
+
+        $safeIndex = mysqli_real_escape_string($conn, $indexName);
+        $safeTable = str_replace('`', '``', $tableName);
+        $res = mysqli_query($conn, "SHOW INDEX FROM `{$safeTable}` WHERE Key_name = '{$safeIndex}'");
+        return (bool)($res && mysqli_num_rows($res) > 0);
+    }
+}
+
 if (!function_exists('app_product_status_from_stock')) {
     function app_product_status_from_stock(int $inventory, string $currentStatus = ''): string
     {
@@ -29,12 +43,8 @@ if (!function_exists('app_product_status_from_stock')) {
         if (in_array($currentStatus, ['discontinued', 'made_to_order'], true)) {
             return $currentStatus;
         }
-        if ($inventory <= 0) {
-            return 'out_of_stock';
-        }
-        if ($inventory <= 3) {
-            return 'low_stock';
-        }
+
+        // Public catalog products are made-to-order now, so product stock no longer drives storefront status.
         return 'active';
     }
 }
@@ -42,20 +52,8 @@ if (!function_exists('app_product_status_from_stock')) {
 if (!function_exists('app_product_sync_stock_statuses')) {
     function app_product_sync_stock_statuses(mysqli $conn): void
     {
-        if (!app_product_options_table_exists($conn, 'products')) {
-            return;
-        }
-
-        mysqli_query(
-            $conn,
-            "UPDATE products
-             SET cartStatus = CASE
-                 WHEN inventory <= 0 THEN 'out_of_stock'
-                 WHEN inventory <= 3 THEN 'low_stock'
-                 ELSE 'active'
-             END
-             WHERE cartStatus NOT IN ('made_to_order', 'discontinued')"
-        );
+        // Product stock is kept only as legacy/reference data. Do not derive public availability from it.
+        return;
     }
 }
 
@@ -71,6 +69,7 @@ if (!function_exists('app_product_options_ensure_schema')) {
         if (app_product_options_table_exists($conn, 'products')) {
             $productColumns = [
                 'materialType' => "ALTER TABLE products ADD COLUMN materialType VARCHAR(100) NULL AFTER category",
+                'yarnTypeID' => "ALTER TABLE products ADD COLUMN yarnTypeID INT NULL AFTER materialType",
                 'shippingWeightKg' => "ALTER TABLE products ADD COLUMN shippingWeightKg DECIMAL(6,3) NULL AFTER materialType",
                 'shippingSizeCode' => "ALTER TABLE products ADD COLUMN shippingSizeCode VARCHAR(20) NULL AFTER shippingWeightKg",
                 'customColorFields' => "ALTER TABLE products ADD COLUMN customColorFields TINYINT(1) NOT NULL DEFAULT 0 AFTER category",
@@ -89,6 +88,12 @@ if (!function_exists('app_product_options_ensure_schema')) {
                 if (!app_product_options_column_exists($conn, 'products', $columnName)) {
                     mysqli_query($conn, $sql);
                 }
+            }
+
+            if (app_product_options_column_exists($conn, 'products', 'yarnTypeID')
+                && !app_product_options_index_exists($conn, 'products', 'idx_products_yarnTypeID')
+            ) {
+                mysqli_query($conn, "ALTER TABLE products ADD KEY idx_products_yarnTypeID (yarnTypeID)");
             }
 
             mysqli_query(
@@ -309,6 +314,47 @@ if (!function_exists('app_product_options_ensure_schema')) {
                      )"
                 );
             }
+
+            if (app_product_options_table_exists($conn, 'products')
+                && app_product_options_column_exists($conn, 'products', 'yarnTypeID')
+            ) {
+                mysqli_query(
+                    $conn,
+                    "UPDATE products p
+                     JOIN yarn_types yt
+                       ON LOWER(TRIM(yt.typeName)) = LOWER(TRIM(COALESCE(p.materialType, '')))
+                     SET p.yarnTypeID = yt.typeID
+                     WHERE p.yarnTypeID IS NULL OR p.yarnTypeID <= 0"
+                );
+
+                $velvetRes = mysqli_query($conn, "SELECT typeID FROM yarn_types WHERE typeName = 'Velvet' LIMIT 1");
+                $velvetRow = $velvetRes ? mysqli_fetch_assoc($velvetRes) : null;
+                $fallbackTypeID = (int)($velvetRow['typeID'] ?? 0);
+                if ($fallbackTypeID <= 0) {
+                    $fallbackRes = mysqli_query($conn, "SELECT typeID FROM yarn_types ORDER BY typeName ASC LIMIT 1");
+                    $fallbackRow = $fallbackRes ? mysqli_fetch_assoc($fallbackRes) : null;
+                    $fallbackTypeID = (int)($fallbackRow['typeID'] ?? 0);
+                }
+                if ($fallbackTypeID > 0) {
+                    mysqli_query(
+                        $conn,
+                        "UPDATE products
+                         SET yarnTypeID = {$fallbackTypeID}
+                         WHERE (yarnTypeID IS NULL OR yarnTypeID <= 0)
+                           AND cartStatus <> 'discontinued'"
+                    );
+                }
+
+                mysqli_query(
+                    $conn,
+                    "UPDATE products p
+                     JOIN yarn_types yt ON yt.typeID = p.yarnTypeID
+                     SET p.materialType = yt.typeName
+                     WHERE p.yarnTypeID IS NOT NULL
+                       AND p.yarnTypeID > 0
+                       AND (p.materialType IS NULL OR TRIM(p.materialType) = '')"
+                );
+            }
         }
 
         mysqli_query(
@@ -360,6 +406,185 @@ if (!function_exists('app_product_options_ensure_schema')) {
         ) {
             mysqli_query($conn, "ALTER TABLE order_items ADD COLUMN customizationNote VARCHAR(255) NULL AFTER giftMessage");
         }
+    }
+}
+
+if (!function_exists('app_product_is_private_made_to_order_row')) {
+    function app_product_is_private_made_to_order_row(array $row): bool
+    {
+        $status = strtolower(trim((string)($row['cartStatus'] ?? '')));
+        if ($status !== 'made_to_order') {
+            return false;
+        }
+
+        return trim((string)($row['privateCustomerEmail'] ?? '')) !== ''
+            && trim((string)($row['privateAccessToken'] ?? '')) !== '';
+    }
+}
+
+if (!function_exists('app_product_is_stockless_made_to_order_row')) {
+    function app_product_is_stockless_made_to_order_row(array $row): bool
+    {
+        $status = strtolower(trim((string)($row['cartStatus'] ?? '')));
+        return in_array($status, ['active', 'low_stock', 'out_of_stock', 'made_to_order'], true);
+    }
+}
+
+if (!function_exists('app_product_public_status_label')) {
+    function app_product_public_status_label(array $row): string
+    {
+        return app_product_is_stockless_made_to_order_row($row) ? 'Made to Order' : 'Hidden';
+    }
+}
+
+if (!function_exists('app_yarn_types_all')) {
+    function app_yarn_types_all(mysqli $conn): array
+    {
+        app_product_options_ensure_schema($conn);
+        if (!app_product_options_table_exists($conn, 'yarn_types')) {
+            return [];
+        }
+
+        $rows = [];
+        $res = mysqli_query($conn, "SELECT typeID, typeName FROM yarn_types ORDER BY typeName ASC");
+        while ($res && ($row = mysqli_fetch_assoc($res))) {
+            $typeID = (int)($row['typeID'] ?? 0);
+            $typeName = trim((string)($row['typeName'] ?? ''));
+            if ($typeID <= 0 || $typeName === '') {
+                continue;
+            }
+            $rows[] = ['typeID' => $typeID, 'typeName' => $typeName];
+        }
+        return $rows;
+    }
+}
+
+if (!function_exists('app_product_yarn_type_id')) {
+    function app_product_yarn_type_id(mysqli $conn, int $productId): int
+    {
+        app_product_options_ensure_schema($conn);
+        if ($productId <= 0 || !app_product_options_table_exists($conn, 'products')) {
+            return 0;
+        }
+
+        $stmt = mysqli_prepare(
+            $conn,
+            "SELECT COALESCE(p.yarnTypeID, yt.typeID, 0) AS typeID
+             FROM products p
+             LEFT JOIN yarn_types yt ON LOWER(TRIM(yt.typeName)) = LOWER(TRIM(COALESCE(p.materialType, '')))
+             WHERE p.productID = ?
+             LIMIT 1"
+        );
+        if (!$stmt) {
+            return 0;
+        }
+        mysqli_stmt_bind_param($stmt, 'i', $productId);
+        mysqli_stmt_execute($stmt);
+        $res = mysqli_stmt_get_result($stmt);
+        $row = $res ? mysqli_fetch_assoc($res) : null;
+        mysqli_stmt_close($stmt);
+        return (int)($row['typeID'] ?? 0);
+    }
+}
+
+if (!function_exists('app_product_colours_for_product')) {
+    function app_product_colours_for_product(mysqli $conn, int $productId, bool $availableOnly = false): array
+    {
+        app_product_options_ensure_schema($conn);
+        if ($productId <= 0) {
+            return [];
+        }
+
+        $colorDisplaySql = app_color_display_sql('c');
+        $availabilitySql = $availableOnly ? " AND c.isActive = 1 AND c.globalInventoryAvailable > 0" : "";
+        $stmt = mysqli_prepare(
+            $conn,
+            "SELECT
+                c.colorID,
+                {$colorDisplaySql} AS colorName,
+                c.displayCode,
+                c.hexCode,
+                c.globalInventoryAvailable,
+                c.isActive,
+                yt.typeID,
+                yt.typeName,
+                MIN(cyt.photoPath) AS yarnPhotoPath,
+                MIN(pcp.photoPath) AS productPhotoPath,
+                COALESCE(NULLIF(MIN(pcp.photoPath), ''), NULLIF(MIN(cyt.photoPath), '')) AS photoPath
+             FROM products p
+             LEFT JOIN yarn_types fallback_yt
+               ON LOWER(TRIM(fallback_yt.typeName)) = LOWER(TRIM(COALESCE(p.materialType, '')))
+             JOIN color_yarn_types cyt
+               ON cyt.typeID = COALESCE(NULLIF(p.yarnTypeID, 0), fallback_yt.typeID)
+             JOIN yarn_types yt ON yt.typeID = cyt.typeID
+             JOIN colors c ON c.colorID = cyt.colorID
+             LEFT JOIN product_color_photos pcp
+               ON pcp.productID = p.productID AND pcp.colorID = c.colorID
+             WHERE p.productID = ?
+               {$availabilitySql}
+             GROUP BY c.colorID, c.colorName, c.displayCode, c.hexCode, c.globalInventoryAvailable, c.isActive, yt.typeID, yt.typeName
+             ORDER BY colorName ASC, c.colorID ASC"
+        );
+        if (!$stmt) {
+            return [];
+        }
+
+        mysqli_stmt_bind_param($stmt, 'i', $productId);
+        mysqli_stmt_execute($stmt);
+        $res = mysqli_stmt_get_result($stmt);
+        $rows = [];
+        while ($res && ($row = mysqli_fetch_assoc($res))) {
+            $hex = trim((string)($row['hexCode'] ?? ''));
+            $photoPathRaw = (string)($row['photoPath'] ?? '');
+            $productPhotoPathRaw = (string)($row['productPhotoPath'] ?? '');
+            $yarnPhotoPathRaw = (string)($row['yarnPhotoPath'] ?? '');
+            $photoPath = function_exists('app_image_prefer_optimized_asset_path') ? app_image_prefer_optimized_asset_path($photoPathRaw) : trim($photoPathRaw);
+            $productPhotoPath = function_exists('app_image_prefer_optimized_asset_path') ? app_image_prefer_optimized_asset_path($productPhotoPathRaw) : trim($productPhotoPathRaw);
+            $yarnPhotoPath = function_exists('app_image_prefer_optimized_asset_path') ? app_image_prefer_optimized_asset_path($yarnPhotoPathRaw) : trim($yarnPhotoPathRaw);
+            $rows[] = [
+                'id' => (int)$row['colorID'],
+                'colorID' => (int)$row['colorID'],
+                'name' => (string)($row['colorName'] ?? ''),
+                'colorName' => (string)($row['colorName'] ?? ''),
+                'displayCode' => (string)($row['displayCode'] ?? ''),
+                'hex' => preg_match('/^#[0-9a-fA-F]{6}$/', $hex) ? $hex : '#ece6f6',
+                'hexCode' => preg_match('/^#[0-9a-fA-F]{6}$/', $hex) ? $hex : '#ece6f6',
+                'stock' => (int)($row['globalInventoryAvailable'] ?? 0),
+                'globalInventoryAvailable' => (int)($row['globalInventoryAvailable'] ?? 0),
+                'isActive' => (int)($row['isActive'] ?? 0),
+                'available' => ((int)($row['isActive'] ?? 0) === 1 && (int)($row['globalInventoryAvailable'] ?? 0) > 0) ? 1 : 0,
+                'typeId' => (int)($row['typeID'] ?? 0),
+                'typeID' => (int)($row['typeID'] ?? 0),
+                'typeName' => (string)($row['typeName'] ?? ''),
+                'photoPath' => $photoPath,
+                'productPhotoPath' => $productPhotoPath,
+                'yarnPhotoPath' => $yarnPhotoPath,
+            ];
+        }
+        mysqli_stmt_close($stmt);
+        return $rows;
+    }
+}
+
+if (!function_exists('app_product_colour_count')) {
+    function app_product_colour_count(mysqli $conn, int $productId, bool $availableOnly = false): int
+    {
+        return count(app_product_colours_for_product($conn, $productId, $availableOnly));
+    }
+}
+
+if (!function_exists('app_product_colour_is_available')) {
+    function app_product_colour_is_available(mysqli $conn, int $productId, int $colorId): bool
+    {
+        if ($productId <= 0 || $colorId <= 0) {
+            return false;
+        }
+        foreach (app_product_colours_for_product($conn, $productId, true) as $row) {
+            if ((int)($row['colorID'] ?? 0) === $colorId) {
+                return true;
+            }
+        }
+        return false;
     }
 }
 

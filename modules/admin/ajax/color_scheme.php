@@ -42,41 +42,7 @@ $id        = (int)($_POST['id']           ?? $_GET['id']        ?? 0);
 
 function product_color_scheme_available_colour_count(mysqli $conn, int $productID): int
 {
-    if ($productID <= 0) {
-        return 0;
-    }
-
-    $stmt = $conn->prepare("
-        SELECT COUNT(DISTINCT product_colours.colorID) AS colourCount
-        FROM (
-            SELECT productID, colorID
-            FROM product_variations
-            WHERE colorID IS NOT NULL
-              AND (size IS NULL OR size = '')
-              AND (yarnType IS NULL OR yarnType = '')
-            UNION
-            SELECT productID, colorID
-            FROM product_color_photos
-            WHERE colorID IS NOT NULL
-        ) product_colours
-        JOIN colors c ON c.colorID = product_colours.colorID
-        LEFT JOIN product_color_availability pca ON pca.productID = product_colours.productID AND pca.colorID = product_colours.colorID
-        WHERE product_colours.productID = ?
-          AND c.isActive = 1
-          AND c.globalInventoryAvailable > 0
-          AND COALESCE(pca.isAvailable, 1) = 1
-    ");
-    if (!$stmt) {
-        return 0;
-    }
-
-    $stmt->bind_param('i', $productID);
-    $stmt->execute();
-    $res = $stmt->get_result();
-    $row = $res ? $res->fetch_assoc() : null;
-    $stmt->close();
-
-    return (int)($row['colourCount'] ?? 0);
+    return app_product_colour_count($conn, $productID, true);
 }
 
 if ($action === 'get_config' && $productID > 0) {
@@ -107,7 +73,7 @@ if ($action === 'save_config' && $productID > 0) {
     if ($isEnabled && $availableColourCount < 2) {
         echo json_encode([
             'ok' => false,
-            'error' => 'Assign at least 2 available colours before enabling multi-colour selection.',
+            'error' => 'This product yarn type needs at least 2 available colours before enabling multi-colour selection.',
         ]);
         exit;
     }
@@ -115,7 +81,7 @@ if ($action === 'save_config' && $productID > 0) {
     if ($isEnabled && $numColors > $availableColourCount) {
         echo json_encode([
             'ok' => false,
-            'error' => 'This product has only ' . $availableColourCount . ' available assigned colour(s).',
+            'error' => 'This product has only ' . $availableColourCount . ' available yarn type colour(s).',
         ]);
         exit;
     }

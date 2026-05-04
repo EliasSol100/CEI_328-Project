@@ -20,6 +20,13 @@ ensureMadeToOrderProductSchema($conn);
 app_product_options_ensure_schema($conn);
 app_product_sync_stock_statuses($conn);
 
+$yarnTypes = app_yarn_types_all($conn);
+$yarnTypeNamesById = [];
+foreach ($yarnTypes as $yt) {
+    $yarnTypeNamesById[(int)$yt['typeID']] = (string)$yt['typeName'];
+}
+$defaultYarnTypeID = !empty($yarnTypes) ? (int)$yarnTypes[0]['typeID'] : 0;
+
 function productMgmtEnsurePhotoStorageSchema(mysqli $conn): void
 {
     static $checked = false;
@@ -259,6 +266,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cost     = (float)($_POST['costPrice']  ?? 0);
         $inv      = (int)($_POST['inventory']    ?? 0);
         $category = trim($_POST['category'] ?? '');
+        $yarnTypeID = (int)($_POST['yarnTypeID'] ?? 0);
         $sku      = trim($_POST['sku']      ?? '');
         $isSellingFast = isset($_POST['isSellingFast']) ? 1 : 0;
         $privateCustomerEmail = normalizeCustomerEmail((string)($_POST['privateCustomerEmail'] ?? ''));
@@ -274,11 +282,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $existingPrivateToken = '';
         $existingPrivateEmail = '';
         $existingStatus = '';
+        $existingInventory = 0;
+        $existingYarnTypeID = 0;
 
         if ($action === 'edit' && $id > 0) {
             $existingRowStmt = mysqli_prepare(
                 $conn,
-                "SELECT cartStatus, privateAccessToken, privateCustomerEmail
+                "SELECT cartStatus, inventory, yarnTypeID, privateAccessToken, privateCustomerEmail
                  FROM products
                  WHERE productID = ?
                  LIMIT 1"
@@ -289,6 +299,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $existingRes = mysqli_stmt_get_result($existingRowStmt);
                 if ($existingRes && ($existingRow = mysqli_fetch_assoc($existingRes))) {
                     $existingStatus = (string)($existingRow['cartStatus'] ?? '');
+                    $existingInventory = (int)($existingRow['inventory'] ?? 0);
+                    $existingYarnTypeID = (int)($existingRow['yarnTypeID'] ?? 0);
                     $existingPrivateToken = trim((string)($existingRow['privateAccessToken'] ?? ''));
                     $existingPrivateEmail = normalizeCustomerEmail((string)($existingRow['privateCustomerEmail'] ?? ''));
                 }
@@ -296,7 +308,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        $status = app_product_status_from_stock($inv, $existingStatus);
+        if ($action === 'edit' && !array_key_exists('inventory', $_POST)) {
+            $inv = $existingInventory;
+        }
+        if ($yarnTypeID <= 0 && $existingYarnTypeID > 0) {
+            $yarnTypeID = $existingYarnTypeID;
+        }
+        if ($yarnTypeID <= 0 && $defaultYarnTypeID > 0) {
+            $yarnTypeID = $defaultYarnTypeID;
+        }
+        if ($yarnTypeID <= 0 || !isset($yarnTypeNamesById[$yarnTypeID])) {
+            $flash = 'error:Please select a valid yarn type.';
+            header('Location: product_management.php?flash=' . urlencode($flash));
+            exit;
+        }
+        $materialType = $yarnTypeNamesById[$yarnTypeID];
+
+        $status = in_array($existingStatus, ['made_to_order', 'discontinued'], true)
+            ? $existingStatus
+            : 'active';
 
         if ($price === null) {
             if (!empty($sizePriceAmounts)) {
@@ -329,13 +359,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = mysqli_prepare(
                 $conn,
                 "INSERT INTO products
-                 (sku, nameEN, nameGR, descriptionEN, descriptionGR, basePrice, costPrice, inventory, cartStatus, category, isSellingFast, privateCustomerEmail, privateAccessToken, privateLinkSentAt, availableSizes)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                 (sku, nameEN, nameGR, descriptionEN, descriptionGR, basePrice, costPrice, inventory, cartStatus, category, materialType, yarnTypeID, isSellingFast, privateCustomerEmail, privateAccessToken, privateLinkSentAt, availableSizes)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             );
 
             mysqli_stmt_bind_param(
                 $stmt,
-                'sssssddississss',
+                'sssssddisssiissss',
                 $sku,
                 $nameEN,
                 $nameGR,
@@ -346,6 +376,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $inv,
                 $status,
                 $category,
+                $materialType,
+                $yarnTypeID,
                 $isSellingFast,
                 $privateCustomerEmail,
                 $privateAccessToken,
@@ -407,6 +439,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      inventory=?,
                      cartStatus=?,
                      category=?,
+                     materialType=?,
+                     yarnTypeID=?,
                      isSellingFast=?,
                      privateCustomerEmail=?,
                      privateAccessToken=?,
@@ -416,7 +450,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             mysqli_stmt_bind_param(
                 $stmt,
-                'ssssddississsi',
+                'ssssddisssiisssi',
                 $nameEN,
                 $nameGR,
                 $descEN,
@@ -426,6 +460,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $inv,
                 $status,
                 $category,
+                $materialType,
+                $yarnTypeID,
                 $isSellingFast,
                 $privateCustomerEmail,
                 $privateAccessToken,
@@ -762,14 +798,18 @@ if (isset($_GET['edit'])) {
         mysqli_stmt_close($stmt);
     }
     if ($editProduct) {
+        $resolvedEditYarnTypeID = app_product_yarn_type_id($conn, (int)$editProduct['productID']);
+        if ($resolvedEditYarnTypeID > 0) {
+            $editProduct['yarnTypeID'] = $resolvedEditYarnTypeID;
+        }
         $editSizePrices = app_product_size_prices_for_product($conn, (int)$editProduct['productID']);
     }
 }
 
 $availStatus = [
-    'active'        => ['label' => 'in stock',      'badge' => 'badge-green'],
-    'low_stock'     => ['label' => 'low stock',     'badge' => 'badge-warning'],
-    'out_of_stock'  => ['label' => 'out of stock',  'badge' => 'badge-red'],
+    'active'        => ['label' => 'made to order', 'badge' => 'badge-muted'],
+    'low_stock'     => ['label' => 'made to order', 'badge' => 'badge-muted'],
+    'out_of_stock'  => ['label' => 'made to order', 'badge' => 'badge-muted'],
     'made_to_order' => ['label' => 'made to order', 'badge' => 'badge-muted'],
     'discontinued'  => ['label' => 'hidden',        'badge' => 'badge-muted'],
 ];
@@ -794,17 +834,17 @@ $globalProductWarnings = app_product_global_warning_texts($conn);
 $categories = ['Animals','Blankets','Bags','Decor','Dolls'];
 
 $statuses = [
-    'active'        => 'In Stock',
-    'low_stock'     => 'Low Stock',
-    'out_of_stock'  => 'Out of Stock',
+    'active'        => 'Made to Order',
+    'low_stock'     => 'Made to Order (Legacy Low Stock)',
+    'out_of_stock'  => 'Made to Order (Legacy Out of Stock)',
     'made_to_order' => 'Made to Order',
     'discontinued'  => 'Discontinued',
 ];
 $statusFilterOptions = [
     ''              => 'All Statuses',
-    'active'        => 'In Stock',
-    'low_stock'     => 'Low Stock',
-    'out_of_stock'  => 'Out of Stock',
+    'active'        => 'Made to Order',
+    'low_stock'     => 'Legacy Low Stock',
+    'out_of_stock'  => 'Legacy Out of Stock',
     'made_to_order' => 'Made to Order',
     'discontinued'  => 'Discontinued',
 ];
@@ -890,8 +930,8 @@ $statusFilterOptions = [
               <th>Category</th>
               <th>Price</th>
               <th>Availability</th>
+              <th>Yarn Type</th>
               <th>Promotions</th>
-              <th>Stock</th>
               <th style="text-align:right">Actions</th>
             </tr>
           </thead>
@@ -944,6 +984,7 @@ $statusFilterOptions = [
                     </div>
                   <?php endif; ?>
                 </td>
+                <td class="text-muted"><?= htmlspecialchars($yarnTypeNamesById[(int)($p['yarnTypeID'] ?? 0)] ?? ($p['materialType'] ?? '-')) ?></td>
                 <td>
                   <?php if (!empty($p['isSellingFast'])): ?>
                     <span class="badge badge-orange">Homepage</span>
@@ -951,7 +992,6 @@ $statusFilterOptions = [
                     <span class="text-muted">&mdash;</span>
                   <?php endif; ?>
                 </td>
-                <td><?= (int)$p['inventory'] ?></td>
                 <td style="text-align:right">
                   <a href="?edit=<?= $p['productID'] ?><?= ($searchTerm !== '' || $statusFilter !== '') ? '&' . http_build_query(['q' => $searchTerm, 'status_filter' => $statusFilter]) : '' ?>" class="btn-edit">
                     <i class="fas fa-pen"></i> Edit
@@ -1089,8 +1129,15 @@ $statusFilterOptions = [
       </div>
       <div class="form-grid-2">
         <div class="form-group">
-          <label class="form-label">Stock Quantity</label>
-          <input name="inventory" type="number" min="0" class="form-input" value="0">
+          <label class="form-label">Yarn Type *</label>
+          <select name="yarnTypeID" class="form-input" required>
+            <option value="">-- Select yarn type --</option>
+            <?php foreach ($yarnTypes as $yt): ?>
+              <option value="<?= (int)$yt['typeID'] ?>" <?= (int)$yt['typeID'] === $defaultYarnTypeID ? 'selected' : '' ?>><?= htmlspecialchars((string)$yt['typeName']) ?></option>
+            <?php endforeach; ?>
+          </select>
+          <span class="form-hint">All colours from this yarn type appear automatically on the product page.</span>
+          <input name="inventory" type="hidden" value="0">
         </div>
         <div class="form-group">
           <label class="form-label">SKU</label>
@@ -1204,6 +1251,16 @@ $statusFilterOptions = [
           <?php endforeach; ?>
         </select>
       </div>
+      <div class="form-group">
+        <label class="form-label">Yarn Type *</label>
+        <select name="yarnTypeID" class="form-input" required>
+          <option value="">-- Select yarn type --</option>
+          <?php foreach ($yarnTypes as $yt): ?>
+            <option value="<?= (int)$yt['typeID'] ?>" <?= (int)($editProduct['yarnTypeID'] ?? 0) === (int)$yt['typeID'] ? 'selected' : '' ?>><?= htmlspecialchars((string)$yt['typeName']) ?></option>
+          <?php endforeach; ?>
+        </select>
+        <span class="form-hint">All colours from this yarn type appear automatically on the product page.</span>
+      </div>
       <div
         class="form-group mto-private-email-field"
         data-private-email-field
@@ -1230,10 +1287,7 @@ $statusFilterOptions = [
           </label>
         <?php endif; ?>
       </div>
-      <div class="form-group">
-        <label class="form-label">Stock Quantity</label>
-        <input name="inventory" type="number" min="0" class="form-input" value="<?= (int)$editProduct['inventory'] ?>">
-      </div>
+      <input name="inventory" type="hidden" value="<?= (int)$editProduct['inventory'] ?>">
       <div class="form-group" data-size-editor data-size-prices='<?= htmlspecialchars(json_encode($editSizePrices, JSON_UNESCAPED_UNICODE | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES, 'UTF-8') ?>'>
         <label class="form-label">Available Sizes</label>
         <div id="pm-size-chips" data-size-chips style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:28px;"></div>

@@ -379,11 +379,15 @@ if ($userId) {
 $_SESSION['wishlist_count'] = count($wishlistedIDs);
 
 $accessibleMadeToOrderIds = getAccessibleMadeToOrderProductIds($conn);
-$catalogVisibilityWhere = "p.cartStatus IN ('active', 'low_stock', 'out_of_stock')";
+$catalogVisibilityWhere = "p.cartStatus IN ('active', 'low_stock', 'out_of_stock')
+    OR (p.cartStatus = 'made_to_order'
+        AND (TRIM(COALESCE(p.privateCustomerEmail, '')) = '' OR TRIM(COALESCE(p.privateAccessToken, '')) = ''))";
 if (!empty($accessibleMadeToOrderIds)) {
     $catalogVisibilityWhere .= " OR (p.cartStatus = 'made_to_order' AND p.productID IN (" . implode(',', array_map('intval', $accessibleMadeToOrderIds)) . "))";
 }
-$categoryVisibilityWhere = "cartStatus IN ('active', 'low_stock', 'out_of_stock')";
+$categoryVisibilityWhere = "cartStatus IN ('active', 'low_stock', 'out_of_stock')
+    OR (cartStatus = 'made_to_order'
+        AND (TRIM(COALESCE(privateCustomerEmail, '')) = '' OR TRIM(COALESCE(privateAccessToken, '')) = ''))";
 if (!empty($accessibleMadeToOrderIds)) {
     $categoryVisibilityWhere .= " OR (cartStatus = 'made_to_order' AND productID IN (" . implode(',', array_map('intval', $accessibleMadeToOrderIds)) . "))";
 }
@@ -455,9 +459,16 @@ if ($materialRes) {
 $colorFilterOptions = [];
 $colorDisplaySql = app_color_display_sql('c');
 $colorRes = $conn->query("
-    SELECT c.colorID, {$colorDisplaySql} AS colorName, c.globalInventoryAvailable
-    FROM colors c
-    WHERE isActive = 1
+    SELECT DISTINCT c.colorID, {$colorDisplaySql} AS colorName, c.globalInventoryAvailable
+    FROM products p
+    LEFT JOIN yarn_types fallback_yt
+      ON LOWER(TRIM(fallback_yt.typeName)) = LOWER(TRIM(COALESCE(p.materialType, '')))
+    JOIN color_yarn_types cyt
+      ON cyt.typeID = COALESCE(NULLIF(p.yarnTypeID, 0), fallback_yt.typeID)
+    JOIN colors c ON c.colorID = cyt.colorID
+    WHERE c.isActive = 1
+      AND c.globalInventoryAvailable > 0
+      AND ({$catalogVisibilityWhere})
     ORDER BY colorName ASC
 ");
 if ($colorRes) {
@@ -540,7 +551,7 @@ $selectedColors = array_values(array_unique(array_filter(array_map('intval', $se
 $products = [];
 $sql = "
     SELECT p.productID, p.sku, p.nameEN, p.nameGR, p.basePrice, p.inventory,
-           p.cartStatus, p.category, p.materialType, p.hasVariants,
+           p.cartStatus, p.category, p.materialType, p.yarnTypeID, p.hasVariants,
            CASE
                WHEN vstats.min_price IS NOT NULL AND sizestats.min_price IS NOT NULL THEN LEAST(vstats.min_price, sizestats.min_price)
                ELSE COALESCE(vstats.min_price, sizestats.min_price, p.basePrice)
@@ -647,20 +658,7 @@ if (!empty($selectedMaterials)) {
         $sql .= " AND (";
         if (!empty($selectedMaterialIds)) {
             $sql .= "
-                EXISTS (
-                    SELECT 1
-                    FROM product_variations pvf
-                    JOIN color_yarn_types cyt ON cyt.colorID = pvf.colorID
-                    WHERE pvf.productID = p.productID
-                      AND cyt.typeID IN ({$idPlaceholders})
-                )
-                OR EXISTS (
-                    SELECT 1
-                    FROM product_color_photos pcpf
-                    JOIN color_yarn_types cyt ON cyt.colorID = pcpf.colorID
-                    WHERE pcpf.productID = p.productID
-                      AND cyt.typeID IN ({$idPlaceholders})
-                )
+                p.yarnTypeID IN ({$idPlaceholders})
             ";
         }
         if (!empty($selectedMaterialNames)) {
@@ -672,10 +670,7 @@ if (!empty($selectedMaterials)) {
         $sql .= ")";
 
         if (!empty($selectedMaterialIds)) {
-            $bindTypes .= str_repeat('i', count($selectedMaterialIds) * 2);
-            foreach ($selectedMaterialIds as $materialId) {
-                $bindValues[] = $materialId;
-            }
+            $bindTypes .= str_repeat('i', count($selectedMaterialIds));
             foreach ($selectedMaterialIds as $materialId) {
                 $bindValues[] = $materialId;
             }
@@ -708,27 +703,15 @@ if (!empty($selectedColors)) {
     $sql .= " AND (
         EXISTS (
             SELECT 1
-            FROM product_variations pvf
-            JOIN colors cf ON cf.colorID = pvf.colorID
-            WHERE pvf.productID = p.productID
-              AND pvf.colorID IN ({$placeholders})
+            FROM color_yarn_types cytf
+            JOIN colors cf ON cf.colorID = cytf.colorID
+            WHERE cytf.typeID = p.yarnTypeID
+              AND cytf.colorID IN ({$placeholders})
               AND cf.isActive = 1
               AND cf.globalInventoryAvailable > 0
         )
-        OR EXISTS (
-            SELECT 1
-            FROM product_color_photos pcpf
-            JOIN colors cpf ON cpf.colorID = pcpf.colorID
-            WHERE pcpf.productID = p.productID
-              AND pcpf.colorID IN ({$placeholders})
-              AND cpf.isActive = 1
-              AND cpf.globalInventoryAvailable > 0
-        )
     )";
-    $bindTypes .= str_repeat('i', count($selectedColors) * 2);
-    foreach ($selectedColors as $colorId) {
-        $bindValues[] = $colorId;
-    }
+    $bindTypes .= str_repeat('i', count($selectedColors));
     foreach ($selectedColors as $colorId) {
         $bindValues[] = $colorId;
     }
@@ -785,7 +768,17 @@ if ($revRes) {
 }
 
 $colorPhotosByProduct = [];
-$cpRes = $conn->query("SELECT productID, photoPath FROM product_color_photos ORDER BY productID, sortOrder ASC");
+$cpRes = $conn->query("
+    SELECT pcp.productID, pcp.photoPath
+    FROM product_color_photos pcp
+    JOIN products p ON p.productID = pcp.productID
+    LEFT JOIN yarn_types fallback_yt
+      ON LOWER(TRIM(fallback_yt.typeName)) = LOWER(TRIM(COALESCE(p.materialType, '')))
+    JOIN color_yarn_types cyt
+      ON cyt.colorID = pcp.colorID
+     AND cyt.typeID = COALESCE(NULLIF(p.yarnTypeID, 0), fallback_yt.typeID)
+    ORDER BY pcp.productID, pcp.sortOrder ASC
+");
 if ($cpRes) {
     while ($row = $cpRes->fetch_assoc()) {
         $path = app_image_prefer_optimized_asset_path((string)($row['photoPath'] ?? ''));
@@ -800,6 +793,13 @@ $vpRes = $conn->query("
     SELECT pv.productID, pvp.photoPath
     FROM product_variation_photos pvp
     JOIN product_variations pv ON pv.variationID = pvp.variationID
+    JOIN products p ON p.productID = pv.productID
+    LEFT JOIN yarn_types fallback_yt
+      ON LOWER(TRIM(fallback_yt.typeName)) = LOWER(TRIM(COALESCE(p.materialType, '')))
+    LEFT JOIN color_yarn_types cyt
+      ON cyt.colorID = pv.colorID
+     AND cyt.typeID = COALESCE(NULLIF(p.yarnTypeID, 0), fallback_yt.typeID)
+    WHERE pv.colorID IS NULL OR cyt.colorID IS NOT NULL
     ORDER BY pv.productID ASC, pvp.sortOrder ASC, pvp.variationPhotoID ASC
 ");
 if ($vpRes) {
@@ -1149,8 +1149,8 @@ foreach ($products as $p) {
                         <?php foreach ($products as $productIndex => $p):
                             $pid       = (int)$p['productID'];
                             $inWishlist = in_array($pid, $wishlistedIDs, true);
-                            $isOutStock = ((string)$p['cartStatus'] === 'out_of_stock') || ((int)$p['inventory'] <= 0 && (string)$p['cartStatus'] !== 'made_to_order');
-                            $isLowStock = ((string)$p['cartStatus'] === 'low_stock') || (!$isOutStock && (int)$p['inventory'] > 0 && (int)$p['inventory'] <= 3);
+                            $isOutStock = false;
+                            $isLowStock = false;
                             $imageIDs   = !empty($p['imageIDs']) ? array_map('intval', explode(',', $p['imageIDs'])) : [];
                             $colorPaths = $colorPhotosByProduct[$pid] ?? [];
                             $variationPaths = $variationPhotosByProduct[$pid] ?? [];
@@ -1255,15 +1255,7 @@ foreach ($products as $p) {
                                             &euro;<?= number_format($displayMinPrice, 2) ?>
                                         <?php endif; ?>
                                     </span>
-                                    <?php if ($p['cartStatus'] === 'made_to_order'): ?>
-                                        <span class="shop-stock" style="color:#a066f0;" data-translate="madeToOrder">Made to Order</span>
-                                    <?php elseif ($isOutStock): ?>
-                                        <span class="shop-stock out" data-translate="outOfStock">Out of Stock</span>
-                                    <?php elseif ($isLowStock): ?>
-                                        <span class="shop-stock" style="background:#fff7d1;color:#9a6b00;"<?= app_translate_text_attrs('Only ' . (int)$p['inventory'] . ' left', 'Μόνο ' . (int)$p['inventory'] . ' έμειναν') ?>>Only <?= (int)$p['inventory'] ?> left</span>
-                                    <?php else: ?>
-                                        <span class="shop-stock" data-translate="inStock">In Stock</span>
-                                    <?php endif; ?>
+                                    <span class="shop-stock" style="color:#a066f0;" data-translate="madeToOrder">Made to Order</span>
                                 </div>
                                 <div class="shop-rating">
                                     <?= $stars ?>

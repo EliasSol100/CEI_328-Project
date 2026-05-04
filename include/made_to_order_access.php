@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/product_option_helpers.php';
 
 if (!function_exists('ensureMadeToOrderProductSchema')) {
     function ensureMadeToOrderProductSchema(mysqli $conn): void
@@ -131,6 +132,9 @@ if (!function_exists('grantMadeToOrderAccessFromLink')) {
         if (!$row || (string)($row['cartStatus'] ?? '') !== 'made_to_order') {
             return ['ok' => false, 'reason' => 'not_found'];
         }
+        if (!app_product_is_private_made_to_order_row($row)) {
+            return ['ok' => false, 'reason' => 'not_private'];
+        }
 
         $expectedToken = trim((string)($row['privateAccessToken'] ?? ''));
         if ($expectedToken === '' || !hash_equals($expectedToken, $token)) {
@@ -214,6 +218,10 @@ if (!function_exists('isMadeToOrderProductAccessible')) {
         }
 
         if ((string)($row['cartStatus'] ?? '') !== 'made_to_order') {
+            return true;
+        }
+
+        if (!app_product_is_private_made_to_order_row($row)) {
             return true;
         }
 

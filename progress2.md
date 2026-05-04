@@ -62,18 +62,15 @@
 - Το size pricing υποστηρίζει custom labels όπως `XLarge`, `2XL`, `Crib Blanket (150x110cm)` κτλ.
 - Το `product.php` ενημερώνει το visible price όταν ο customer επιλέγει size.
 - Το `cart_api.php` εφαρμόζει server-side το σωστό price per selected size, ώστε να μην γίνεται bypass από frontend.
-- Το `Product Management` δεν χρειάζεται πλέον manual `Availability` dropdown.
-- Το product status υπολογίζεται αυτόματα από stock:
-  - stock πάνω από 3 -> `active` / in stock,
-  - stock 1 έως 3 -> `low_stock`,
-  - stock 0 -> `out_of_stock`,
-  - `made_to_order` και `discontinued` μένουν ειδικά statuses όπου χρειάζεται.
-- Το current stock μπορεί να αλλάξει από `Product Management` και από `Product Page & Stock`.
-- Το stock sync γίνεται και προς τις δύο κατευθύνσεις.
+- Το `Product Management` δεν χρειάζεται πλέον manual `Availability` dropdown ή product stock workflow.
+- Κάθε public catalog product λειτουργεί ως public made-to-order product.
+- Ο admin επιλέγει dynamic `Yarn Type` για κάθε product από τα yarn types που υπάρχουν στο system.
+- Το επιλεγμένο yarn type αποθηκεύεται στο `products.yarnTypeID` και κρατά sync το legacy `materialType` για compatibility.
+- Το product stock κρατιέται μόνο ως legacy/reference data και δεν επηρεάζει πλέον shop/cart/checkout για public catalog products.
+- Τα private custom-order products συνεχίζουν να χρησιμοποιούν private email/token/access behaviour και δεν εμφανίζονται public χωρίς σωστή πρόσβαση.
 - Το `Stock & Availability` μετονομάστηκε σε `Product Page & Stock`, γιατί πλέον περιέχει stock αλλά και product page setup.
 - Στο `Product Page & Stock` τα boxes μπήκαν σε tabs/categories:
-  - `Product Stock`
-  - `Assign Colours`
+  - `Product Sales`
   - `Colour Photos`
   - `Multi-Colour`
   - `Add Colour`
@@ -81,13 +78,16 @@
 
 ## Stock, sales και availability
 
-- Το `Product Stock` tab κρατά μόνο τα απαραίτητα editable fields: current stock και current sales.
-- Αφαιρέθηκαν τα manual status dropdowns από stock management, επειδή το status βγαίνει αυτόματα από quantity.
+- Το `Product Sales` tab κρατά μόνο το current sales workflow.
+- Το stock quantity δεν είναι πλέον editable workflow για products, επειδή τα public products είναι made-to-order.
+- Αφαιρέθηκαν τα manual status dropdowns από stock management.
 - Το current sales είναι automated από successful checkout.
 - Αν γίνει private/IRL payment, ο admin μπορεί να βάλει manual sales baseline και μετά το website συνεχίζει να μετρά αυτόματα από εκείνο το σημείο.
 - Υπάρχει warning όταν ο admin προσπαθεί να μειώσει sales count, επειδή είναι suspicious action.
 - Υπάρχει endpoint που δίνει JSON current sales per product και το admin panel κάνει refresh ανά 30 seconds.
 - Όταν checkout ολοκληρώνεται, αυξάνονται τα sales για κάθε product στο cart.
+- Το `Colour Inventory` έχει πλέον required yarn type filter: ο admin επιλέγει πρώτα yarn type και μετά βλέπει μόνο τα colours αυτού του yarn type.
+- Το global colour availability (`isActive` και `globalInventoryAvailable`) παραμένει η πηγή αλήθειας για το red diagonal/out-of-stock behaviour στο storefront.
 
 ## Yarn colours και product colours
 
@@ -99,23 +99,29 @@
 - Το `Puffy Color` συγχωνεύτηκε πρακτικά μέσα στο `Puffy`, ώστε να μην υπάρχει διπλή category.
 - Τα yarn colour images κατέβηκαν/στήθηκαν ως WebP assets από τα Alize colour sources.
 - Το `Add Colour` συνεχίζει να δουλεύει και κάθε uploaded colour photo μετατρέπεται σε WebP.
+- Το `Add Colour` δεν ζητά πλέον display code από τον admin. Το internal colour ID παραμένει το βασικό admin reference.
 - Το `Colour Inventory` δείχνει stock και active/inactive status για κάθε yarn colour.
-- Το `Assign Colours` έγινε switch/toggle based, ώστε ο admin να μπορεί εύκολα να κάνει assigned/unassigned και available/unavailable ανά product.
-- Αν ένα colour είναι assigned αλλά unavailable για συγκεκριμένο product, εμφανίζεται στο product page με unavailable/red line behaviour.
-- Αν ένα colour έχει global stock 0, θεωρείται out of stock στο shop ακόμα και αν είναι assigned.
-- Τα product colour photos είναι synced με τα assigned colours.
+- Το `Assign Colours` αφαιρέθηκε από το admin workflow.
+- Η νέα λογική είναι: product -> `yarnTypeID` -> όλα τα colours που υπάρχουν στο `color_yarn_types` για αυτό το yarn type.
+- Δεν υπάρχει πλέον manual product-colour assignment ή manual αφαίρεση colour ανά product.
+- Αν ένα colour γίνει unavailable ή stock 0 στο `Colour Inventory`, εμφανίζεται στο product page με unavailable/red line behaviour και μπλοκάρεται από add-to-cart.
+- Τα product colour photos είναι product-specific decoration πάνω στα colours του product yarn type. Δεν δημιουργούν πλέον colour eligibility από μόνα τους.
 - Τα product colour photos και multi-colour diagrams μετατρέπονται σε WebP κατά το upload.
 - Στο shop/product page τα colour labels πλέον δείχνουν πραγματικό colour name αντί για yarn type ή numeric code.
 - Παράδειγμα: `Baby Blue 218` με display code `218` εμφανίζεται στον customer ως `Baby Blue`.
-- Το yarn type και το numeric display code κρατιούνται για admin reference σε `Assign Colours`, `Colour Inventory`, `Colour Photos` και `Multi-Colour`.
-- Τα admin dropdowns για `Colour Photos` δείχνουν label τύπου `Velvet - Baby Blue (Code 218)`, ώστε να ξεχωρίζουν ίδια colour names σε διαφορετικά yarn types.
-- Το `Multi-Colour` tab δείχνει summary με τα assigned colours του product με yarn type, colour name και code.
-- Το `Multi-Colour` πλέον επιτρέπει enable μόνο όταν το product έχει τουλάχιστον 2 available assigned colours.
-- Αν ο admin επιλέξει 3 colours αλλά υπάρχουν μόνο 2 available assigned colours, το option μπλοκάρεται και εμφανίζεται warning.
+- Το yarn type και το internal colour ID κρατιούνται για admin reference σε `Colour Inventory`, `Colour Photos` και `Multi-Colour`.
+- Τα admin dropdowns για `Colour Photos` και `Multi-Colour` φορτώνουν μόνο colours από το yarn type του selected product.
+- Το `Multi-Colour` tab δείχνει summary με τα yarn type colours του product.
+- Το `Multi-Colour` πλέον επιτρέπει enable μόνο όταν το product έχει τουλάχιστον 2 available colours στο selected yarn type.
+- Αν ο admin επιλέξει 3 colours αλλά υπάρχουν μόνο 2 available colours στο selected yarn type, το option μπλοκάρεται και εμφανίζεται warning.
 - Το server-side save του `Multi-Colour` κάνει το ίδιο validation, ώστε να μη δημιουργηθεί broken customer flow αν γίνει bypass από frontend.
 - Το public `product.php` κρύβει το multi-colour selector αν αργότερα δεν υπάρχουν αρκετά available colours για τον αποθηκευμένο αριθμό επιλογών.
 - Το `colors.colorName` δεν είναι πλέον unique, επειδή φυσιολογικά το ίδιο colour name μπορεί να υπάρχει σε Baby Anti Pilling, Cotton, Puffy και Velvet.
 - Για νέα colours που προστίθενται από `Add Colour`, ο admin γράφει πραγματικό `Colour Name` όπως `Baby Blue`, επιλέγει ξεχωριστά `Yarn Type`, και το shop εμφανίζει το clean colour name.
+- Στο public product page προστέθηκε selected-colours summary table για multi-colour dropdowns όταν υπάρχουν αρκετές επιλογές.
+- Κάθε αλλαγή σε multi-colour dropdown ανοίγει preview popup με product/dashboard colour photo πρώτα και swatch fallback αν δεν υπάρχει photo.
+- Διορθώθηκε το mojibake text τύπου `â€”` στο Product Management yarn type dropdown.
+- Το shop/product/cart validation φιλτράρει πλέον legacy colour photos/variations ώστε να εμφανίζονται και να αγοράζονται μόνο colours που υπάρχουν στο colour inventory για το product yarn type.
 
 ## Images και WebP
 

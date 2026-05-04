@@ -382,12 +382,14 @@ function placeOrder(mysqli $conn, array $input): array {
     }
     if (!empty($productIds)) {
         $idsSql = implode(',', array_map('intval', array_keys($productIds)));
-        $metaRes = $conn->query("SELECT productID, nameEN, cartStatus FROM products WHERE productID IN ({$idsSql})");
+        $metaRes = $conn->query("SELECT productID, nameEN, cartStatus, privateCustomerEmail, privateAccessToken FROM products WHERE productID IN ({$idsSql})");
         if ($metaRes) {
             while ($metaRow = $metaRes->fetch_assoc()) {
                 $productMetaMap[(int)$metaRow['productID']] = [
                     'name' => trim((string)($metaRow['nameEN'] ?? 'Product')),
                     'status' => trim((string)($metaRow['cartStatus'] ?? '')),
+                    'privateCustomerEmail' => trim((string)($metaRow['privateCustomerEmail'] ?? '')),
+                    'privateAccessToken' => trim((string)($metaRow['privateAccessToken'] ?? '')),
                 ];
             }
         }
@@ -444,7 +446,11 @@ function placeOrder(mysqli $conn, array $input): array {
         }
 
         $meta = $productMetaMap[$productID] ?? null;
-        if ($meta && strtolower((string)$meta['status']) === 'made_to_order') {
+        if ($meta && app_product_is_private_made_to_order_row([
+            'cartStatus' => (string)$meta['status'],
+            'privateCustomerEmail' => (string)($meta['privateCustomerEmail'] ?? ''),
+            'privateAccessToken' => (string)($meta['privateAccessToken'] ?? ''),
+        ])) {
             $madeToOrderItems[] = [
                 'product_id' => $productID,
                 'product_name' => (string)$meta['name'],
