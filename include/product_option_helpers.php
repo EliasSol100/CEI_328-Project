@@ -30,9 +30,34 @@ if (!function_exists('app_product_options_index_exists')) {
         }
 
         $safeIndex = mysqli_real_escape_string($conn, $indexName);
-        $safeTable = str_replace('`', '``', $tableName);
-        $res = mysqli_query($conn, "SHOW INDEX FROM `{$safeTable}` WHERE Key_name = '{$safeIndex}'");
+        $safeTable = mysqli_real_escape_string($conn, $tableName);
+        $res = mysqli_query(
+            $conn,
+            "SELECT 1
+             FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = '{$safeTable}'
+               AND INDEX_NAME = '{$safeIndex}'
+             LIMIT 1"
+        );
         return (bool)($res && mysqli_num_rows($res) > 0);
+    }
+}
+
+if (!function_exists('app_product_options_add_index_if_missing')) {
+    function app_product_options_add_index_if_missing(mysqli $conn, string $tableName, string $indexName, string $sql): void
+    {
+        if (app_product_options_index_exists($conn, $tableName, $indexName)) {
+            return;
+        }
+
+        try {
+            mysqli_query($conn, $sql);
+        } catch (mysqli_sql_exception $e) {
+            if (stripos($e->getMessage(), 'Duplicate key name') === false) {
+                throw $e;
+            }
+        }
     }
 }
 
@@ -93,7 +118,12 @@ if (!function_exists('app_product_options_ensure_schema')) {
             if (app_product_options_column_exists($conn, 'products', 'yarnTypeID')
                 && !app_product_options_index_exists($conn, 'products', 'idx_products_yarnTypeID')
             ) {
-                mysqli_query($conn, "ALTER TABLE products ADD KEY idx_products_yarnTypeID (yarnTypeID)");
+                app_product_options_add_index_if_missing(
+                    $conn,
+                    'products',
+                    'idx_products_yarnTypeID',
+                    "ALTER TABLE products ADD KEY idx_products_yarnTypeID (yarnTypeID)"
+                );
             }
 
             mysqli_query(
