@@ -291,12 +291,22 @@ body.account-page .footer {
     gap: 30px;
 }
 
+.selling-fast .products-grid {
+    align-items: stretch;
+}
+
 .product-card {
     background-color: var(--white);
     border-radius: 16px;
     overflow: hidden;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     transition: transform 0.3s, box-shadow 0.3s;
+}
+
+.selling-fast-card {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
 }
 
 .product-card:hover {
@@ -448,11 +458,32 @@ body.account-page .footer {
     padding: 20px;
 }
 
+.selling-fast-card .product-info {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 178px;
+}
+
 .product-name {
     font-size: 18px;
     font-weight: 600;
     color: var(--text-dark);
     margin-bottom: 10px;
+}
+
+.selling-fast-card .product-name {
+    display: -webkit-box;
+    min-height: 46px;
+    margin-bottom: 10px;
+    overflow: hidden;
+    line-height: 1.28;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.selling-fast-card .product-title-link {
+    display: inline;
 }
 
 .product-price {
@@ -462,11 +493,21 @@ body.account-page .footer {
     margin-bottom: 10px;
 }
 
+.selling-fast-card .product-price {
+    min-height: 30px;
+    margin-bottom: 10px;
+    line-height: 1.3;
+}
+
 .product-rating {
     display: flex;
     align-items: center;
     gap: 8px;
     margin-bottom: 12px;
+}
+
+.selling-fast-card .product-rating {
+    min-height: 22px;
 }
 
 .stars {
@@ -505,8 +546,13 @@ body.account-page .footer {
 }
 
 .stock-badge-alt {
-    background: #ede9fe;
-    color: #6d28d9;
+    background: #dff7df;
+    color: #2c7a2c;
+}
+
+.selling-fast-card .stock-badge {
+    align-self: flex-start;
+    margin-top: auto;
 }
 
 .view-all-section {

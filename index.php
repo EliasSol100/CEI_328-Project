@@ -305,11 +305,9 @@ $homeHeroButtonUrl = app_website_content_safe_href((string)($homeHero['button_ur
                     $inWishlist = in_array($pid, $wishlistedProductIDs, true);
                     $imageIDs = !empty($product['imageIDs']) ? array_map('intval', explode(',', $product['imageIDs'])) : [];
                     $primaryImage = $imageIDs[0] ?? 0;
-                    $isOutStock = ((string)$product['cartStatus'] === 'out_of_stock') || ((int)$product['inventory'] <= 0 && (string)$product['cartStatus'] !== 'made_to_order');
-                    $isLowStock = ((string)$product['cartStatus'] === 'low_stock') || (!$isOutStock && (int)$product['inventory'] > 0 && (int)$product['inventory'] <= 3);
                     $filledStars = (int)round((float)$product['avgRating']);
                     ?>
-                    <article class="product-card">
+                    <article class="product-card selling-fast-card">
                         <div class="product-image-wrapper">
                             <span class="selling-fast-badge" data-translate="sellingFast">Selling Fast</span>
                             <?php if ($primaryImage > 0): ?>
@@ -350,15 +348,7 @@ $homeHeroButtonUrl = app_website_content_safe_href((string)($homeHero['button_ur
                                 </div>
                                 <span class="rating-count">(<?= (int)$product['reviewCount'] ?>)</span>
                             </div>
-                            <?php if ($product['cartStatus'] === 'made_to_order'): ?>
-                                <span class="stock-badge stock-badge-alt" data-translate="madeToOrder">Made to Order</span>
-                            <?php elseif ($isOutStock): ?>
-                                <span class="stock-badge stock-badge-out" data-translate="outOfStock">Out of Stock</span>
-                            <?php elseif ($isLowStock): ?>
-                                <span class="stock-badge stock-badge-low"<?= app_translate_text_attrs('Only ' . (int)$product['inventory'] . ' left', 'Μόνο ' . (int)$product['inventory'] . ' έμειναν') ?>>Only <?= (int)$product['inventory'] ?> left</span>
-                            <?php else: ?>
-                                <span class="stock-badge" data-translate="inStock">In Stock</span>
-                            <?php endif; ?>
+                            <span class="stock-badge stock-badge-alt" data-translate="madeToOrder">Made to Order</span>
                         </div>
                     </article>
                 <?php endforeach; ?>
@@ -381,8 +371,6 @@ $homeHeroButtonUrl = app_website_content_safe_href((string)($homeHero['button_ur
                     $inWishlist = in_array($pid, $wishlistedProductIDs, true);
                     $imageIDs = !empty($product['imageIDs']) ? array_map('intval', explode(',', $product['imageIDs'])) : [];
                     $primaryImage = $imageIDs[0] ?? 0;
-                    $isOutStock = ((string)$product['cartStatus'] === 'out_of_stock') || ((int)$product['inventory'] <= 0 && (string)$product['cartStatus'] !== 'made_to_order');
-                    $isLowStock = ((string)$product['cartStatus'] === 'low_stock') || (!$isOutStock && (int)$product['inventory'] > 0 && (int)$product['inventory'] <= 3);
                     $filledStars = (int)round((float)$product['avgRating']);
                     ?>
                     <article class="product-card">
@@ -425,15 +413,7 @@ $homeHeroButtonUrl = app_website_content_safe_href((string)($homeHero['button_ur
                                 </div>
                                 <span class="rating-count">(<?= (int)$product['reviewCount'] ?>)</span>
                             </div>
-                            <?php if ($product['cartStatus'] === 'made_to_order'): ?>
-                                <span class="stock-badge stock-badge-alt" data-translate="madeToOrder">Made to Order</span>
-                            <?php elseif ($isOutStock): ?>
-                                <span class="stock-badge stock-badge-out" data-translate="outOfStock">Out of Stock</span>
-                            <?php elseif ($isLowStock): ?>
-                                <span class="stock-badge stock-badge-low"<?= app_translate_text_attrs('Only ' . (int)$product['inventory'] . ' left', 'Μόνο ' . (int)$product['inventory'] . ' έμειναν') ?>>Only <?= (int)$product['inventory'] ?> left</span>
-                            <?php else: ?>
-                                <span class="stock-badge" data-translate="inStock">In Stock</span>
-                            <?php endif; ?>
+                            <span class="stock-badge stock-badge-alt" data-translate="madeToOrder">Made to Order</span>
                         </div>
                     </article>
                 <?php endforeach; ?>
