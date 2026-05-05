@@ -836,7 +836,7 @@ if (!function_exists('app_product_colours_for_product')) {
         }
 
         $colorDisplaySql = app_color_display_sql('c');
-        $availabilitySql = $availableOnly ? " AND c.isActive = 1 AND c.globalInventoryAvailable > 0" : "";
+        $availabilitySql = $availableOnly ? " AND c.isActive = 1" : "";
         $stmt = mysqli_prepare(
             $conn,
             "SELECT
@@ -892,7 +892,7 @@ if (!function_exists('app_product_colours_for_product')) {
                 'stock' => (int)($row['globalInventoryAvailable'] ?? 0),
                 'globalInventoryAvailable' => (int)($row['globalInventoryAvailable'] ?? 0),
                 'isActive' => (int)($row['isActive'] ?? 0),
-                'available' => ((int)($row['isActive'] ?? 0) === 1 && (int)($row['globalInventoryAvailable'] ?? 0) > 0) ? 1 : 0,
+                'available' => ((int)($row['isActive'] ?? 0) === 1) ? 1 : 0,
                 'typeId' => (int)($row['typeID'] ?? 0),
                 'typeID' => (int)($row['typeID'] ?? 0),
                 'typeName' => (string)($row['typeName'] ?? ''),

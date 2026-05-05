@@ -977,7 +977,7 @@ foreach ($uniqueColors as $catalogColor) {
         'name' => (string)($catalogColor['name'] ?? ('Color ' . $catalogColorId)),
         'hex' => (string)($catalogColor['hex'] ?? '#ece6f6'),
         'typeName' => (string)($catalogColor['typeName'] ?? $product['materialType'] ?? 'General'),
-        'available' => (int)($catalogColor['isActive'] ?? 0) === 1 && (int)($catalogColor['stock'] ?? 0) > 0,
+        'available' => (int)($catalogColor['isActive'] ?? 0) === 1,
         'stock' => (int)($catalogColor['stock'] ?? 0),
         'photoPath' => trim((string)($catalogColor['photoPath'] ?? '')),
     ];
@@ -1339,8 +1339,7 @@ include __DIR__ . "/include/header.php";
                     <?php foreach ($colorsByYarnType as $typeName => $typeColors): ?>
                         <?php foreach ($typeColors as $color):
                             $chipPhoto    = app_image_prefer_optimized_asset_path((string)($color['photoPath'] ?? ''));
-                            $chipStock    = (int)($color['stock'] ?? 0);
-                            $chipIsAvailable = (int)($color['isActive'] ?? 1) === 1 && $chipStock > 0;
+                            $chipIsAvailable = (int)($color['isActive'] ?? 1) === 1;
                         ?>
                         <?php $chipPhotoUrl = $chipPhoto !== '' ? app_image_asset_url($chipPhoto) : ''; ?>
                         <button type="button"
@@ -1886,8 +1885,8 @@ include __DIR__ . "/include/header.php";
         inStock: "In stock",
         outOfStock: "Out of stock",
         madeToOrder: "Made to order",
-        productSelectedColorOutOfStock: "This colour is currently out of stock.",
-        productSelectedVariationOutOfStock: "This selection is currently out of stock.",
+        productSelectedColorOutOfStock: "This colour is currently unavailable.",
+        productSelectedVariationOutOfStock: "This selection is currently unavailable.",
         productCouponResponseError: "We could not read the server response.",
         productCouponNetworkError: "We could not validate the coupon right now.",
         productEnterCouponFirst: "Please enter a coupon code first.",

@@ -97,13 +97,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $flash = 'err:Product stock is no longer managed. Products are public made-to-order.';
     }
 
-    if ($action === 'update_color_stock') {
+    if ($action === 'update_color_status' || $action === 'update_color_stock') {
         $colorID  = (int)$_POST['colorID'];
-        $stock    = (int)$_POST['globalInventoryAvailable'];
         $isActive = (int)$_POST['isActive'];
+        $legacyAvailabilityValue = $isActive ? 1 : 0;
 
-        $stmt = mysqli_prepare($conn, "UPDATE colors SET globalInventoryAvailable=?, isActive=? WHERE colorID=?");
-        mysqli_stmt_bind_param($stmt, 'iii', $stock, $isActive, $colorID);
+        $stmt = mysqli_prepare($conn, "UPDATE colors SET isActive=?, globalInventoryAvailable=? WHERE colorID=?");
+        mysqli_stmt_bind_param($stmt, 'iii', $isActive, $legacyAvailabilityValue, $colorID);
         mysqli_stmt_execute($stmt);
 
         if (!empty($_FILES['yarn_photo']) && $_FILES['yarn_photo']['error'] === UPLOAD_ERR_OK) {
@@ -237,7 +237,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $colorName   = trim($_POST['colorName'] ?? '');
         $typeIDRaw   = $_POST['typeID'] ?? '';
         $newTypeName = trim($_POST['newTypeName'] ?? '');
-        $stock       = max(0, (int)($_POST['globalInventoryAvailable'] ?? 50));
 
         $errors = [];
         if (!$colorID)   $errors[] = 'Color ID is required.';
@@ -272,13 +271,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $stmt = mysqli_prepare($conn,
                 "INSERT INTO colors (colorID, colorName, displayCode, hexCode, globalInventoryAvailable, isActive)
-                 VALUES (?, ?, ?, ?, ?, 1)
+                 VALUES (?, ?, ?, ?, 1, 1)
                  ON DUPLICATE KEY UPDATE
                     colorName = VALUES(colorName),
                     displayCode = VALUES(displayCode),
-                    hexCode = VALUES(hexCode),
-                    globalInventoryAvailable = VALUES(globalInventoryAvailable)");
-            mysqli_stmt_bind_param($stmt, 'isssi', $colorID, $colorNameForDb, $displayCodeForDb, $hexCode, $stock);
+                    hexCode = VALUES(hexCode)");
+            mysqli_stmt_bind_param($stmt, 'isss', $colorID, $colorNameForDb, $displayCodeForDb, $hexCode);
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
 
@@ -420,7 +418,7 @@ if ($r) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Product Page &amp; Stock - Athena Admin</title>
+  <title>Product Page &amp; Colours - Athena Admin</title>
   <link rel="stylesheet" href="assets/admin.css?v=<?= (int)@filemtime(__DIR__ . '/assets/admin.css') ?>">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
@@ -441,8 +439,8 @@ if ($r) {
   <main class="admin-main">
     <div class="content-header">
       <div class="content-header-left">
-        <h1>Product Page &amp; Stock</h1>
-        <p>Manage product stock, colour availability, and product page setup.</p>
+        <h1>Product Page &amp; Colours</h1>
+        <p>Manage colour availability, colour photos, and product page setup.</p>
       </div>
     </div>
 
@@ -475,7 +473,7 @@ if ($r) {
       <div class="card">
         <div class="card-title">Product Sales</div>
         <p class="text-sm text-muted mb-4">
-          Products are public made-to-order. Stock is no longer edited here; keep current sales accurate for storefront social proof.
+          Products are public made-to-order. Keep current sales accurate for storefront social proof.
         </p>
         <table class="data-table stock-table">
           <thead>
@@ -708,7 +706,7 @@ if ($r) {
         <form method="POST" enctype="multipart/form-data" id="add-color-form">
           <input type="hidden" name="action" value="add_color">
           <input type="hidden" name="active_tab" value="add" data-active-tab-input="stock-availability">
-          <div style="display:grid;grid-template-columns:120px 1fr 1fr 90px;gap:12px;align-items:end;flex-wrap:wrap">
+          <div style="display:grid;grid-template-columns:120px 1fr 1fr;gap:12px;align-items:end;flex-wrap:wrap">
 
             <div>
               <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Internal ID *</label>
@@ -731,12 +729,6 @@ if ($r) {
                 <?php endforeach; ?>
                 <option value="new">+ Add New Type...</option>
               </select>
-            </div>
-
-            <div>
-              <label class="form-label" style="display:block;margin-bottom:4px;font-size:13px;font-weight:600">Stock</label>
-              <input type="number" name="globalInventoryAvailable" value="50" min="0"
-                class="form-input" style="width:100%">
             </div>
 
           </div>
@@ -790,7 +782,7 @@ if ($r) {
           </div>
         </div>
         <p class="text-sm text-muted mb-4">
-          Select a yarn type first, then mark colours available or unavailable. Unavailable or zero-stock colours keep showing on product pages with the red diagonal line.
+          Select a yarn type first, then mark colours available or unavailable. Unavailable colours keep showing on product pages with the red diagonal line.
         </p>
         <table class="data-table">
           <thead>
@@ -799,10 +791,8 @@ if ($r) {
               <th style="width:90px">Internal ID</th>
               <th>Colour / Code</th>
               <th>Category</th>
-              <th style="width:100px">Stock</th>
               <th style="width:110px">Status</th>
-              <th style="width:120px">Quick Save</th>
-              <th style="width:60px"></th>
+              <th style="width:120px">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -822,34 +812,12 @@ if ($r) {
                 <?= htmlspecialchars($c['displayName'] ?? $c['colorName']) ?>
               </td>
               <td class="text-muted" style="font-size:12px"><?= htmlspecialchars($c['typeNames'] ?? '—') ?></td>
-              <td><?= (int)$c['globalInventoryAvailable'] ?></td>
               <td>
                 <?php if ($c['isActive']): ?>
                   <span class="badge badge-green">Available</span>
                 <?php else: ?>
                   <span class="badge badge-red">Unavailable</span>
                 <?php endif; ?>
-              </td>
-              <td>
-                <form method="POST" style="display:flex;gap:6px;align-items:center" data-ignore-unsaved-warning data-stock-warning>
-                  <input type="hidden" name="action"  value="update_color_stock">
-                  <input type="hidden" name="active_tab" value="inventory" data-active-tab-input="stock-availability">
-                  <input type="hidden" name="inventory_type_id" value="<?= (int)$selectedInventoryTypeID ?>">
-                  <input type="hidden" name="colorID" value="<?= $c['colorID'] ?>">
-                  <?php foreach ($c['typeIDsArray'] as $tid): ?>
-                  <input type="hidden" name="typeIDs[]" value="<?= (int)$tid ?>">
-                  <?php endforeach; ?>
-                  <input type="number" name="globalInventoryAvailable"
-                    value="<?= (int)$c['globalInventoryAvailable'] ?>" min="0"
-                    class="form-input" style="width:70px;padding:5px 7px">
-                  <select name="isActive" class="form-input" style="width:110px;padding:5px 7px">
-                    <option value="1" <?= $c['isActive'] ? 'selected' : '' ?>>Available</option>
-                    <option value="0" <?= !$c['isActive'] ? 'selected' : '' ?>>Unavailable</option>
-                  </select>
-                  <button type="submit" class="btn-primary" style="padding:5px 10px;font-size:12px">
-                    <i class="fas fa-save"></i>
-                  </button>
-                </form>
               </td>
               <td style="text-align:center">
                 <div style="display:flex;gap:6px;justify-content:center;align-items:center">
@@ -858,7 +826,6 @@ if ($r) {
                     data-color-id="<?= (int)$c['colorID'] ?>"
                     data-color-name="<?= htmlspecialchars($c['displayName'] ?? $c['colorName'], ENT_QUOTES) ?>"
                     data-hex="<?= htmlspecialchars($swatchHex, ENT_QUOTES) ?>"
-                    data-stock="<?= (int)$c['globalInventoryAvailable'] ?>"
                     data-active="<?= (int)$c['isActive'] ?>"
                     data-type-ids="<?= htmlspecialchars(json_encode($c['typeIDsArray']), ENT_QUOTES) ?>"
                     title="Edit colour details">
@@ -897,17 +864,12 @@ if ($r) {
           </div>
 
           <form method="POST" enctype="multipart/form-data" id="colour-edit-form">
-            <input type="hidden" name="action" value="update_color_stock">
+            <input type="hidden" name="action" value="update_color_status">
             <input type="hidden" name="active_tab" value="inventory" data-active-tab-input="stock-availability">
             <input type="hidden" name="inventory_type_id" value="<?= (int)$selectedInventoryTypeID ?>">
             <input type="hidden" name="colorID" id="modal-input-id">
 
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
-              <div>
-                <label style="display:block;font-size:13px;font-weight:600;margin-bottom:5px">Stock (units)</label>
-                <input type="number" name="globalInventoryAvailable" id="modal-input-stock"
-                  min="0" class="form-input" style="width:100%">
-              </div>
+            <div style="display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:16px">
               <div>
                 <label style="display:block;font-size:13px;font-weight:600;margin-bottom:5px">Status</label>
                 <select name="isActive" id="modal-input-active" class="form-input" style="width:100%">
@@ -1176,7 +1138,7 @@ function mcsSyncColourControls(pid) {
   if (!pid) {
     mcsSetWarning('');
   } else if (!canEnable) {
-    mcsSetWarning('This product yarn type needs at least 2 available colours before enabling multi-colour selection. Unavailable or out-of-stock colours cannot be used by customers.');
+    mcsSetWarning('This product yarn type needs at least 2 available colours before enabling multi-colour selection. Unavailable colours cannot be used by customers.');
   } else {
     mcsSetWarning('');
   }
@@ -1529,14 +1491,12 @@ document.addEventListener('DOMContentLoaded', function () {
     var colorId   = btn.dataset.colorId;
     var colorName = btn.dataset.colorName;
     var hex       = btn.dataset.hex || '#ece6f6';
-    var stock     = btn.dataset.stock;
     var active    = btn.dataset.active;
     var typeIds   = JSON.parse(btn.dataset.typeIds || '[]');
 
     document.getElementById('modal-color-name').textContent = colorName;
     document.getElementById('modal-color-id').textContent   = colorId;
     document.getElementById('modal-input-id').value         = colorId;
-    document.getElementById('modal-input-stock').value      = stock;
     document.getElementById('modal-input-active').value     = active;
     modalSwatch.style.background = hex;
 

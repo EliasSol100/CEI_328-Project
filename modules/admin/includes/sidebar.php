@@ -6,7 +6,7 @@ $current_page = $current_page ?? '';
 $nav = [
     ['id' => 'dashboard',              'label' => 'Dashboard',              'icon' => 'fa-th-large',       'file' => 'dashboard.php'],
     ['id' => 'product_management',     'label' => 'Product Management',     'icon' => 'fa-box',            'file' => 'product_management.php'],
-    ['id' => 'stock_availability',     'label' => 'Product Page & Stock',   'icon' => 'fa-layer-group',    'file' => 'stock_availability.php'],
+    ['id' => 'stock_availability',     'label' => 'Product Page & Colours', 'icon' => 'fa-layer-group',    'file' => 'stock_availability.php'],
 
     ['id' => 'customer_management',    'label' => 'Customer Management',    'icon' => 'fa-user',           'file' => 'customer_management.php'],
     ['id' => 'order_management',       'label' => 'Order Management',       'icon' => 'fa-shopping-cart',  'file' => 'order_management.php'],
