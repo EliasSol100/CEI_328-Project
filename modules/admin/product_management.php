@@ -521,6 +521,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $flash = 'ok:Product updated successfully.';
             }
         }
+
+        app_product_options_sync_colour_inventory_refs($conn);
     }
 
     if ($action === 'delete_photo') {

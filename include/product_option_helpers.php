@@ -82,6 +82,116 @@ if (!function_exists('app_product_sync_stock_statuses')) {
     }
 }
 
+if (!function_exists('app_product_options_sync_colour_inventory_refs')) {
+    function app_product_options_sync_colour_inventory_refs(mysqli $conn): void
+    {
+        if (!app_product_options_table_exists($conn, 'products')
+            || !app_product_options_table_exists($conn, 'color_yarn_types')
+        ) {
+            return;
+        }
+
+        $productTypeJoin = "
+            JOIN products p ON p.productID = %s
+            LEFT JOIN yarn_types fallback_yt
+              ON LOWER(TRIM(fallback_yt.typeName)) = LOWER(TRIM(COALESCE(p.materialType, '')))
+            LEFT JOIN color_yarn_types valid_cyt
+              ON valid_cyt.colorID = %s
+             AND valid_cyt.typeID = COALESCE(NULLIF(p.yarnTypeID, 0), fallback_yt.typeID)
+        ";
+
+        if (app_product_options_table_exists($conn, 'product_color_photos')) {
+            mysqli_query(
+                $conn,
+                "DELETE pcp
+                 FROM product_color_photos pcp
+                 " . sprintf($productTypeJoin, 'pcp.productID', 'pcp.colorID') . "
+                 WHERE valid_cyt.colorID IS NULL"
+            );
+        }
+
+        if (app_product_options_table_exists($conn, 'product_color_availability')) {
+            mysqli_query(
+                $conn,
+                "DELETE pca
+                 FROM product_color_availability pca
+                 " . sprintf($productTypeJoin, 'pca.productID', 'pca.colorID') . "
+                 WHERE valid_cyt.colorID IS NULL"
+            );
+        }
+
+        if (!app_product_options_table_exists($conn, 'product_variations')) {
+            return;
+        }
+
+        $variationInvalidJoin = "
+            JOIN product_variations pv ON pv.variationID = %s
+            JOIN products p ON p.productID = pv.productID
+            LEFT JOIN yarn_types fallback_yt
+              ON LOWER(TRIM(fallback_yt.typeName)) = LOWER(TRIM(COALESCE(p.materialType, '')))
+            LEFT JOIN color_yarn_types valid_cyt
+              ON valid_cyt.colorID = pv.colorID
+             AND valid_cyt.typeID = COALESCE(NULLIF(p.yarnTypeID, 0), fallback_yt.typeID)
+        ";
+
+        if (app_product_options_table_exists($conn, 'product_variation_photos')) {
+            mysqli_query(
+                $conn,
+                "DELETE pvp
+                 FROM product_variation_photos pvp
+                 " . sprintf($variationInvalidJoin, 'pvp.variationID') . "
+                 WHERE pv.colorID IS NOT NULL
+                   AND valid_cyt.colorID IS NULL"
+            );
+        }
+
+        if (app_product_options_table_exists($conn, 'variation_stock')) {
+            mysqli_query(
+                $conn,
+                "DELETE vs
+                 FROM variation_stock vs
+                 " . sprintf($variationInvalidJoin, 'vs.variationID') . "
+                 WHERE pv.colorID IS NOT NULL
+                   AND valid_cyt.colorID IS NULL
+                   AND (pv.size IS NULL OR TRIM(pv.size) = '')
+                   AND (pv.yarnType IS NULL OR TRIM(pv.yarnType) = '')
+                   AND pv.price IS NULL"
+            );
+        }
+
+        mysqli_query(
+            $conn,
+            "DELETE pv
+             FROM product_variations pv
+             JOIN products p ON p.productID = pv.productID
+             LEFT JOIN yarn_types fallback_yt
+               ON LOWER(TRIM(fallback_yt.typeName)) = LOWER(TRIM(COALESCE(p.materialType, '')))
+             LEFT JOIN color_yarn_types valid_cyt
+               ON valid_cyt.colorID = pv.colorID
+              AND valid_cyt.typeID = COALESCE(NULLIF(p.yarnTypeID, 0), fallback_yt.typeID)
+             WHERE pv.colorID IS NOT NULL
+               AND valid_cyt.colorID IS NULL
+               AND (pv.size IS NULL OR TRIM(pv.size) = '')
+               AND (pv.yarnType IS NULL OR TRIM(pv.yarnType) = '')
+               AND pv.price IS NULL"
+        );
+
+        mysqli_query(
+            $conn,
+            "UPDATE product_variations pv
+             JOIN products p ON p.productID = pv.productID
+             LEFT JOIN yarn_types fallback_yt
+               ON LOWER(TRIM(fallback_yt.typeName)) = LOWER(TRIM(COALESCE(p.materialType, '')))
+             LEFT JOIN color_yarn_types valid_cyt
+               ON valid_cyt.colorID = pv.colorID
+              AND valid_cyt.typeID = COALESCE(NULLIF(p.yarnTypeID, 0), fallback_yt.typeID)
+             SET pv.colorID = NULL
+             WHERE pv.colorID IS NOT NULL
+               AND valid_cyt.colorID IS NULL"
+        );
+    }
+}
+
 if (!function_exists('app_product_options_ensure_schema')) {
     function app_product_options_ensure_schema(mysqli $conn): void
     {
@@ -436,6 +546,8 @@ if (!function_exists('app_product_options_ensure_schema')) {
         ) {
             mysqli_query($conn, "ALTER TABLE order_items ADD COLUMN customizationNote VARCHAR(255) NULL AFTER giftMessage");
         }
+
+        app_product_options_sync_colour_inventory_refs($conn);
     }
 }
 

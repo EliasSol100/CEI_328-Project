@@ -912,13 +912,6 @@ foreach ($products as $p) {
         height: 100%;
         object-fit: cover;
     }
-    @media (max-width: 640px) {
-        .shop-carousel .carousel-item img {
-            object-fit: contain;
-            object-position: center center;
-            background: #fcf8ff;
-        }
-    }
     .shop-carousel .carousel-control-prev,
     .shop-carousel .carousel-control-next {
         display: none;
@@ -960,23 +953,6 @@ foreach ($products as $p) {
             background: rgba(255,255,255,0.72);
             box-shadow: 0 1px 3px rgba(17,24,39,0.22);
         }
-    }
-    .shop-size-pills {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 5px;
-        margin: 8px 0 4px;
-    }
-    .shop-size-pill {
-        font-size: 11px;
-        font-weight: 500;
-        color: #6b5b8a;
-        background: #f3eeff;
-        border: 1px solid #ddd2f5;
-        border-radius: 20px;
-        padding: 2px 10px;
-        line-height: 1.6;
-        white-space: nowrap;
     }
     .filter-color-dot {
         display: inline-block;
@@ -1246,7 +1222,7 @@ foreach ($products as $p) {
                                 </form>
                             </div>
                             <div class="shop-product-info">
-                                <h3 class="shop-product-name" data-product-name data-name-en="<?= htmlspecialchars((string)$p['nameEN'], ENT_QUOTES, 'UTF-8') ?>" data-name-el="<?= htmlspecialchars((string)($p['nameGR'] ?: $p['nameEN']), ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($p['nameEN']) ?></h3>
+                                <h3 class="shop-product-name" title="<?= htmlspecialchars((string)$p['nameEN'], ENT_QUOTES, 'UTF-8') ?>" data-product-name data-name-en="<?= htmlspecialchars((string)$p['nameEN'], ENT_QUOTES, 'UTF-8') ?>" data-name-el="<?= htmlspecialchars((string)($p['nameGR'] ?: $p['nameEN']), ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($p['nameEN']) ?></h3>
                                 <div class="shop-price-row">
                                     <span class="shop-price">
                                         <?php if ($displayMaxPrice > $displayMinPrice): ?>
@@ -1255,23 +1231,54 @@ foreach ($products as $p) {
                                             &euro;<?= number_format($displayMinPrice, 2) ?>
                                         <?php endif; ?>
                                     </span>
-                                    <span class="shop-stock" style="color:#a066f0;" data-translate="madeToOrder">Made to Order</span>
                                 </div>
                                 <div class="shop-rating">
-                                    <?= $stars ?>
-                                    <span class="shop-review-count">(<?= $rev['cnt'] ?>)</span>
+                                    <span class="shop-review-summary">
+                                        <span class="shop-rating-stars"><?= $stars ?></span>
+                                        <span class="shop-review-count">(<?= $rev['cnt'] ?>)</span>
+                                    </span>
+                                    <span class="shop-made-to-order-badge" data-translate="madeToOrder">Made to Order</span>
                                 </div>
-                                <div class="shop-review-count" style="margin-top:4px;display:block;">
+                                <div class="shop-sold-count">
                                     <span<?= app_translate_text_attrs((int)($p['totalSales'] ?? 0) . ' sold', (int)($p['totalSales'] ?? 0) . ' πωλήθηκαν') ?>><?= (int)($p['totalSales'] ?? 0) ?> sold</span>
                                 </div>
-                                <?php $cardSizes = $sizesByProduct[$pid] ?? []; ?>
-                                <?php if (!empty($cardSizes)): ?>
-                                <div class="shop-size-pills">
-                                    <?php foreach ($cardSizes as $sz): ?>
+                                <?php
+                                    $cardSizes = $sizesByProduct[$pid] ?? [];
+                                    $sizePreviewLimit = 3;
+                                    foreach ($cardSizes as $cardSizeLabel) {
+                                        if (strlen((string)$cardSizeLabel) > 14) {
+                                            $sizePreviewLimit = 1;
+                                            break;
+                                        }
+                                    }
+                                    if (count($cardSizes) > 3) {
+                                        $sizePreviewLimit = min($sizePreviewLimit, 2);
+                                    }
+                                    $visibleCardSizes = array_slice($cardSizes, 0, $sizePreviewLimit);
+                                    $hiddenCardSizeCount = max(0, count($cardSizes) - count($visibleCardSizes));
+                                    $cardSizesTitle = implode(', ', array_map('strval', $cardSizes));
+                                    $sizePillClasses = ['shop-size-pills'];
+                                    if (empty($cardSizes)) {
+                                        $sizePillClasses[] = 'is-empty';
+                                    } elseif (count($cardSizes) === 1) {
+                                        $sizePillClasses[] = 'is-single';
+                                    } elseif ($hiddenCardSizeCount > 0 && $sizePreviewLimit === 1) {
+                                        $sizePillClasses[] = 'is-compact';
+                                    } elseif ($hiddenCardSizeCount > 0) {
+                                        $sizePillClasses[] = 'has-more';
+                                    }
+                                ?>
+                                <div class="<?= htmlspecialchars(implode(' ', $sizePillClasses), ENT_QUOTES, 'UTF-8') ?>"
+                                     <?= empty($cardSizes) ? 'aria-hidden="true"' : 'title="' . htmlspecialchars($cardSizesTitle, ENT_QUOTES, 'UTF-8') . '"' ?>>
+                                    <?php if (!empty($visibleCardSizes)): ?>
+                                    <?php foreach ($visibleCardSizes as $sz): ?>
                                     <span class="shop-size-pill"><?= htmlspecialchars($sz) ?></span>
                                     <?php endforeach; ?>
+                                    <?php if ($hiddenCardSizeCount > 0): ?>
+                                    <span class="shop-size-pill shop-size-more">+<?= (int)$hiddenCardSizeCount ?></span>
+                                    <?php endif; ?>
+                                    <?php endif; ?>
                                 </div>
-                                <?php endif; ?>
                                 <button class="shop-atc-btn"
                                         data-product-id="<?= $pid ?>"
                                         data-has-variants="<?= (int)$p['hasVariants'] ?>"

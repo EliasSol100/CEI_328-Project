@@ -149,6 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             mysqli_stmt_execute($insStmt);
             mysqli_stmt_close($insStmt);
         }
+        app_product_options_sync_colour_inventory_refs($conn);
 
         $flash = 'ok:Colour updated.';
     }
@@ -166,6 +167,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($photoToDelete !== '' && file_exists(__DIR__ . '/../../' . $photoToDelete)) {
                 @unlink(__DIR__ . '/../../' . $photoToDelete);
             }
+            app_product_options_sync_colour_inventory_refs($conn);
             $flash = 'ok:Colour deleted.';
         }
     }
