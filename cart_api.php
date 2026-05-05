@@ -558,7 +558,7 @@ function fetchVariationById(mysqli $conn, int $variationId, int $productId): ?ar
             FROM product_variations pv
             LEFT JOIN colors c ON c.colorID = pv.colorID
             WHERE pv.variationID = ? AND pv.productID = ?
-              AND (pv.colorID IS NULL OR (c.isActive = 1 AND c.globalInventoryAvailable > 0)) LIMIT 1";
+              AND (pv.colorID IS NULL OR c.isActive = 1) LIMIT 1";
     $st = $conn->prepare($sql);
     if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
     $st->bind_param("ii", $variationId, $productId);
@@ -573,7 +573,7 @@ function fetchVariationByFields(mysqli $conn, int $productId, string $size, stri
             FROM product_variations pv
             LEFT JOIN colors c ON c.colorID = pv.colorID
             WHERE pv.productID=? AND pv.size=? AND pv.yarnType=? AND pv.colorID=?
-              AND (pv.colorID IS NULL OR (c.isActive = 1 AND c.globalInventoryAvailable > 0)) LIMIT 1";
+              AND (pv.colorID IS NULL OR c.isActive = 1) LIMIT 1";
     $st = $conn->prepare($sql);
     if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
     $st->bind_param("issi", $productId, $size, $yarnType, $colorId);
@@ -588,7 +588,7 @@ function fetchVariationByColorAndSize(mysqli $conn, int $productId, string $size
             FROM product_variations pv
             LEFT JOIN colors c ON c.colorID = pv.colorID
             WHERE pv.productID=? AND pv.size=? AND pv.colorID=?
-              AND (pv.colorID IS NULL OR (c.isActive = 1 AND c.globalInventoryAvailable > 0))
+              AND (pv.colorID IS NULL OR c.isActive = 1)
             ORDER BY pv.variationID ASC LIMIT 1";
     $st = $conn->prepare($sql);
     if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
@@ -604,7 +604,7 @@ function fetchVariationBySize(mysqli $conn, int $productId, string $size): ?arra
             FROM product_variations pv
             LEFT JOIN colors c ON c.colorID = pv.colorID
             WHERE pv.productID=? AND pv.size=?
-              AND (pv.colorID IS NULL OR (c.isActive = 1 AND c.globalInventoryAvailable > 0))
+              AND (pv.colorID IS NULL OR c.isActive = 1)
             ORDER BY pv.variationID ASC LIMIT 1";
     $st = $conn->prepare($sql);
     if (!$st) throw new RuntimeException("SQL prepare failed: ".$conn->error);
@@ -635,7 +635,7 @@ function fetchAllVariations(mysqli $conn, int $productId): array {
             LEFT JOIN variation_stock vs ON vs.variationID = pv.variationID
             JOIN products p ON p.productID = pv.productID
             WHERE pv.productID = ?
-              AND (pv.colorID IS NULL OR (c.isActive = 1 AND c.globalInventoryAvailable > 0))
+              AND (pv.colorID IS NULL OR c.isActive = 1)
               AND NOT (
                 pv.colorID IS NOT NULL
                 AND (pv.size IS NULL OR TRIM(pv.size) = '')
