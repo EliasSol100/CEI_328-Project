@@ -1321,7 +1321,7 @@ include __DIR__ . "/include/header.php";
                 </div>
             <?php endif; ?>
 
-            <?php if (!empty($colorsByYarnType)): ?>
+            <?php if (!$colorSchemeEnabled && !empty($colorsByYarnType)): ?>
                 <?php $hasMultipleYarnTypes = count($colorsByYarnType) > 1; ?>
 
                 <?php if ($hasMultipleYarnTypes): ?>
