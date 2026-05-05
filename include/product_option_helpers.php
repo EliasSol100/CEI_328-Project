@@ -192,6 +192,200 @@ if (!function_exists('app_product_options_sync_colour_inventory_refs')) {
     }
 }
 
+if (!function_exists('app_product_options_ensure_colour_inventory_tables')) {
+    function app_product_options_ensure_colour_inventory_tables(mysqli $conn): void
+    {
+        mysqli_query(
+            $conn,
+            "CREATE TABLE IF NOT EXISTS yarn_types (
+                typeID INT NOT NULL AUTO_INCREMENT,
+                typeName VARCHAR(100) NOT NULL,
+                PRIMARY KEY (typeID),
+                UNIQUE KEY uq_yarn_types_typeName (typeName)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+        );
+
+        mysqli_query(
+            $conn,
+            "CREATE TABLE IF NOT EXISTS colors (
+                colorID INT NOT NULL,
+                colorName VARCHAR(100) NOT NULL,
+                displayCode VARCHAR(32) NULL,
+                hexCode VARCHAR(7) NOT NULL DEFAULT '#ece6f6',
+                globalInventoryAvailable INT NOT NULL DEFAULT 0,
+                isActive TINYINT(1) NOT NULL DEFAULT 1,
+                updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (colorID)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+        );
+
+        mysqli_query(
+            $conn,
+            "CREATE TABLE IF NOT EXISTS color_yarn_types (
+                colorID INT NOT NULL,
+                typeID INT NOT NULL,
+                photoPath VARCHAR(255) DEFAULT NULL,
+                PRIMARY KEY (colorID, typeID),
+                KEY typeID (typeID),
+                CONSTRAINT color_yarn_types_ibfk_1
+                    FOREIGN KEY (colorID) REFERENCES colors (colorID) ON DELETE CASCADE,
+                CONSTRAINT color_yarn_types_ibfk_2
+                    FOREIGN KEY (typeID) REFERENCES yarn_types (typeID) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci"
+        );
+    }
+}
+
+if (!function_exists('app_product_options_default_yarn_colour_catalogue')) {
+    function app_product_options_default_yarn_colour_catalogue(): array
+    {
+        return [
+            'Baby Anti Pilling' => [
+                [100055, 'Snow White', '55', 'assets/yarn_colors/alize_baby-best_55.webp'],
+                [100062, 'Ivory Cream', '62', 'assets/yarn_colors/alize_baby-best_62.webp'],
+                [100185, 'Baby Pink', '185', 'assets/yarn_colors/alize_baby-best_185.webp'],
+                [100237, 'Cornflower Blue', '237', 'assets/yarn_colors/alize_baby-best_237.webp'],
+                [100250, 'Lemon Yellow', '250', 'assets/yarn_colors/alize_baby-best_250.webp'],
+                [100287, 'Aqua Teal', '287', 'assets/yarn_colors/alize_baby-best_287.webp'],
+                [100310, 'Warm Beige', '310', 'assets/yarn_colors/alize_baby-best_310.webp'],
+                [100336, 'Tangerine Orange', '336', 'assets/yarn_colors/alize_baby-best_336.webp'],
+                [100344, 'Silver Grey', '344', 'assets/yarn_colors/alize_baby-best_344.webp'],
+                [100599, 'Taupe Beige', '599', 'assets/yarn_colors/alize_baby-best_599.webp'],
+            ],
+            'Cotton' => [
+                [200001, 'Ivory Cream', '1', 'assets/yarn_colors/alize_cotton-gold_1.webp'],
+                [200036, 'Rust Brown', '36', 'assets/yarn_colors/alize_cotton-gold_36.webp'],
+                [200055, 'Snow White', '55', 'assets/yarn_colors/alize_cotton-gold_55.webp'],
+                [200056, 'Cherry Red', '56', 'assets/yarn_colors/alize_cotton-gold_56.webp'],
+                [200060, 'Black', '60', 'assets/yarn_colors/alize_cotton-gold_60.webp'],
+                [200062, 'Soft White', '62', 'assets/yarn_colors/alize_cotton-gold_62.webp'],
+                [200149, 'Hot Pink', '149', 'assets/yarn_colors/alize_cotton-gold_149.webp'],
+                [200216, 'Golden Yellow', '216', 'assets/yarn_colors/alize_cotton-gold_216.webp'],
+                [200279, 'Navy Blue', '279', 'assets/yarn_colors/alize_cotton-gold_279.webp'],
+                [200287, 'Turquoise Blue', '287', 'assets/yarn_colors/alize_cotton-gold_287.webp'],
+            ],
+            'Puffy' => [
+                [300055, 'Snow White', '55', 'assets/yarn_colors/alize_puffy_55.webp'],
+                [300062, 'Vanilla Cream', '62', 'assets/yarn_colors/alize_puffy_62.webp'],
+                [300310, 'Peach Cream', '310', 'assets/yarn_colors/alize_puffy_310.webp'],
+                [300340, 'Soft Pink', '340', 'assets/yarn_colors/alize_puffy_340.webp'],
+                [300428, 'Silver Grey', '428', 'assets/yarn_colors/alize_puffy_428.webp'],
+                [300599, 'Warm Oatmeal', '599', 'assets/yarn_colors/alize_puffy_599.webp'],
+                [355865, 'Sky Blue Mix', '5865', 'assets/yarn_colors/alize_puffy-color_5865.webp'],
+                [355923, 'Lavender Pink Mix', '5923', 'assets/yarn_colors/alize_puffy-color_5923.webp'],
+                [356395, 'Stone Beige Mix', '6395', 'assets/yarn_colors/alize_puffy-color_6395.webp'],
+                [356408, 'Mint Grey Mix', '6408', 'assets/yarn_colors/alize_puffy-color_6408.webp'],
+            ],
+            'Velvet' => [
+                [400013, 'Lemon Cream', '13', 'assets/yarn_colors/alize_velluto_13.webp'],
+                [400055, 'Snow White', '55', 'assets/yarn_colors/alize_velluto_55.webp'],
+                [400199, 'Camel Brown', '199', 'assets/yarn_colors/alize_velluto_199.webp'],
+                [400218, 'Baby Blue', '218', 'assets/yarn_colors/alize_velluto_218.webp'],
+                [400310, 'Peach Cream', '310', 'assets/yarn_colors/alize_velluto_310.webp'],
+                [400329, 'Mocha Brown', '329', 'assets/yarn_colors/alize_velluto_329.webp'],
+                [400340, 'Blush Pink', '340', 'assets/yarn_colors/alize_velluto_340.webp'],
+                [400374, 'Denim Blue', '374', 'assets/yarn_colors/alize_velluto_374.webp'],
+                [400416, 'Ice Grey', '416', 'assets/yarn_colors/alize_velluto_416.webp'],
+                [400428, 'Silver Grey', '428', 'assets/yarn_colors/alize_velluto_428.webp'],
+            ],
+        ];
+    }
+}
+
+if (!function_exists('app_product_options_seed_default_yarn_colours')) {
+    function app_product_options_seed_default_yarn_colours(mysqli $conn): void
+    {
+        if (!app_product_options_table_exists($conn, 'colors')
+            || !app_product_options_table_exists($conn, 'yarn_types')
+            || !app_product_options_table_exists($conn, 'color_yarn_types')
+        ) {
+            return;
+        }
+
+        $existingLinks = mysqli_query($conn, "SELECT COUNT(*) AS total FROM color_yarn_types");
+        $existingRow = $existingLinks ? mysqli_fetch_assoc($existingLinks) : null;
+        if ((int)($existingRow['total'] ?? 0) > 0) {
+            return;
+        }
+
+        $typeStmt = mysqli_prepare(
+            $conn,
+            "INSERT INTO yarn_types (typeName)
+             VALUES (?)
+             ON DUPLICATE KEY UPDATE typeID = LAST_INSERT_ID(typeID)"
+        );
+        $typeLookupStmt = mysqli_prepare($conn, "SELECT typeID FROM yarn_types WHERE typeName = ? LIMIT 1");
+        $colorStmt = mysqli_prepare(
+            $conn,
+            "INSERT INTO colors (colorID, colorName, displayCode, hexCode, globalInventoryAvailable, isActive)
+             VALUES (?, ?, ?, '#ece6f6', 20, 1)
+             ON DUPLICATE KEY UPDATE
+                colorName = VALUES(colorName),
+                displayCode = CASE
+                    WHEN displayCode IS NULL OR TRIM(displayCode) = ''
+                    THEN VALUES(displayCode)
+                    ELSE displayCode
+                END,
+                hexCode = CASE
+                    WHEN hexCode IS NULL OR TRIM(hexCode) = ''
+                    THEN VALUES(hexCode)
+                    ELSE hexCode
+                END"
+        );
+        $linkStmt = mysqli_prepare(
+            $conn,
+            "INSERT INTO color_yarn_types (colorID, typeID, photoPath)
+             VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                photoPath = CASE
+                    WHEN photoPath IS NULL OR TRIM(photoPath) = ''
+                    THEN VALUES(photoPath)
+                    ELSE photoPath
+                END"
+        );
+
+        if (!$typeStmt || !$typeLookupStmt || !$colorStmt || !$linkStmt) {
+            return;
+        }
+
+        foreach (app_product_options_default_yarn_colour_catalogue() as $typeName => $colours) {
+            mysqli_stmt_bind_param($typeStmt, 's', $typeName);
+            mysqli_stmt_execute($typeStmt);
+            $typeID = (int)mysqli_insert_id($conn);
+
+            if ($typeID <= 0) {
+                mysqli_stmt_bind_param($typeLookupStmt, 's', $typeName);
+                mysqli_stmt_execute($typeLookupStmt);
+                $lookupRes = mysqli_stmt_get_result($typeLookupStmt);
+                $lookupRow = $lookupRes ? mysqli_fetch_assoc($lookupRes) : null;
+                $typeID = (int)($lookupRow['typeID'] ?? 0);
+            }
+
+            if ($typeID <= 0) {
+                continue;
+            }
+
+            foreach ($colours as $colour) {
+                [$colorID, $baseName, $displayCode, $photoPath] = $colour;
+                $colorID = (int)$colorID;
+                $displayCode = (string)$displayCode;
+                $colorName = trim((string)$baseName . ' ' . $displayCode);
+
+                mysqli_stmt_bind_param($colorStmt, 'iss', $colorID, $colorName, $displayCode);
+                mysqli_stmt_execute($colorStmt);
+
+                mysqli_stmt_bind_param($linkStmt, 'iis', $colorID, $typeID, $photoPath);
+                mysqli_stmt_execute($linkStmt);
+            }
+        }
+
+        mysqli_stmt_close($typeStmt);
+        mysqli_stmt_close($typeLookupStmt);
+        mysqli_stmt_close($colorStmt);
+        mysqli_stmt_close($linkStmt);
+    }
+}
+
 if (!function_exists('app_product_options_ensure_schema')) {
     function app_product_options_ensure_schema(mysqli $conn): void
     {
@@ -200,6 +394,8 @@ if (!function_exists('app_product_options_ensure_schema')) {
             return;
         }
         $checked = true;
+
+        app_product_options_ensure_colour_inventory_tables($conn);
 
         if (app_product_options_table_exists($conn, 'products')) {
             $productColumns = [
@@ -454,6 +650,8 @@ if (!function_exists('app_product_options_ensure_schema')) {
                      )"
                 );
             }
+
+            app_product_options_seed_default_yarn_colours($conn);
 
             if (app_product_options_table_exists($conn, 'products')
                 && app_product_options_column_exists($conn, 'products', 'yarnTypeID')
