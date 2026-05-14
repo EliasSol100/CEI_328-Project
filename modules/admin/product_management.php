@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../include/image_storage.php';
 require_once __DIR__ . '/../../include/product_option_helpers.php';
 require_once __DIR__ . '/../../include/product_warnings.php';
 require_once __DIR__ . '/../../include/made_to_order_access.php';
+require_once __DIR__ . '/../../include/shop_filter_settings.php';
 
 $current_page = 'product_management';
 $flash = '';
@@ -26,6 +27,89 @@ foreach ($yarnTypes as $yt) {
     $yarnTypeNamesById[(int)$yt['typeID']] = (string)$yt['typeName'];
 }
 $defaultYarnTypeID = !empty($yarnTypes) ? (int)$yarnTypes[0]['typeID'] : 0;
+
+function productMgmtShopCategoryLabel(array $row): string
+{
+    $label = trim((string)($row['label_en'] ?? ''));
+    if ($label === '') {
+        $label = trim((string)($row['label_gr'] ?? ''));
+    }
+    if ($label === '') {
+        $label = trim(ucwords(str_replace('-', ' ', (string)($row['id'] ?? ''))));
+    }
+    return $label;
+}
+
+function productMgmtShopCategories(mysqli $conn): array
+{
+    $settings = app_shop_filter_settings($conn);
+    $categories = [];
+    foreach (app_shop_filter_active_options($settings, 'categories') as $row) {
+        $label = productMgmtShopCategoryLabel($row);
+        if ($label !== '') {
+            $categories[$label] = $label;
+        }
+    }
+
+    if (empty($categories)) {
+        foreach (['Blankets', 'Animals', 'Plushies', 'Characters'] as $fallbackCategory) {
+            $categories[$fallbackCategory] = $fallbackCategory;
+        }
+    }
+
+    return array_values($categories);
+}
+
+function productMgmtSyncShopCategoryAssignment(mysqli $conn, int $productId, string $category): void
+{
+    if ($productId <= 0 || trim($category) === '') {
+        return;
+    }
+
+    $settings = app_shop_filter_settings($conn);
+    if (!is_array($settings['categories'] ?? null)) {
+        $settings['categories'] = [];
+    }
+    $categoryKey = app_shop_filter_slug($category, 'category');
+    $matched = false;
+
+    foreach ($settings['categories'] as &$row) {
+        if (!is_array($row)) {
+            $row = [];
+        }
+        $label = productMgmtShopCategoryLabel($row);
+        $rowKey = app_shop_filter_slug($label !== '' ? $label : (string)($row['id'] ?? ''), 'category');
+        $rowIds = [];
+        foreach ((array)($row['product_ids'] ?? []) as $existingProductId) {
+            $existingProductId = (int)$existingProductId;
+            if ($existingProductId > 0 && $existingProductId !== $productId) {
+                $rowIds[] = $existingProductId;
+            }
+        }
+
+        if ($rowKey === $categoryKey || (string)($row['id'] ?? '') === $categoryKey) {
+            $rowIds[] = $productId;
+            $matched = true;
+        }
+
+        $row['product_ids'] = array_values(array_unique($rowIds));
+    }
+    unset($row);
+
+    if (!$matched) {
+        $settings['categories'][] = [
+            'id' => $categoryKey,
+            'label_en' => $category,
+            'label_gr' => $category,
+            'active' => 1,
+            'product_ids' => [$productId],
+        ];
+    }
+
+    app_shop_filter_save($conn, $settings);
+}
+
+$categories = productMgmtShopCategories($conn);
 
 function productMgmtEnsurePhotoStorageSchema(mysqli $conn): void
 {
@@ -266,6 +350,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cost     = (float)($_POST['costPrice']  ?? 0);
         $inv      = (int)($_POST['inventory']    ?? 0);
         $category = trim($_POST['category'] ?? '');
+        $allowedCategoryLookup = array_fill_keys($categories, true);
         $yarnTypeID = (int)($_POST['yarnTypeID'] ?? 0);
         $sku      = trim($_POST['sku']      ?? '');
         $isSellingFast = isset($_POST['isSellingFast']) ? 1 : 0;
@@ -320,6 +405,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($yarnTypeID <= 0 || !isset($yarnTypeNamesById[$yarnTypeID])) {
             $flash = 'error:Please select a valid yarn type.';
             header('Location: product_management.php?flash=' . urlencode($flash));
+            exit;
+        }
+        if ($category === '' || !isset($allowedCategoryLookup[$category])) {
+            $flash = 'error:Please select one of the Shop categories.';
+            $redirect = ['flash' => $flash];
+            if ($action === 'edit' && $id > 0) {
+                $redirect['edit'] = $id;
+            }
+            header('Location: product_management.php?' . http_build_query($redirect));
             exit;
         }
         $materialType = $yarnTypeNamesById[$yarnTypeID];
@@ -386,6 +480,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
             mysqli_stmt_execute($stmt);
             $newProductID = mysqli_insert_id($conn);
+            productMgmtSyncShopCategoryAssignment($conn, (int)$newProductID, $category);
             app_product_size_prices_save($conn, (int)$newProductID, $rawSizesPost, $sizePricesPost);
             if ($hasWarningPost) {
                 productMgmtSaveProductWarning($conn, (int)$newProductID, $productWarningEN, $productWarningGR);
@@ -469,6 +564,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $id
             );
             mysqli_stmt_execute($stmt);
+            productMgmtSyncShopCategoryAssignment($conn, $id, $category);
             if ($hasWarningPost) {
                 productMgmtSaveProductWarning($conn, $id, $productWarningEN, $productWarningGR);
             }
@@ -833,8 +929,6 @@ foreach ($products as $productRow) {
 }
 $globalProductWarnings = app_product_global_warning_texts($conn);
 
-$categories = ['Animals','Blankets','Bags','Decor','Dolls'];
-
 $statuses = [
     'active'        => 'Made to Order',
     'low_stock'     => 'Made to Order (Legacy Low Stock)',
@@ -1122,7 +1216,7 @@ $statusFilterOptions = [
       </div>
       <div class="form-group">
         <label class="form-label">Category</label>
-        <select name="category" class="form-input">
+        <select name="category" class="form-input" required>
           <option value="">— Select —</option>
           <?php foreach ($categories as $cat): ?>
             <option value="<?= htmlspecialchars((string)$cat) ?>"><?= htmlspecialchars((string)$cat) ?></option>
@@ -1246,12 +1340,16 @@ $statusFilterOptions = [
       </div>
       <div class="form-group">
         <label class="form-label">Category</label>
-        <select name="category" class="form-input">
+        <?php $editCategory = trim((string)($editProduct['category'] ?? '')); ?>
+        <select name="category" class="form-input" required>
           <option value="">— Select —</option>
           <?php foreach ($categories as $cat): ?>
-            <option value="<?= htmlspecialchars((string)$cat) ?>" <?= $editProduct['category']===$cat?'selected':'' ?>><?= htmlspecialchars((string)$cat) ?></option>
+            <option value="<?= htmlspecialchars((string)$cat) ?>" <?= $editCategory === $cat ? 'selected' : '' ?>><?= htmlspecialchars((string)$cat) ?></option>
           <?php endforeach; ?>
         </select>
+        <?php if ($editCategory !== '' && !in_array($editCategory, $categories, true)): ?>
+          <span class="form-hint">Current category "<?= htmlspecialchars($editCategory) ?>" is not active in Shop filters. Choose one of the Shop categories before saving.</span>
+        <?php endif; ?>
       </div>
       <div class="form-group">
         <label class="form-label">Yarn Type *</label>
