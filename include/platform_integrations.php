@@ -194,13 +194,18 @@ if (!function_exists('app_integration_is_placeholder_value')) {
 if (!function_exists('app_integration_setting')) {
     function app_integration_setting(mysqli $conn, string $envKey, string $configKey, string $default = ''): string
     {
+        $missingValue = '__athina_missing_integration_setting__';
+        $storedValue = app_system_config_get($conn, $configKey, $missingValue);
+        if ($storedValue !== $missingValue && !app_integration_is_placeholder_value($storedValue)) {
+            return $storedValue;
+        }
+
         $envValue = trim((string)app_env_value($envKey, ''));
         if ($envValue !== '' && !app_integration_is_placeholder_value($envValue)) {
             return $envValue;
         }
 
-        $storedValue = app_system_config_get($conn, $configKey, $default);
-        return app_integration_is_placeholder_value($storedValue) ? $default : $storedValue;
+        return $default;
     }
 }
 

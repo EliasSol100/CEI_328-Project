@@ -43,6 +43,12 @@ if (!function_exists('payment_gateway_system_config_value')) {
 if (!function_exists('payment_gateway_setting')) {
     function payment_gateway_setting(mysqli $conn, string $envKey, string $configKey, string $default = ''): string
     {
+        $missingValue = '__athina_missing_gateway_setting__';
+        $value = payment_gateway_system_config_value($conn, $configKey, $missingValue);
+        if ($value !== $missingValue && !payment_gateway_is_placeholder_value($value)) {
+            return $value;
+        }
+
         $envValue = getenv($envKey);
         if (is_string($envValue) && trim($envValue) !== '') {
             $trimmedEnv = trim($envValue);
@@ -51,8 +57,7 @@ if (!function_exists('payment_gateway_setting')) {
             }
         }
 
-        $value = payment_gateway_system_config_value($conn, $configKey, $default);
-        return payment_gateway_is_placeholder_value($value) ? $default : $value;
+        return $default;
     }
 }
 
