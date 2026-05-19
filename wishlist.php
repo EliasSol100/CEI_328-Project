@@ -231,7 +231,7 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
                                     </a>
                                 <?php endif; ?>
                             </div>
-                            <form method="post" action="wishlist.php">
+                            <form method="post" action="wishlist.php" data-confirm-message="Remove this item from your wishlist?">
                                 <?= app_csrf_input() ?>
                                 <input type="hidden" name="action" value="remove_session_wishlist_item">
                                 <input type="hidden" name="wishlist_value" value="<?= htmlspecialchars((string)$item["wishlistValue"]) ?>">
@@ -257,7 +257,7 @@ $_SESSION["wishlist_count"] = count($sessionItems) + count($dbItems);
                                     </div>
                                 </a>
                             </div>
-                            <form method="post" action="wishlist.php">
+                            <form method="post" action="wishlist.php" data-confirm-message="Remove this item from your wishlist?">
                                 <?= app_csrf_input() ?>
                                 <input type="hidden" name="action" value="remove_wishlist_pid">
                                 <input type="hidden" name="product_id" value="<?= (int)$item["productID"] ?>">

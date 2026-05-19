@@ -175,6 +175,7 @@ include __DIR__ . '/cookie_consent.php';
 <script src="<?= htmlspecialchars($footerRootPrefix, ENT_QUOTES, 'UTF-8') ?>assets/js/footer-info.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/footer-info.js') ?>" defer></script>
 <script src="<?= htmlspecialchars($footerRootPrefix, ENT_QUOTES, 'UTF-8') ?>assets/js/long-page-optimizations.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/long-page-optimizations.js') ?>" defer></script>
 <script src="<?= htmlspecialchars($footerRootPrefix, ENT_QUOTES, 'UTF-8') ?>assets/js/date-input-format.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/date-input-format.js') ?>" defer></script>
+<script src="<?= htmlspecialchars($footerRootPrefix, ENT_QUOTES, 'UTF-8') ?>assets/js/delete-confirmations.js?v=<?= (int)@filemtime(__DIR__ . '/../assets/js/delete-confirmations.js') ?>" defer></script>
 <script>
 window.athinaPwa = {
     serviceWorkerUrl: <?= json_encode($footerRootPrefix . 'sw.js') ?>

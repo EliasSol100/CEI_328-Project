@@ -330,7 +330,7 @@ unset($_SESSION['cart_notice']);
                             €<?= number_format((float)($item['pricing']['lineTotal'] ?? 0), 2) ?>
                         </div>
 
-                        <form method="post" action="cart.php">
+                        <form method="post" action="cart.php" data-confirm-message="Remove this item from your cart?">
                             <?= app_csrf_input() ?>
                             <input type="hidden" name="action"     value="remove">
                             <input type="hidden" name="item_index" value="<?= $idx ?>">
@@ -372,7 +372,7 @@ unset($_SESSION['cart_notice']);
                         <button type="submit" name="action" value="apply_coupon" data-translate="apply">Apply</button>
                     </div>
                     <?php if ($cartCouponCode !== ''): ?>
-                    <button type="submit" name="action" value="remove_coupon" class="cart-coupon-remove" data-translate="remove">Remove</button>
+                    <button type="submit" name="action" value="remove_coupon" class="cart-coupon-remove" data-confirm-message="Remove this coupon?" data-translate="remove">Remove</button>
                     <?php endif; ?>
                     <p data-translate="cartCouponHelp">Coupons are applied to your cart before checkout.</p>
                 </form>

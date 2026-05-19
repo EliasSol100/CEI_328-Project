@@ -73,6 +73,24 @@
         });
     }
 
+    function isRemovingFromWishlist(form) {
+        const actionInput = form.querySelector('input[name="action"]');
+        const button = form.querySelector("button.wishlist-btn, button.shop-fav");
+        if (actionInput && String(actionInput.value || "").indexOf("remove") !== -1) {
+            return true;
+        }
+        return !!(button && button.classList.contains("is-active"));
+    }
+
+    function confirmWishlistRemoval(form) {
+        if (!isRemovingFromWishlist(form)) {
+            return true;
+        }
+        const message = form.getAttribute("data-confirm-message") || "Remove this item from your wishlist?";
+        const confirmFn = window.athinaConfirmDelete || window.confirm;
+        return confirmFn(message);
+    }
+
     function getFeedbackEl() {
         let el = document.querySelector(".wishlist-feedback");
         if (!el) {
@@ -100,6 +118,7 @@
         const button = form.querySelector("button.wishlist-btn, button.shop-fav");
         const identifier = getWishlistIdentifier(form);
         if (!identifier) return;
+        if (!confirmWishlistRemoval(form)) return;
 
         if (button) button.disabled = true;
 

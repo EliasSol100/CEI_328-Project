@@ -84,7 +84,7 @@ function cm_shop_filter_row(string $type, int $index, array $row, array $product
     <div class="cms-shop-filter-row" data-shop-filter-row data-shop-filter-type="<?= app_h($type) ?>">
       <div class="cms-step-header">
         <div class="cms-step-title" data-shop-filter-title><?= app_h((string)($row['label_en'] ?? ('Option ' . ($index + 1)))) ?></div>
-        <button type="button" class="cms-step-remove" data-remove-shop-filter><i class="fas fa-trash"></i> Remove</button>
+        <button type="button" class="cms-step-remove" data-remove-shop-filter data-confirm-delete data-confirm-message="Remove this shop filter?"><i class="fas fa-trash"></i> Remove</button>
       </div>
       <div class="form-grid-2">
         <div class="form-group">
@@ -323,7 +323,7 @@ function cm_shop_filter_section(string $type, string $title, string $icon, array
                   <div class="cms-step" data-cms-step data-step-path="<?= app_h($pathKey) ?>">
                     <div class="cms-step-header">
                       <div class="cms-step-title" data-step-title>Step <?= (int)$stepIndex + 1 ?></div>
-                      <button type="button" class="cms-step-remove" data-remove-step><i class="fas fa-trash"></i> Remove</button>
+                      <button type="button" class="cms-step-remove" data-remove-step data-confirm-delete data-confirm-message="Remove this customer instruction step?"><i class="fas fa-trash"></i> Remove</button>
                     </div>
                     <div class="form-grid-2">
                       <div class="form-group">
@@ -539,7 +539,7 @@ document.addEventListener('DOMContentLoaded', function () {
       '<div class="cms-step" data-cms-step data-step-path="' + path + '">',
       '  <div class="cms-step-header">',
       '    <div class="cms-step-title" data-step-title>Step ' + (index + 1) + '</div>',
-      '    <button type="button" class="cms-step-remove" data-remove-step><i class="fas fa-trash"></i> Remove</button>',
+      '    <button type="button" class="cms-step-remove" data-remove-step data-confirm-delete data-confirm-message="Remove this customer instruction step?"><i class="fas fa-trash"></i> Remove</button>',
       '  </div>',
       '  <div class="form-grid-2">',
       '    <div class="form-group">',
@@ -625,7 +625,7 @@ document.addEventListener('DOMContentLoaded', function () {
       '<div class="cms-shop-filter-row" data-shop-filter-row data-shop-filter-type="' + type + '">',
       '  <div class="cms-step-header">',
       '    <div class="cms-step-title" data-shop-filter-title>' + label + '</div>',
-      '    <button type="button" class="cms-step-remove" data-remove-shop-filter><i class="fas fa-trash"></i> Remove</button>',
+      '    <button type="button" class="cms-step-remove" data-remove-shop-filter data-confirm-delete data-confirm-message="Remove this shop filter?"><i class="fas fa-trash"></i> Remove</button>',
       '  </div>',
       '  <div class="form-grid-2">',
       '    <div class="form-group">',

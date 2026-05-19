@@ -114,8 +114,131 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 function confirmDelete(msg) {
-  return confirm(msg || 'Are you sure you want to delete this item?');
+  return window.confirm(msg || 'Are you sure you want to delete or remove this item?');
 }
+
+window.athinaConfirmDelete = confirmDelete;
+
+(function () {
+  var destructivePattern = /(^|[\s_\-])(delete|remove|clear|dismiss|disconnect)([\s_\-]|$)/i;
+
+  function getSubmitter(event, form) {
+    if (event.submitter && form.contains(event.submitter)) return event.submitter;
+    var active = document.activeElement;
+    if (active && form.contains(active) && /^(BUTTON|INPUT)$/i.test(active.tagName || '')) return active;
+    return null;
+  }
+
+  function isSubmitControl(trigger) {
+    if (!trigger || !trigger.closest('form') || !/^(BUTTON|INPUT)$/i.test(trigger.tagName || '')) return false;
+    var type = String(trigger.getAttribute('type') || (trigger.tagName === 'BUTTON' ? 'submit' : '')).toLowerCase();
+    return type === 'submit' || type === 'image';
+  }
+
+  function hasInlineConfirm(form, submitter) {
+    var formHandler = form.getAttribute('onsubmit') || '';
+    var submitterHandler = submitter ? (submitter.getAttribute('onclick') || '') : '';
+    return /confirm\s*\(|confirmDelete\s*\(/i.test(formHandler + ' ' + submitterHandler);
+  }
+
+  function isSkippedForm(form) {
+    return form.hasAttribute('data-skip-delete-confirmation') ||
+      form.classList.contains('colour-delete-form');
+  }
+
+  function addFormSignals(signals, form, submitter) {
+    var fields = form.querySelectorAll('input, button, select, textarea');
+    Array.prototype.forEach.call(fields, function (field) {
+      if (field.disabled) return;
+      var type = String(field.type || '').toLowerCase();
+      if (type !== 'hidden' && type !== 'submit' && type !== 'button') return;
+      if ((type === 'submit' || type === 'button') && (!submitter || field !== submitter)) return;
+      if (field.name) signals.push(field.name);
+      if (field.value) signals.push(field.value);
+      if (field === submitter && field.textContent) signals.push(field.textContent);
+    });
+  }
+
+  function signalText(form, submitter) {
+    var signals = [
+      form.getAttribute('action') || '',
+      form.getAttribute('data-confirm-delete') || '',
+      form.getAttribute('data-confirm-message') || ''
+    ];
+    if (submitter) {
+      signals.push(submitter.getAttribute('data-confirm-delete') || '');
+      signals.push(submitter.getAttribute('data-confirm-message') || '');
+      signals.push(submitter.getAttribute('aria-label') || '');
+      signals.push(submitter.getAttribute('title') || '');
+      signals.push(submitter.textContent || '');
+    }
+    addFormSignals(signals, form, submitter);
+    return signals.join(' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function isExplicit(form, submitter) {
+    return form.hasAttribute('data-confirm-delete') ||
+      !!(submitter && submitter.hasAttribute('data-confirm-delete'));
+  }
+
+  function shouldConfirmForm(form, submitter) {
+    if ((form.method || 'get').toLowerCase() === 'get') return false;
+    if (isExplicit(form, submitter)) return true;
+    return destructivePattern.test(signalText(form, submitter));
+  }
+
+  function messageFor(form, submitter) {
+    var explicit = (submitter && submitter.getAttribute('data-confirm-message')) ||
+      form.getAttribute('data-confirm-message');
+    if (explicit) return explicit;
+
+    var text = signalText(form, submitter).toLowerCase();
+    if (text.indexOf('notification') !== -1 || text.indexOf('dismiss') !== -1) {
+      return 'Dismiss this notification?';
+    }
+    if (text.indexOf('cost') !== -1) {
+      return 'Delete this cost entry?';
+    }
+    if (text.indexOf('customer') !== -1 || text.indexOf('user') !== -1) {
+      return 'Delete this customer account?';
+    }
+    if (text.indexOf('promotion') !== -1 || text.indexOf('discount') !== -1) {
+      return 'Delete this promotion?';
+    }
+    if (text.indexOf('colour') !== -1 || text.indexOf('color') !== -1) {
+      return 'Delete this colour?';
+    }
+    if (text.indexOf('photo') !== -1) {
+      return 'Delete this photo?';
+    }
+    if (text.indexOf('disconnect') !== -1) {
+      return 'Disconnect this integration?';
+    }
+    return 'Are you sure you want to delete or remove this item?';
+  }
+
+  document.addEventListener('submit', function (event) {
+    var form = event.target;
+    if (!form || form.tagName !== 'FORM') return;
+    var submitter = getSubmitter(event, form);
+    if (isSkippedForm(form) || hasInlineConfirm(form, submitter)) return;
+    if (!shouldConfirmForm(form, submitter)) return;
+    if (!confirmDelete(messageFor(form, submitter))) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+
+  document.addEventListener('click', function (event) {
+    var trigger = event.target && event.target.closest('[data-confirm-delete]');
+    if (!trigger || isSubmitControl(trigger)) return;
+    if (/confirm\s*\(|confirmDelete\s*\(/i.test(trigger.getAttribute('onclick') || '')) return;
+    if (!confirmDelete(trigger.getAttribute('data-confirm-message') || 'Are you sure you want to delete or remove this item?')) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+})();
 
 function copyCode(text) {
   navigator.clipboard.writeText(text).then(function () {
