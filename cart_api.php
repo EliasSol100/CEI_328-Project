@@ -383,11 +383,6 @@ function normalizeAddons($a): array {
     if (mb_strlen($message) > 255) $message = mb_substr($message, 0, 255);
     return ['gift_wrapping'=>(bool)$giftWrapping,'gift_bag'=>(bool)$giftBag,'message'=>$message];
 }
-function normalizeCouponCode(string $code): string {
-    $code = strtoupper(trim($code));
-    $code = preg_replace('/[^A-Z0-9_-]/', '', $code);
-    return (string)$code;
-}
 function normalizeCustomization($input, array $product): array {
     $input = is_array($input) ? $input : [];
     $field1 = trim((string)($input['field1'] ?? ''));

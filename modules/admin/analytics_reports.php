@@ -58,9 +58,9 @@ function buildTrendBuckets(DateTimeImmutable $startDate, DateTimeImmutable $endD
 }
 
 $allowedRanges = ['7', '30', '90', '365', 'custom'];
-$range = (string)($_GET['range'] ?? '30');
+$range = (string)($_GET['range'] ?? '7');
 if (!in_array($range, $allowedRanges, true)) {
-    $range = '30';
+    $range = '7';
 }
 
 $allowedGroups = ['day', 'week', 'month'];
@@ -102,12 +102,39 @@ $endDateSql = $endDate->format('Y-m-d 23:59:59');
 $startDateCostSql = $startDate->format('Y-m-d');
 $endDateCostSql = $endDate->format('Y-m-d');
 
+$productSearch = trim((string)($_GET['product_search'] ?? ''));
+$productSearch = substr($productSearch, 0, 120);
+$productFilterActive = $productSearch !== '';
+$productSearchLike = '%' . $productSearch . '%';
+$productFilterLabel = $productFilterActive ? $productSearch : '';
+
+$productOptions = [];
+$productOptionsRes = mysqli_query(
+    $conn,
+    "SELECT nameEN, sku
+     FROM products
+     WHERE nameEN IS NOT NULL AND nameEN <> ''
+     ORDER BY nameEN ASC
+     LIMIT 300"
+);
+if ($productOptionsRes) {
+    while ($row = mysqli_fetch_assoc($productOptionsRes)) {
+        $productOptions[] = [
+            'name' => (string)($row['nameEN'] ?? ''),
+            'sku' => (string)($row['sku'] ?? ''),
+        ];
+    }
+}
+
 $currentFilters = [
     'range' => $range,
     'group' => $trendGroup,
     'cost_view' => $costView,
     'cost_focus' => $costFocus,
 ];
+if ($productFilterActive) {
+    $currentFilters['product_search'] = $productSearch;
+}
 if ($range === 'custom') {
     $currentFilters['start_date'] = $startDate->format('Y-m-d');
     $currentFilters['end_date'] = $endDate->format('Y-m-d');
@@ -161,9 +188,24 @@ if (isset($_GET['flash'])) {
 }
 
 $totalRevenue = 0.0;
-$revStmt = mysqli_prepare($conn, "SELECT COALESCE(SUM(totalAmount),0) AS s FROM orders WHERE createdAt BETWEEN ? AND ?");
+$revSql = "SELECT COALESCE(SUM(totalAmount),0) AS s FROM orders WHERE createdAt BETWEEN ? AND ?";
+if ($productFilterActive) {
+    $revSql = "
+        SELECT COALESCE(SUM(oi.quantity * oi.unitPrice),0) AS s
+        FROM order_items oi
+        INNER JOIN orders o ON o.orderID = oi.orderID
+        INNER JOIN products p ON p.productID = oi.productID
+        WHERE o.createdAt BETWEEN ? AND ?
+          AND (p.nameEN LIKE ? OR COALESCE(p.sku, '') LIKE ?)
+    ";
+}
+$revStmt = mysqli_prepare($conn, $revSql);
 if ($revStmt) {
-    mysqli_stmt_bind_param($revStmt, 'ss', $startDateSql, $endDateSql);
+    if ($productFilterActive) {
+        mysqli_stmt_bind_param($revStmt, 'ssss', $startDateSql, $endDateSql, $productSearchLike, $productSearchLike);
+    } else {
+        mysqli_stmt_bind_param($revStmt, 'ss', $startDateSql, $endDateSql);
+    }
     mysqli_stmt_execute($revStmt);
     $revRes = mysqli_stmt_get_result($revStmt);
     if ($revRes && ($row = mysqli_fetch_assoc($revRes))) {
@@ -172,23 +214,25 @@ if ($revStmt) {
     mysqli_stmt_close($revStmt);
 }
 $operationalRows = [];
-$opsStmt = mysqli_prepare(
-    $conn,
-    "SELECT costID, costDate, category, description, amount
-     FROM operational_costs
-     WHERE costDate BETWEEN ? AND ?
-     ORDER BY costDate DESC, costID DESC"
-);
-if ($opsStmt) {
-    mysqli_stmt_bind_param($opsStmt, 'ss', $startDateCostSql, $endDateCostSql);
-    mysqli_stmt_execute($opsStmt);
-    $opsRes = mysqli_stmt_get_result($opsStmt);
-    if ($opsRes) {
-        while ($row = mysqli_fetch_assoc($opsRes)) {
-            $operationalRows[] = $row;
+if (!$productFilterActive) {
+    $opsStmt = mysqli_prepare(
+        $conn,
+        "SELECT costID, costDate, category, description, amount
+         FROM operational_costs
+         WHERE costDate BETWEEN ? AND ?
+         ORDER BY costDate DESC, costID DESC"
+    );
+    if ($opsStmt) {
+        mysqli_stmt_bind_param($opsStmt, 'ss', $startDateCostSql, $endDateCostSql);
+        mysqli_stmt_execute($opsStmt);
+        $opsRes = mysqli_stmt_get_result($opsStmt);
+        if ($opsRes) {
+            while ($row = mysqli_fetch_assoc($opsRes)) {
+                $operationalRows[] = $row;
+            }
         }
+        mysqli_stmt_close($opsStmt);
     }
-    mysqli_stmt_close($opsStmt);
 }
 
 $operationalByCategory = [
@@ -219,9 +263,8 @@ foreach ($operationalRows as $row) {
 
 $dynamicMaterialTotal = 0.0;
 $materialByProduct = [];
-$materialStmt = mysqli_prepare(
-    $conn,
-    "SELECT
+$materialSql = "
+    SELECT
         p.productID,
         p.nameEN,
         SUM(oi.quantity) AS units_sold,
@@ -230,12 +273,25 @@ $materialStmt = mysqli_prepare(
      INNER JOIN orders o ON o.orderID = oi.orderID
      INNER JOIN products p ON p.productID = oi.productID
      WHERE o.createdAt BETWEEN ? AND ?
+";
+if ($productFilterActive) {
+    $materialSql .= " AND (p.nameEN LIKE ? OR COALESCE(p.sku, '') LIKE ?)";
+}
+$materialSql .= "
      GROUP BY p.productID, p.nameEN
      HAVING material_total > 0
-     ORDER BY material_total DESC"
+     ORDER BY material_total DESC
+";
+$materialStmt = mysqli_prepare(
+    $conn,
+    $materialSql
 );
 if ($materialStmt) {
-    mysqli_stmt_bind_param($materialStmt, 'ss', $startDateSql, $endDateSql);
+    if ($productFilterActive) {
+        mysqli_stmt_bind_param($materialStmt, 'ssss', $startDateSql, $endDateSql, $productSearchLike, $productSearchLike);
+    } else {
+        mysqli_stmt_bind_param($materialStmt, 'ss', $startDateSql, $endDateSql);
+    }
     mysqli_stmt_execute($materialStmt);
     $matRes = mysqli_stmt_get_result($materialStmt);
     if ($matRes) {
@@ -268,15 +324,30 @@ $bucketExprCosts = trendBucketExpression('costDate', $trendGroup);
 $bucketExprMaterials = trendBucketExpression('o.createdAt', $trendGroup);
 
 $revenueMap = [];
-$trendRevenueStmt = mysqli_prepare(
-    $conn,
-    "SELECT {$bucketExprOrders} AS bucket_key, COALESCE(SUM(totalAmount),0) AS total
+$trendRevenueSql = "SELECT {$bucketExprOrders} AS bucket_key, COALESCE(SUM(totalAmount),0) AS total
      FROM orders
      WHERE createdAt BETWEEN ? AND ?
-     GROUP BY bucket_key"
+     GROUP BY bucket_key";
+if ($productFilterActive) {
+    $trendRevenueSql = "SELECT {$bucketExprMaterials} AS bucket_key,
+            COALESCE(SUM(oi.quantity * oi.unitPrice),0) AS total
+         FROM order_items oi
+         INNER JOIN orders o ON o.orderID = oi.orderID
+         INNER JOIN products p ON p.productID = oi.productID
+         WHERE o.createdAt BETWEEN ? AND ?
+           AND (p.nameEN LIKE ? OR COALESCE(p.sku, '') LIKE ?)
+         GROUP BY bucket_key";
+}
+$trendRevenueStmt = mysqli_prepare(
+    $conn,
+    $trendRevenueSql
 );
 if ($trendRevenueStmt) {
-    mysqli_stmt_bind_param($trendRevenueStmt, 'ss', $startDateSql, $endDateSql);
+    if ($productFilterActive) {
+        mysqli_stmt_bind_param($trendRevenueStmt, 'ssss', $startDateSql, $endDateSql, $productSearchLike, $productSearchLike);
+    } else {
+        mysqli_stmt_bind_param($trendRevenueStmt, 'ss', $startDateSql, $endDateSql);
+    }
     mysqli_stmt_execute($trendRevenueStmt);
     $res = mysqli_stmt_get_result($trendRevenueStmt);
     if ($res) {
@@ -289,39 +360,50 @@ if ($trendRevenueStmt) {
 }
 
 $opsCostMap = [];
-$trendCostStmt = mysqli_prepare(
-    $conn,
-    "SELECT {$bucketExprCosts} AS bucket_key, COALESCE(SUM(amount),0) AS total
-     FROM operational_costs
-     WHERE costDate BETWEEN ? AND ?
-     GROUP BY bucket_key"
-);
-if ($trendCostStmt) {
-    mysqli_stmt_bind_param($trendCostStmt, 'ss', $startDateCostSql, $endDateCostSql);
-    mysqli_stmt_execute($trendCostStmt);
-    $res = mysqli_stmt_get_result($trendCostStmt);
-    if ($res) {
-        while ($row = mysqli_fetch_assoc($res)) {
-            $key = (string)($row['bucket_key'] ?? '');
-            if ($key !== '') $opsCostMap[$key] = (float)($row['total'] ?? 0);
+if (!$productFilterActive) {
+    $trendCostStmt = mysqli_prepare(
+        $conn,
+        "SELECT {$bucketExprCosts} AS bucket_key, COALESCE(SUM(amount),0) AS total
+         FROM operational_costs
+         WHERE costDate BETWEEN ? AND ?
+         GROUP BY bucket_key"
+    );
+    if ($trendCostStmt) {
+        mysqli_stmt_bind_param($trendCostStmt, 'ss', $startDateCostSql, $endDateCostSql);
+        mysqli_stmt_execute($trendCostStmt);
+        $res = mysqli_stmt_get_result($trendCostStmt);
+        if ($res) {
+            while ($row = mysqli_fetch_assoc($res)) {
+                $key = (string)($row['bucket_key'] ?? '');
+                if ($key !== '') $opsCostMap[$key] = (float)($row['total'] ?? 0);
+            }
         }
+        mysqli_stmt_close($trendCostStmt);
     }
-    mysqli_stmt_close($trendCostStmt);
 }
 
 $dynamicMaterialsMap = [];
-$trendMaterialStmt = mysqli_prepare(
-    $conn,
-    "SELECT {$bucketExprMaterials} AS bucket_key,
+$trendMaterialSql = "SELECT {$bucketExprMaterials} AS bucket_key,
             SUM(oi.quantity * COALESCE(p.costPrice, 0)) AS total
      FROM order_items oi
      INNER JOIN orders o ON o.orderID = oi.orderID
      INNER JOIN products p ON p.productID = oi.productID
-     WHERE o.createdAt BETWEEN ? AND ?
-     GROUP BY bucket_key"
+     WHERE o.createdAt BETWEEN ? AND ?";
+if ($productFilterActive) {
+    $trendMaterialSql .= " AND (p.nameEN LIKE ? OR COALESCE(p.sku, '') LIKE ?)";
+}
+$trendMaterialSql .= "
+     GROUP BY bucket_key";
+$trendMaterialStmt = mysqli_prepare(
+    $conn,
+    $trendMaterialSql
 );
 if ($trendMaterialStmt) {
-    mysqli_stmt_bind_param($trendMaterialStmt, 'ss', $startDateSql, $endDateSql);
+    if ($productFilterActive) {
+        mysqli_stmt_bind_param($trendMaterialStmt, 'ssss', $startDateSql, $endDateSql, $productSearchLike, $productSearchLike);
+    } else {
+        mysqli_stmt_bind_param($trendMaterialStmt, 'ss', $startDateSql, $endDateSql);
+    }
     mysqli_stmt_execute($trendMaterialStmt);
     $res = mysqli_stmt_get_result($trendMaterialStmt);
     if ($res) {
@@ -419,20 +501,29 @@ $catIcons = [
 ];
 
 $topProducts = [];
-$topStmt = mysqli_prepare(
-    $conn,
-    "SELECT p.nameEN, SUM(oi.quantity) AS units,
+$topSql = "SELECT p.nameEN, SUM(oi.quantity) AS units,
             ROUND(SUM(oi.quantity * oi.unitPrice),2) AS revenue
      FROM order_items oi
      INNER JOIN orders o ON o.orderID = oi.orderID
      INNER JOIN products p ON p.productID = oi.productID
-     WHERE o.createdAt BETWEEN ? AND ?
-     GROUP BY oi.productID
+     WHERE o.createdAt BETWEEN ? AND ?";
+if ($productFilterActive) {
+    $topSql .= " AND (p.nameEN LIKE ? OR COALESCE(p.sku, '') LIKE ?)";
+}
+$topSql .= "
+     GROUP BY oi.productID, p.nameEN
      ORDER BY units DESC
-     LIMIT 6"
+     LIMIT 3";
+$topStmt = mysqli_prepare(
+    $conn,
+    $topSql
 );
 if ($topStmt) {
-    mysqli_stmt_bind_param($topStmt, 'ss', $startDateSql, $endDateSql);
+    if ($productFilterActive) {
+        mysqli_stmt_bind_param($topStmt, 'ssss', $startDateSql, $endDateSql, $productSearchLike, $productSearchLike);
+    } else {
+        mysqli_stmt_bind_param($topStmt, 'ss', $startDateSql, $endDateSql);
+    }
     mysqli_stmt_execute($topStmt);
     $topRes = mysqli_stmt_get_result($topStmt);
     if ($topRes) {
@@ -449,6 +540,9 @@ $rangeLabel = $range === 'custom'
     ? $startDate->format('M j, Y') . ' - ' . $endDate->format('M j, Y')
     : 'Last ' . $range . ' days';
 $groupLabel = $trendGroup === 'day' ? 'Daily' : ($trendGroup === 'week' ? 'Weekly' : 'Monthly');
+$analyticsScopeLabel = $productFilterActive
+    ? $rangeLabel . ' for ' . $productFilterLabel
+    : $rangeLabel;
 
 $jsonRevLabels = json_encode($revLabels);
 $jsonRevValues = json_encode($revValues);
@@ -525,6 +619,23 @@ $jsonCatValues = json_encode(array_map(static fn(array $row): float => round((fl
               <option value="other" <?= $costFocus === 'other' ? 'selected' : '' ?>>Other</option>
             </select>
           </div>
+          <div class="form-group" style="margin-bottom:0;min-width:260px;flex:1;">
+            <label class="form-label" style="margin-bottom:4px;">Product Search</label>
+            <input
+              type="search"
+              name="product_search"
+              class="form-input"
+              list="analytics-product-options"
+              value="<?= htmlspecialchars($productSearch, ENT_QUOTES, 'UTF-8') ?>"
+              placeholder="Search product name or SKU">
+            <datalist id="analytics-product-options">
+              <?php foreach ($productOptions as $option): ?>
+                <option value="<?= htmlspecialchars($option['name'], ENT_QUOTES, 'UTF-8') ?>">
+                  <?= htmlspecialchars($option['sku'] !== '' ? $option['sku'] : $option['name'], ENT_QUOTES, 'UTF-8') ?>
+                </option>
+              <?php endforeach; ?>
+            </datalist>
+          </div>
           <div class="form-grid-2" id="analytics-custom-range" style="<?= $range === 'custom' ? '' : 'display:none;' ?>;gap:10px;min-width:320px;margin:0;">
             <div class="form-group" style="margin-bottom:0;">
               <label class="form-label" style="margin-bottom:4px;">Start</label>
@@ -543,19 +654,19 @@ $jsonCatValues = json_encode(array_map(static fn(array $row): float => round((fl
           </a>
         </form>
         <p class="text-sm text-muted" style="margin-top:10px;">
-          Showing data for <?= htmlspecialchars($rangeLabel) ?> with <?= htmlspecialchars($groupLabel) ?> trend grouping.
+          Showing data for <?= htmlspecialchars($analyticsScopeLabel) ?> with <?= htmlspecialchars($groupLabel) ?> trend grouping.
         </p>
       </div>
       <div class="grid-4 mb-6">
         <div class="stat-card">
           <div class="stat-header">Total Revenue <i class="fas fa-arrow-trend-up stat-icon" style="color:#10b981"></i></div>
           <div class="analytics-val green">€<?= number_format($totalRevenue, 2) ?></div>
-          <div class="stat-desc"><?= htmlspecialchars($rangeLabel) ?></div>
+          <div class="stat-desc"><?= htmlspecialchars($analyticsScopeLabel) ?></div>
         </div>
         <div class="stat-card">
           <div class="stat-header">Total Costs <i class="fas fa-arrow-trend-down stat-icon" style="color:#dc2626"></i></div>
           <div class="analytics-val red">€<?= number_format($totalCosts, 2) ?></div>
-          <div class="stat-desc">Includes live materials from product cost</div>
+          <div class="stat-desc"><?= $productFilterActive ? 'Live material cost for matching product sales' : 'Includes live materials from product cost' ?></div>
         </div>
         <div class="stat-card">
           <div class="stat-header">Net Income <i class="fas fa-euro-sign stat-icon" style="color:#1d4ed8"></i></div>
@@ -570,9 +681,9 @@ $jsonCatValues = json_encode(array_map(static fn(array $row): float => round((fl
       </div>
 
       <div class="card mb-6">
-        <div class="card-title">Revenue, Costs &amp; Profit Trend</div>
+        <div class="card-title"><?= $productFilterActive ? 'Product Revenue, Cost &amp; Profit Trend' : 'Revenue, Costs &amp; Profit Trend' ?></div>
         <div class="text-sm text-muted" style="margin-top:-8px;margin-bottom:12px;">
-          Filters: <?= htmlspecialchars($rangeLabel) ?>, <?= htmlspecialchars($groupLabel) ?>
+          Filters: <?= htmlspecialchars($analyticsScopeLabel) ?>, <?= htmlspecialchars($groupLabel) ?>
         </div>
         <div class="chart-wrap" style="height:260px">
           <canvas id="trendChart"></canvas>
@@ -611,7 +722,10 @@ $jsonCatValues = json_encode(array_map(static fn(array $row): float => round((fl
         </div>
 
         <div class="card">
-          <div class="card-title">Top Selling Products</div>
+          <div class="card-title"><?= $productFilterActive ? 'Product Sales Matches' : 'Top 3 Selling Products' ?></div>
+          <?php if ($productFilterActive): ?>
+            <p class="text-muted text-sm" style="margin-top:-4px;">Search: <?= htmlspecialchars($productFilterLabel) ?></p>
+          <?php endif; ?>
           <?php if (empty($topProducts)): ?>
             <p class="text-muted text-sm">No sales data yet for the selected range.</p>
           <?php else: ?>
@@ -632,7 +746,7 @@ $jsonCatValues = json_encode(array_map(static fn(array $row): float => round((fl
       </div>
 
       <div class="card mb-6">
-        <div class="card-title">Recent Operational Costs</div>
+        <div class="card-title"><?= $productFilterActive ? 'Recent Operational Costs' : 'Recent Operational Costs' ?></div>
         <table class="data-table">
           <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th></th></tr></thead>
           <tbody>
@@ -657,7 +771,7 @@ $jsonCatValues = json_encode(array_map(static fn(array $row): float => round((fl
             </tr>
             <?php endforeach; ?>
             <?php if (empty($recentCosts)): ?>
-              <tr><td colspan="5" class="text-muted" style="padding:24px 0;text-align:center">No costs recorded yet.</td></tr>
+              <tr><td colspan="5" class="text-muted" style="padding:24px 0;text-align:center"><?= $productFilterActive ? 'Manual operational costs are not assigned to individual products.' : 'No costs recorded yet.' ?></td></tr>
             <?php endif; ?>
           </tbody>
         </table>

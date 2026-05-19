@@ -77,7 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['notif_action'])) {
     exit;
 }
 
-$allowedTrendRanges = [7, 14, 30, 90];
+$allowedTrendRanges = [7, 30, 90, 365];
 $trendRange = (int)($_GET['trend_range'] ?? 7);
 if (!in_array($trendRange, $allowedTrendRanges, true)) {
     $trendRange = 7;
@@ -102,17 +102,78 @@ $trendMetricMeta = [
 ];
 $trendMeta = $trendMetricMeta[$trendMetric];
 
+$productSearch = trim((string)($_GET['product_search'] ?? ''));
+$productSearch = substr($productSearch, 0, 120);
+$productFilterActive = $productSearch !== '';
+$productSearchLike = '%' . $productSearch . '%';
+$productFilterLabel = $productFilterActive ? $productSearch : '';
+$dashboardToday = new DateTimeImmutable('today');
+$dashboardStartDate = $dashboardToday->modify('-' . max(0, $trendRange - 1) . ' days');
+$dashboardStartSql = $dashboardStartDate->format('Y-m-d 00:00:00');
+$dashboardEndSql = $dashboardToday->format('Y-m-d 23:59:59');
+
+$productOptions = [];
+$productOptionsRes = mysqli_query(
+    $conn,
+    "SELECT nameEN, sku
+     FROM products
+     WHERE nameEN IS NOT NULL AND nameEN <> ''
+     ORDER BY nameEN ASC
+     LIMIT 300"
+);
+if ($productOptionsRes) {
+    while ($row = mysqli_fetch_assoc($productOptionsRes)) {
+        $productOptions[] = [
+            'name' => (string)($row['nameEN'] ?? ''),
+            'sku' => (string)($row['sku'] ?? ''),
+        ];
+    }
+}
+
 $salesInWindow = 0.0;
 $ordersInWindow = 0;
-$rangeSql = "
-    SELECT COALESCE(SUM(totalAmount),0) AS sales_total, COUNT(*) AS orders_total
-    FROM orders
-    WHERE createdAt >= DATE_SUB(NOW(), INTERVAL {$trendRange} DAY)
-";
-$rangeRes = mysqli_query($conn, $rangeSql);
-if ($rangeRes && ($rangeRow = mysqli_fetch_assoc($rangeRes))) {
-    $salesInWindow = (float)($rangeRow['sales_total'] ?? 0);
-    $ordersInWindow = (int)($rangeRow['orders_total'] ?? 0);
+$unitsInWindow = 0;
+if ($productFilterActive) {
+    $rangeStmt = mysqli_prepare(
+        $conn,
+        "SELECT
+            COALESCE(SUM(oi.quantity * oi.unitPrice),0) AS sales_total,
+            COUNT(DISTINCT o.orderID) AS orders_total,
+            COALESCE(SUM(oi.quantity),0) AS units_total
+         FROM order_items oi
+         INNER JOIN orders o ON o.orderID = oi.orderID
+         INNER JOIN products p ON p.productID = oi.productID
+         WHERE o.createdAt BETWEEN ? AND ?
+           AND (p.nameEN LIKE ? OR COALESCE(p.sku, '') LIKE ?)"
+    );
+    if ($rangeStmt) {
+        mysqli_stmt_bind_param($rangeStmt, 'ssss', $dashboardStartSql, $dashboardEndSql, $productSearchLike, $productSearchLike);
+        mysqli_stmt_execute($rangeStmt);
+        $rangeRes = mysqli_stmt_get_result($rangeStmt);
+        if ($rangeRes && ($rangeRow = mysqli_fetch_assoc($rangeRes))) {
+            $salesInWindow = (float)($rangeRow['sales_total'] ?? 0);
+            $ordersInWindow = (int)($rangeRow['orders_total'] ?? 0);
+            $unitsInWindow = (int)($rangeRow['units_total'] ?? 0);
+        }
+        mysqli_stmt_close($rangeStmt);
+    }
+} else {
+    $rangeStmt = mysqli_prepare(
+        $conn,
+        "SELECT COALESCE(SUM(totalAmount),0) AS sales_total, COUNT(*) AS orders_total
+         FROM orders
+         WHERE createdAt BETWEEN ? AND ?"
+    );
+    if ($rangeStmt) {
+        mysqli_stmt_bind_param($rangeStmt, 'ss', $dashboardStartSql, $dashboardEndSql);
+        mysqli_stmt_execute($rangeStmt);
+        $rangeRes = mysqli_stmt_get_result($rangeStmt);
+        if ($rangeRes && ($rangeRow = mysqli_fetch_assoc($rangeRes))) {
+            $salesInWindow = (float)($rangeRow['sales_total'] ?? 0);
+            $ordersInWindow = (int)($rangeRow['orders_total'] ?? 0);
+        }
+        mysqli_stmt_close($rangeStmt);
+    }
 }
 
 $topProduct = ['name' => '—', 'sales' => 0];
@@ -121,15 +182,30 @@ $topProductSql = "
     FROM order_items oi
     JOIN orders o ON o.orderID = oi.orderID
     JOIN products p ON p.productID = oi.productID
-    WHERE o.createdAt >= DATE_SUB(NOW(), INTERVAL {$trendRange} DAY)
-    GROUP BY oi.productID
+    WHERE o.createdAt BETWEEN ? AND ?
+";
+if ($productFilterActive) {
+    $topProductSql .= " AND (p.nameEN LIKE ? OR COALESCE(p.sku, '') LIKE ?)";
+}
+$topProductSql .= "
+    GROUP BY oi.productID, p.nameEN
     ORDER BY total DESC
     LIMIT 1
 ";
-$topProductRes = mysqli_query($conn, $topProductSql);
-if ($topProductRes && mysqli_num_rows($topProductRes) > 0) {
-    $row = mysqli_fetch_assoc($topProductRes);
-    $topProduct = ['name' => (string)$row['nameEN'], 'sales' => (int)$row['total']];
+$topProductStmt = mysqli_prepare($conn, $topProductSql);
+if ($topProductStmt) {
+    if ($productFilterActive) {
+        mysqli_stmt_bind_param($topProductStmt, 'ssss', $dashboardStartSql, $dashboardEndSql, $productSearchLike, $productSearchLike);
+    } else {
+        mysqli_stmt_bind_param($topProductStmt, 'ss', $dashboardStartSql, $dashboardEndSql);
+    }
+    mysqli_stmt_execute($topProductStmt);
+    $topProductRes = mysqli_stmt_get_result($topProductStmt);
+    if ($topProductRes && mysqli_num_rows($topProductRes) > 0) {
+        $row = mysqli_fetch_assoc($topProductRes);
+        $topProduct = ['name' => (string)$row['nameEN'], 'sales' => (int)$row['total']];
+    }
+    mysqli_stmt_close($topProductStmt);
 }
 
 $lowStockProducts = [];
@@ -152,22 +228,58 @@ $trendOrderValues = [];
 
 if ($trendGroup === 'day') {
     $trendMap = [];
-    $trendSql = "
-        SELECT DATE(createdAt) AS bucket_date,
-               COALESCE(SUM(totalAmount),0) AS revenue_total,
-               COUNT(*) AS orders_total
-        FROM orders
-        WHERE createdAt >= DATE_SUB(NOW(), INTERVAL " . ($trendRange - 1) . " DAY)
-        GROUP BY DATE(createdAt)
-        ORDER BY bucket_date ASC
-    ";
-    $trendRes = mysqli_query($conn, $trendSql);
-    if ($trendRes) {
-        while ($row = mysqli_fetch_assoc($trendRes)) {
-            $trendMap[(string)$row['bucket_date']] = [
-                'revenue' => (float)($row['revenue_total'] ?? 0),
-                'orders' => (int)($row['orders_total'] ?? 0),
-            ];
+    if ($productFilterActive) {
+        $trendStmt = mysqli_prepare(
+            $conn,
+            "SELECT DATE(o.createdAt) AS bucket_date,
+                   COALESCE(SUM(oi.quantity * oi.unitPrice),0) AS revenue_total,
+                   COUNT(DISTINCT o.orderID) AS orders_total
+             FROM order_items oi
+             INNER JOIN orders o ON o.orderID = oi.orderID
+             INNER JOIN products p ON p.productID = oi.productID
+             WHERE o.createdAt BETWEEN ? AND ?
+               AND (p.nameEN LIKE ? OR COALESCE(p.sku, '') LIKE ?)
+             GROUP BY DATE(o.createdAt)
+             ORDER BY bucket_date ASC"
+        );
+        if ($trendStmt) {
+            mysqli_stmt_bind_param($trendStmt, 'ssss', $dashboardStartSql, $dashboardEndSql, $productSearchLike, $productSearchLike);
+            mysqli_stmt_execute($trendStmt);
+            $trendRes = mysqli_stmt_get_result($trendStmt);
+            if ($trendRes) {
+                while ($row = mysqli_fetch_assoc($trendRes)) {
+                    $trendMap[(string)$row['bucket_date']] = [
+                        'revenue' => (float)($row['revenue_total'] ?? 0),
+                        'orders' => (int)($row['orders_total'] ?? 0),
+                    ];
+                }
+            }
+            mysqli_stmt_close($trendStmt);
+        }
+    } else {
+        $trendStmt = mysqli_prepare(
+            $conn,
+            "SELECT DATE(createdAt) AS bucket_date,
+                   COALESCE(SUM(totalAmount),0) AS revenue_total,
+                   COUNT(*) AS orders_total
+             FROM orders
+             WHERE createdAt BETWEEN ? AND ?
+             GROUP BY DATE(createdAt)
+             ORDER BY bucket_date ASC"
+        );
+        if ($trendStmt) {
+            mysqli_stmt_bind_param($trendStmt, 'ss', $dashboardStartSql, $dashboardEndSql);
+            mysqli_stmt_execute($trendStmt);
+            $trendRes = mysqli_stmt_get_result($trendStmt);
+            if ($trendRes) {
+                while ($row = mysqli_fetch_assoc($trendRes)) {
+                    $trendMap[(string)$row['bucket_date']] = [
+                        'revenue' => (float)($row['revenue_total'] ?? 0),
+                        'orders' => (int)($row['orders_total'] ?? 0),
+                    ];
+                }
+            }
+            mysqli_stmt_close($trendStmt);
         }
     }
 
@@ -178,27 +290,68 @@ if ($trendGroup === 'day') {
         $trendOrderValues[] = (int)($trendMap[$bucketDate]['orders'] ?? 0);
     }
 } else {
-    $trendSql = "
-        SELECT
-            YEARWEEK(createdAt, 1) AS bucket_key,
-            DATE_SUB(DATE(createdAt), INTERVAL WEEKDAY(createdAt) DAY) AS bucket_start,
-            COALESCE(SUM(totalAmount),0) AS revenue_total,
-            COUNT(*) AS orders_total
-        FROM orders
-        WHERE createdAt >= DATE_SUB(CURDATE(), INTERVAL {$trendRange} DAY)
-        GROUP BY bucket_key, bucket_start
-        ORDER BY bucket_start ASC
-    ";
-    $trendRes = mysqli_query($conn, $trendSql);
-    if ($trendRes) {
-        while ($row = mysqli_fetch_assoc($trendRes)) {
-            $bucketStart = (string)($row['bucket_start'] ?? '');
-            if ($bucketStart === '') {
-                continue;
+    if ($productFilterActive) {
+        $trendStmt = mysqli_prepare(
+            $conn,
+            "SELECT
+                YEARWEEK(o.createdAt, 1) AS bucket_key,
+                DATE_SUB(DATE(o.createdAt), INTERVAL WEEKDAY(o.createdAt) DAY) AS bucket_start,
+                COALESCE(SUM(oi.quantity * oi.unitPrice),0) AS revenue_total,
+                COUNT(DISTINCT o.orderID) AS orders_total
+             FROM order_items oi
+             INNER JOIN orders o ON o.orderID = oi.orderID
+             INNER JOIN products p ON p.productID = oi.productID
+             WHERE o.createdAt BETWEEN ? AND ?
+               AND (p.nameEN LIKE ? OR COALESCE(p.sku, '') LIKE ?)
+             GROUP BY bucket_key, bucket_start
+             ORDER BY bucket_start ASC"
+        );
+        if ($trendStmt) {
+            mysqli_stmt_bind_param($trendStmt, 'ssss', $dashboardStartSql, $dashboardEndSql, $productSearchLike, $productSearchLike);
+            mysqli_stmt_execute($trendStmt);
+            $trendRes = mysqli_stmt_get_result($trendStmt);
+            if ($trendRes) {
+                while ($row = mysqli_fetch_assoc($trendRes)) {
+                    $bucketStart = (string)($row['bucket_start'] ?? '');
+                    if ($bucketStart === '') {
+                        continue;
+                    }
+                    $trendLabels[] = 'Week of ' . date('M j', strtotime($bucketStart));
+                    $trendRevenueValues[] = (float)($row['revenue_total'] ?? 0);
+                    $trendOrderValues[] = (int)($row['orders_total'] ?? 0);
+                }
             }
-            $trendLabels[] = 'Week of ' . date('M j', strtotime($bucketStart));
-            $trendRevenueValues[] = (float)($row['revenue_total'] ?? 0);
-            $trendOrderValues[] = (int)($row['orders_total'] ?? 0);
+            mysqli_stmt_close($trendStmt);
+        }
+    } else {
+        $trendStmt = mysqli_prepare(
+            $conn,
+            "SELECT
+                YEARWEEK(createdAt, 1) AS bucket_key,
+                DATE_SUB(DATE(createdAt), INTERVAL WEEKDAY(createdAt) DAY) AS bucket_start,
+                COALESCE(SUM(totalAmount),0) AS revenue_total,
+                COUNT(*) AS orders_total
+             FROM orders
+             WHERE createdAt BETWEEN ? AND ?
+             GROUP BY bucket_key, bucket_start
+             ORDER BY bucket_start ASC"
+        );
+        if ($trendStmt) {
+            mysqli_stmt_bind_param($trendStmt, 'ss', $dashboardStartSql, $dashboardEndSql);
+            mysqli_stmt_execute($trendStmt);
+            $trendRes = mysqli_stmt_get_result($trendStmt);
+            if ($trendRes) {
+                while ($row = mysqli_fetch_assoc($trendRes)) {
+                    $bucketStart = (string)($row['bucket_start'] ?? '');
+                    if ($bucketStart === '') {
+                        continue;
+                    }
+                    $trendLabels[] = 'Week of ' . date('M j', strtotime($bucketStart));
+                    $trendRevenueValues[] = (float)($row['revenue_total'] ?? 0);
+                    $trendOrderValues[] = (int)($row['orders_total'] ?? 0);
+                }
+            }
+            mysqli_stmt_close($trendStmt);
         }
     }
 }
@@ -216,26 +369,41 @@ foreach ($trendRevenueValues as $idx => $revenueValue) {
 }
 
 $topProducts = [];
-$r = mysqli_query($conn, "
+$topProductsSql = "
     SELECT p.nameEN, SUM(oi.quantity) AS units,
            ROUND(SUM(oi.quantity * oi.unitPrice),2) AS revenue
     FROM order_items oi
     JOIN orders o ON o.orderID = oi.orderID
     JOIN products p ON p.productID = oi.productID
-    WHERE o.createdAt >= DATE_SUB(NOW(), INTERVAL {$trendRange} DAY)
-    GROUP BY oi.productID
+    WHERE o.createdAt BETWEEN ? AND ?
+";
+if ($productFilterActive) {
+    $topProductsSql .= " AND (p.nameEN LIKE ? OR COALESCE(p.sku, '') LIKE ?)";
+}
+$topProductsSql .= "
+    GROUP BY oi.productID, p.nameEN
     ORDER BY units DESC
-    LIMIT 6
-");
-if ($r) {
-    while ($row = mysqli_fetch_assoc($r)) {
-        $topProducts[] = $row;
+    LIMIT 3
+";
+$topProductsStmt = mysqli_prepare($conn, $topProductsSql);
+if ($topProductsStmt) {
+    if ($productFilterActive) {
+        mysqli_stmt_bind_param($topProductsStmt, 'ssss', $dashboardStartSql, $dashboardEndSql, $productSearchLike, $productSearchLike);
+    } else {
+        mysqli_stmt_bind_param($topProductsStmt, 'ss', $dashboardStartSql, $dashboardEndSql);
     }
+    mysqli_stmt_execute($topProductsStmt);
+    $topProductsRes = mysqli_stmt_get_result($topProductsStmt);
+    if ($topProductsRes) {
+        while ($row = mysqli_fetch_assoc($topProductsRes)) {
+            $topProducts[] = $row;
+        }
+    }
+    mysqli_stmt_close($topProductsStmt);
 }
 
 $recentOrders = [];
-$r = mysqli_query(
-    $conn,
+$recentOrdersSql =
     "SELECT
         o.orderNumber,
         o.status,
@@ -243,14 +411,33 @@ $r = mysqli_query(
         DATE_FORMAT(o.createdAt,'%m/%d/%Y') AS date,
         COALESCE(u.full_name, u.email, 'Guest') AS customer
      FROM orders o
-     LEFT JOIN users u ON u.userID = o.userID
+     LEFT JOIN users u ON u.userID = o.userID";
+if ($productFilterActive) {
+    $recentOrdersSql .= "
+     INNER JOIN order_items oi ON oi.orderID = o.orderID
+     INNER JOIN products p ON p.productID = oi.productID
+     WHERE p.nameEN LIKE ? OR COALESCE(p.sku, '') LIKE ?";
+}
+$recentOrdersSql .= "
+     GROUP BY o.orderID, o.orderNumber, o.status, o.totalAmount, o.createdAt, u.full_name, u.email
      ORDER BY o.createdAt DESC
-     LIMIT 5"
+     LIMIT 5";
+$recentOrdersStmt = mysqli_prepare(
+    $conn,
+    $recentOrdersSql
 );
-if ($r) {
-    while ($row = mysqli_fetch_assoc($r)) {
-        $recentOrders[] = $row;
+if ($recentOrdersStmt) {
+    if ($productFilterActive) {
+        mysqli_stmt_bind_param($recentOrdersStmt, 'ss', $productSearchLike, $productSearchLike);
     }
+    mysqli_stmt_execute($recentOrdersStmt);
+    $recentOrdersRes = mysqli_stmt_get_result($recentOrdersStmt);
+    if ($recentOrdersRes) {
+        while ($row = mysqli_fetch_assoc($recentOrdersRes)) {
+            $recentOrders[] = $row;
+        }
+    }
+    mysqli_stmt_close($recentOrdersStmt);
 }
 
 $adminNotifications = [];
@@ -349,6 +536,9 @@ $statusLabel = [
 $trendSubtitle = $trendGroup === 'day'
     ? "Last {$trendRange} days"
     : "Last {$trendRange} days, grouped by week";
+$trendScopeLabel = $productFilterActive
+    ? $trendSubtitle . ' for ' . $productFilterLabel
+    : $trendSubtitle;
 
 $jsonLabels = json_encode($trendLabels);
 $jsonValues = json_encode($trendValues);
@@ -449,12 +639,12 @@ $jsonOrders = json_encode($trendOrderValues);
         <div class="stat-card">
           <div class="stat-header">Total Sales (<?= (int)$trendRange ?> days) <i class="fas fa-euro-sign stat-icon"></i></div>
           <div class="stat-val">€<?= number_format($salesInWindow, 2) ?></div>
-          <div class="stat-desc"><?= htmlspecialchars($trendSubtitle) ?></div>
+          <div class="stat-desc"><?= htmlspecialchars($trendScopeLabel) ?></div>
         </div>
         <div class="stat-card">
-          <div class="stat-header">Recent Orders <i class="fas fa-clipboard-list stat-icon"></i></div>
+          <div class="stat-header"><?= $productFilterActive ? 'Orders With Product' : 'Recent Orders' ?> <i class="fas fa-clipboard-list stat-icon"></i></div>
           <div class="stat-val"><?= (int)$ordersInWindow ?></div>
-          <div class="stat-desc"><?= htmlspecialchars($trendSubtitle) ?></div>
+          <div class="stat-desc"><?= $productFilterActive ? ((int)$unitsInWindow . ' units sold') : htmlspecialchars($trendSubtitle) ?></div>
         </div>
         <div class="stat-card">
           <div class="stat-header">Top Product <i class="fas fa-arrow-trend-up stat-icon"></i></div>
@@ -495,6 +685,23 @@ $jsonOrders = json_encode($trendOrderValues);
               <option value="average_order_value" <?= $trendMetric === 'average_order_value' ? 'selected' : '' ?>>Average Order Value (€)</option>
             </select>
           </div>
+          <div class="form-group" style="margin-bottom:0;min-width:260px;flex:1;">
+            <label class="form-label" style="margin-bottom:4px;">Product Search</label>
+            <input
+              type="search"
+              name="product_search"
+              class="form-input"
+              list="dashboard-product-options"
+              value="<?= htmlspecialchars($productSearch, ENT_QUOTES, 'UTF-8') ?>"
+              placeholder="Search product name or SKU">
+            <datalist id="dashboard-product-options">
+              <?php foreach ($productOptions as $option): ?>
+                <option value="<?= htmlspecialchars($option['name'], ENT_QUOTES, 'UTF-8') ?>">
+                  <?= htmlspecialchars($option['sku'] !== '' ? $option['sku'] : $option['name'], ENT_QUOTES, 'UTF-8') ?>
+                </option>
+              <?php endforeach; ?>
+            </datalist>
+          </div>
           <button type="submit" class="btn-primary" style="margin-top:20px;">
             <i class="fas fa-filter"></i> Apply Trend Filters
           </button>
@@ -506,13 +713,16 @@ $jsonOrders = json_encode($trendOrderValues);
 
       <div class="grid-21 mb-6">
         <div class="card">
-          <div class="card-title">Sales Trend: <?= htmlspecialchars($trendMeta['label']) ?> (<?= htmlspecialchars($trendSubtitle) ?>)</div>
+          <div class="card-title">Sales Trend: <?= htmlspecialchars($trendMeta['label']) ?> (<?= htmlspecialchars($trendScopeLabel) ?>)</div>
           <div class="chart-wrap">
             <canvas id="salesChart"></canvas>
           </div>
         </div>
         <div class="card">
-          <div class="card-title">Top Selling Products (<?= (int)$trendRange ?> days)</div>
+          <div class="card-title"><?= $productFilterActive ? 'Product Sales Matches' : 'Top 3 Selling Products' ?> (<?= (int)$trendRange ?> days)</div>
+          <?php if ($productFilterActive): ?>
+            <p class="text-muted text-sm" style="margin-top:-4px;">Search: <?= htmlspecialchars($productFilterLabel) ?></p>
+          <?php endif; ?>
           <?php if (empty($topProducts)): ?>
             <p class="text-muted text-sm">No sales data yet for the selected filters.</p>
           <?php else: ?>
@@ -542,7 +752,7 @@ $jsonOrders = json_encode($trendOrderValues);
       <?php endif; ?>
 
       <div class="card">
-        <div class="card-title">Recent Orders</div>
+        <div class="card-title"><?= $productFilterActive ? 'Recent Orders for Product Search' : 'Recent Orders' ?></div>
         <?php if (empty($recentOrders)): ?>
           <p class="text-muted text-sm">No orders yet.</p>
         <?php else: ?>

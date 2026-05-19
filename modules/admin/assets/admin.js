@@ -113,16 +113,6 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 });
 
-function toggleColour(form) {
-  var fd = new FormData(form);
-  fetch(form.action, { method: 'POST', body: fd })
-    .then(function (r) { return r.json(); })
-    .then(function (data) {
-      if (!data.ok) alert('Could not update colour.');
-    })
-    .catch(function () { alert('Network error.'); });
-}
-
 function confirmDelete(msg) {
   return confirm(msg || 'Are you sure you want to delete this item?');
 }
@@ -142,16 +132,6 @@ document.addEventListener('change', function (e) {
     e.target.closest('form').submit();
   }
 });
-
-function populateEditModal(modalId, data) {
-  var modal = document.getElementById(modalId);
-  if (!modal) return;
-  Object.keys(data).forEach(function (key) {
-    var el = modal.querySelector('[name="' + key + '"]');
-    if (el) el.value = data[key];
-  });
-  openModal(modalId);
-}
 
 document.addEventListener('DOMContentLoaded', function () {
   var hasUnsavedChanges = false;

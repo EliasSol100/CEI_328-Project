@@ -361,30 +361,6 @@ function attachCustomOrderReferencePhotoToProduct(mysqli $conn, int $productId, 
     }
 }
 
-function sendCustomProductAccessEmail($toEmail, $productId, $accessLink, $method, string $accessCode = '')
-{
-    $toEmail = normalizeCustomerEmail((string)$toEmail);
-    if ($toEmail === '' || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
-        return false;
-    }
-
-    $body =
-        "Hello,\n\n" .
-        "Your custom order request was accepted and is ready for the next step.\n\n" .
-        "Open your private product here:\n" . $accessLink . "\n\n" .
-        ($accessCode !== '' ? "Access code: " . normalizeCustomOrderAccessCode($accessCode) . "\n\n" : '') .
-        "From that page, enter the access code, review the private product while signed in with {$toEmail}, and complete checkout.\n\n" .
-        "Thank you,\nAthina E-Shop";
-
-    if (function_exists('sendCustomOrderPlainEmail')) {
-        return sendCustomOrderPlainEmail($toEmail, $toEmail, 'Your custom order checkout is ready', $body);
-    }
-
-    require_once __DIR__ . '/../authentication/auth_mailer.php';
-    $result = app_auth_send_plaintext_email($toEmail, $toEmail, 'Your custom order checkout is ready', $body);
-    return !empty($result['success']);
-}
-
 function logCustomProductCreation($conn, $customOrderId, $productId, $accessMethod)
 {
     $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';

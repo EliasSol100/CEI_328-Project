@@ -17,25 +17,6 @@ app_product_options_ensure_schema($conn);
 
 $systemTitle = getSystemConfig("site_title") ?: "Creations by Athina";
 
-function ensurePromotionCouponColumn(mysqli $conn): void {
-    static $checked = false;
-    if ($checked) {
-        return;
-    }
-    $checked = true;
-
-    $tableCheck = $conn->query("SHOW TABLES LIKE 'promotions'");
-    if (!$tableCheck || $tableCheck->num_rows === 0) {
-        return;
-    }
-
-    $check = $conn->query("SHOW COLUMNS FROM promotions LIKE 'couponCode'");
-    $exists = ($check && $check->num_rows > 0);
-    if (!$exists) {
-        $conn->query("ALTER TABLE promotions ADD COLUMN couponCode VARCHAR(64) NULL AFTER promotionName");
-    }
-}
-
 function productPageCanQueryCustomOrderPhoto(mysqli $conn): bool
 {
     static $ready = null;
@@ -61,94 +42,6 @@ function productPageCanQueryCustomOrderPhoto(mysqli $conn): bool
 
     $ready = true;
     return $ready;
-}
-
-function normalizeCouponCode(string $code): string {
-    $code = strtoupper(trim($code));
-    $code = preg_replace('/[^A-Z0-9_-]/', '', $code);
-    return (string)$code;
-}
-
-function findActiveCouponPromotion(mysqli $conn, string $couponCode): ?array {
-    if ($couponCode === '') {
-        return null;
-    }
-
-    $sql = "
-        SELECT p.promotionID, p.promotionName, p.discountType, p.discountValue, p.scope, p.categoryID, c.categoryName
-        FROM promotions p
-        LEFT JOIN categories c ON c.categoryID = p.categoryID
-        WHERE p.isActive = 1
-          AND UPPER(TRIM(COALESCE(p.couponCode, ''))) = ?
-          AND (p.startDate IS NULL OR p.startDate <= CURDATE())
-          AND (p.endDate IS NULL OR p.endDate >= CURDATE())
-        ORDER BY p.createdAt DESC, p.promotionID DESC
-        LIMIT 1
-    ";
-    $st = $conn->prepare($sql);
-    if (!$st) {
-        return null;
-    }
-    $st->bind_param("s", $couponCode);
-    $st->execute();
-    $res = $st->get_result();
-    $row = $res ? $res->fetch_assoc() : null;
-    $st->close();
-    return $row ?: null;
-}
-
-function evaluateProductCoupon(mysqli $conn, float $basePrice, string $productCategory, string $couponCode): array {
-    ensurePromotionCouponColumn($conn);
-    $couponCode = normalizeCouponCode($couponCode);
-    $result = [
-        'valid' => false,
-        'coupon_code' => $couponCode,
-        'promotion_name' => '',
-        'discount_amount' => 0.0,
-        'discounted_price' => round(max(0, $basePrice), 2),
-        'message' => '',
-    ];
-
-    if ($couponCode === '') {
-        $result['message'] = 'Enter a coupon code.';
-        return $result;
-    }
-
-    $promotion = findActiveCouponPromotion($conn, $couponCode);
-    if (!$promotion) {
-        $result['message'] = 'Invalid or expired coupon code.';
-        return $result;
-    }
-
-    $scope = strtolower(trim((string)($promotion['scope'] ?? 'store')));
-    $isCategoryScope = strpos($scope, 'category') !== false;
-    if ($isCategoryScope) {
-        $targetCategory = trim((string)($promotion['categoryName'] ?? ''));
-        if ($targetCategory === '' || strcasecmp($targetCategory, $productCategory) !== 0) {
-            $result['message'] = 'Coupon is not applicable to this product.';
-            return $result;
-        }
-    }
-
-    $discountType = strtolower(trim((string)($promotion['discountType'] ?? 'percentage')));
-    $discountValue = max(0.0, (float)($promotion['discountValue'] ?? 0));
-    if ($discountType === 'fixed') {
-        $discountAmount = min($basePrice, $discountValue);
-    } else {
-        $discountAmount = min($basePrice, $basePrice * ($discountValue / 100));
-    }
-    $discountAmount = round(max(0, $discountAmount), 2);
-    if ($discountAmount <= 0) {
-        $result['message'] = 'Coupon is not applicable to this product.';
-        return $result;
-    }
-
-    $result['valid'] = true;
-    $result['promotion_name'] = (string)($promotion['promotionName'] ?? $couponCode);
-    $result['discount_amount'] = $discountAmount;
-    $result['discounted_price'] = round(max(0, $basePrice - $discountAmount), 2);
-    $result['message'] = 'Valid coupon.';
-    return $result;
 }
 
 function ensureProductSalesOverridesSchema(mysqli $conn): void {
@@ -257,39 +150,6 @@ $conn->query("
         INDEX idx_review_admin_replies_admin (adminUserID)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 ");
-
-function userCanReviewDeliveredProduct(mysqli $conn, int $userId, int $productId): bool {
-    if ($userId <= 0 || $productId <= 0) {
-        return false;
-    }
-
-    $stmt = $conn->prepare(
-        "SELECT 1
-         FROM orders o
-         INNER JOIN order_items oi ON oi.orderID = o.orderID
-         WHERE o.userID = ?
-           AND oi.productID = ?
-           AND LOWER(o.status) IN ('delivered', 'completed')
-           AND EXISTS (
-               SELECT 1
-               FROM payments p
-               WHERE p.orderID = o.orderID
-                 AND LOWER(p.paymentStatus) IN ('paid', 'completed', 'captured', 'succeeded', 'confirmed')
-               LIMIT 1
-           )
-         LIMIT 1"
-    );
-    if (!$stmt) {
-        return false;
-    }
-
-    $stmt->bind_param("ii", $userId, $productId);
-    $stmt->execute();
-    $res = $stmt->get_result();
-    $allowed = ($res && $res->num_rows > 0);
-    $stmt->close();
-    return $allowed;
-}
 
 function userReviewEligibleOrderCount(mysqli $conn, int $userId, int $productId): int {
     if ($userId <= 0 || $productId <= 0) {
@@ -1176,22 +1036,6 @@ foreach ($variationPhotos as $photoList) {
     }
 }
 $productGalleryPreloadSources = array_slice(array_values(array_unique(array_filter($productGalleryPreloadSources))), 0, 32);
-$storedCouponCode = '';
-$initialCouponEvaluation = ['valid' => false, 'discounted_price' => round(max(0, $baseProductPrice), 2)];
-$couponFeedbackText = '';
-$couponFeedbackIsError = false;
-if ($storedCouponCode !== '') {
-    if (!empty($initialCouponEvaluation['valid'])) {
-        $couponFeedbackText = sprintf(
-            "Valid coupon applied: %s (-€%0.2f)",
-            (string)($initialCouponEvaluation['promotion_name'] ?? $storedCouponCode),
-            (float)($initialCouponEvaluation['discount_amount'] ?? 0)
-        );
-    } else {
-        $couponFeedbackText = (string)($initialCouponEvaluation['message'] ?? 'Invalid or expired coupon code.');
-        $couponFeedbackIsError = true;
-    }
-}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -2371,24 +2215,6 @@ include __DIR__ . "/include/header.php";
         });
         selectedColorId = null;
         selectedColorName = "";
-    }
-
-    function triggerColorChip(colorId) {
-        var matchingChip = null;
-        for (var ci = 0; ci < colorChips.length; ci++) {
-            if (parseInt(colorChips[ci].getAttribute("data-color-id") || "0", 10) === colorId) {
-                matchingChip = colorChips[ci];
-                break;
-            }
-        }
-        if (matchingChip && !matchingChip.disabled) {
-            matchingChip.click();
-        } else if (colorId) {
-            selectedColorId = colorId;
-            updateColorChips();
-            updateColorStockDisplay();
-            updateAddToCartState(validationStarted);
-        }
     }
 
     if (yarnTypeSelectEl) {

@@ -1145,8 +1145,8 @@ if (file_exists($headerPath)) {
                     <div class="form-group">
                         <label data-translate="checkoutSpeed">Speed</label>
                         <div class="form-options">
-                            <label class="option-label"><input type="radio" name="shipping_speed" value="standard" <?= ($formData['shipping_speed']??'standard')=='standard'?'checked':'' ?>> <span data-translate="checkoutStandard">Standard</span> <span id="standard-cost-label"></span></label>
-                            <label class="option-label"><input type="radio" name="shipping_speed" value="express" <?= ($formData['shipping_speed']??'')=='express'?'checked':'' ?>> <span data-translate="checkoutExpress">Express</span> <span id="express-cost-label"></span></label>
+                            <label class="option-label"><input type="radio" name="shipping_speed" value="standard" <?= ($formData['shipping_speed']??'standard')=='standard'?'checked':'' ?>> <span data-translate="checkoutStandard">Standard</span></label>
+                            <label class="option-label"><input type="radio" name="shipping_speed" value="express" <?= ($formData['shipping_speed']??'')=='express'?'checked':'' ?>> <span data-translate="checkoutExpress">Express</span></label>
                         </div>
                         <?php if (isset($errors['shipping_speed'])): ?><span class="error"><?= $errors['shipping_speed'] ?></span><?php endif; ?>
                     </div>
@@ -1424,8 +1424,6 @@ if (file_exists($headerPath)) {
     var shippingOut = document.getElementById('orderShipping');
     var totalOut = document.getElementById('orderTotal');
     var btnTotalOut = document.getElementById('placeOrderTotal');
-    var standardCostLabelEl = document.getElementById('standard-cost-label');
-    var expressCostLabelEl = document.getElementById('express-cost-label');
     var courierMapFrame = document.getElementById('courier-map-frame');
     var courierMapTitle = document.getElementById('courier-map-title');
     var courierMapHint = document.getElementById('courier-map-hint');
@@ -1513,8 +1511,6 @@ if (file_exists($headerPath)) {
         if (totalOut) totalOut.textContent = total.toFixed(2);
         if (btnTotalOut) btnTotalOut.textContent = total.toFixed(2);
     }
-
-    function updateSpeedLabels() {}
 
     function refreshCourierOptions() {
         if (!courierEl) {
@@ -1854,7 +1850,6 @@ if (file_exists($headerPath)) {
         }
 
         refreshCourierOptions();
-        updateSpeedLabels();
         applyPostalRule();
         updateTotals();
         updateCourierMap();
@@ -1872,7 +1867,6 @@ if (file_exists($headerPath)) {
     if (countryEl) {
         countryEl.addEventListener('change', function () {
             refreshCourierOptions();
-            updateSpeedLabels();
             applyPostalRule();
             updateTotals();
             updateCourierMap();
@@ -1927,7 +1921,6 @@ if (file_exists($headerPath)) {
     if (courierEl) {
         courierEl.addEventListener('change', function () {
             toggleDeliveryOption();
-            updateSpeedLabels();
             updateTotals();
             updateCourierMap();
             togglePickupPointWrappers();
@@ -1968,7 +1961,6 @@ if (file_exists($headerPath)) {
 
     refreshCourierOptions();
     toggleDeliveryOption();
-    updateSpeedLabels();
     applyPostalRule();
     updateTotals();
     togglePickupPointWrappers();

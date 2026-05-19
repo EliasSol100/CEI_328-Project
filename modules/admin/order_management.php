@@ -139,68 +139,6 @@ function inferCourierCode(string $courierCode, string $shipmentCourierName): str
     return '';
 }
 
-function makeTrackingCode(string $courierCode, string $orderNumber): string {
-    $prefixMap = [
-        'akis_express' => 'AKI',
-        'boxnow' => 'BXN',
-        'acs' => 'ACS',
-        'elta_courier' => 'ELT',
-        'speedex' => 'SPD',
-        'geniki' => 'GNK',
-    ];
-    $normalized = strtolower(trim($courierCode));
-    $prefix = $prefixMap[$normalized] ?? 'TRK';
-    $orderPart = strtoupper(preg_replace('/[^A-Z0-9]/', '', $orderNumber));
-    if ($orderPart === '') {
-        $orderPart = 'ORDER';
-    }
-    return $prefix . '-' . substr($orderPart, -6) . '-' . strtoupper(bin2hex(random_bytes(2)));
-}
-
-function ensureShipmentTracking(mysqli $conn, int $orderId, string $orderNumber, string $courierCode, string $shipmentCourierName): string {
-    if ($orderId <= 0) {
-        return '';
-    }
-
-    $resolvedCode = inferCourierCode($courierCode, $shipmentCourierName);
-    $resolvedLabel = courierLabelFromCode($resolvedCode);
-
-    $row = null;
-    $sel = $conn->prepare("SELECT shipmentID, trackingCode FROM shipments WHERE orderID = ? LIMIT 1");
-    if ($sel) {
-        $sel->bind_param('i', $orderId);
-        $sel->execute();
-        $res = $sel->get_result();
-        $row = $res ? $res->fetch_assoc() : null;
-        $sel->close();
-    }
-
-    if ($row && !empty($row['trackingCode'])) {
-        return (string)$row['trackingCode'];
-    }
-
-    $trackingCode = makeTrackingCode($resolvedCode, $orderNumber);
-
-    if ($row) {
-        $shipmentId = (int)$row['shipmentID'];
-        $upd = $conn->prepare("UPDATE shipments SET trackingCode = ?, courierName = COALESCE(NULLIF(courierName, ''), ?) WHERE shipmentID = ?");
-        if ($upd) {
-            $upd->bind_param('ssi', $trackingCode, $resolvedLabel, $shipmentId);
-            $upd->execute();
-            $upd->close();
-        }
-    } else {
-        $ins = $conn->prepare("INSERT INTO shipments (orderID, courierName, shippingCost, trackingCode) VALUES (?, ?, 0, ?)");
-        if ($ins) {
-            $ins->bind_param('iss', $orderId, $resolvedLabel, $trackingCode);
-            $ins->execute();
-            $ins->close();
-        }
-    }
-
-    return $trackingCode;
-}
-
 function fetchOrderStatusContext(mysqli $conn, int $orderId): ?array {
     if ($orderId <= 0) {
         return null;
