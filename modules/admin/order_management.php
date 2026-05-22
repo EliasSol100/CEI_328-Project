@@ -40,6 +40,54 @@ $statusBadge = [
     'cancelled'     => 'badge-red',
 ];
 
+function normalizeOrderStatusForAdmin(string $status): string {
+    $status = strtolower(trim($status));
+    if ($status === 'accepted') {
+        return 'pending';
+    }
+    if ($status === 'delivered') {
+        return 'completed';
+    }
+    return $status;
+}
+
+function allowedOrderStatusTargets(string $currentStatus): array {
+    $currentStatus = normalizeOrderStatusForAdmin($currentStatus);
+    if ($currentStatus === 'pending') {
+        return ['in_production', 'cancelled'];
+    }
+    if ($currentStatus === 'in_production') {
+        return ['cancelled'];
+    }
+    if ($currentStatus === 'shipped') {
+        return ['completed'];
+    }
+    return [];
+}
+
+function orderStatusCanMoveTo(string $currentStatus, string $targetStatus): bool {
+    $currentStatus = normalizeOrderStatusForAdmin($currentStatus);
+    $targetStatus = normalizeOrderStatusForAdmin($targetStatus);
+    if ($currentStatus === $targetStatus) {
+        return true;
+    }
+    return in_array($targetStatus, allowedOrderStatusTargets($currentStatus), true);
+}
+
+function orderStatusSelectOptions(string $currentStatus, array $statusUpdateOptions): array {
+    $currentStatus = normalizeOrderStatusForAdmin($currentStatus);
+    $options = [];
+    if (isset($statusUpdateOptions[$currentStatus])) {
+        $options[$currentStatus] = $statusUpdateOptions[$currentStatus];
+    }
+    foreach (allowedOrderStatusTargets($currentStatus) as $targetStatus) {
+        if (isset($statusUpdateOptions[$targetStatus])) {
+            $options[$targetStatus] = $statusUpdateOptions[$targetStatus];
+        }
+    }
+    return $options;
+}
+
 function ensureOrderShippingSchema(mysqli $conn): void {
     static $checked = false;
     if ($checked) {
@@ -647,76 +695,89 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($orderID > 0 && isset($statusUpdateOptions[$status])) {
             $beforeContext = fetchOrderStatusContext($conn, $orderID);
-            $beforeStatus = strtolower(trim((string)($beforeContext['status'] ?? '')));
-
-            if ($status === 'shipped' && $beforeStatus !== 'shipped') {
-                $flash = 'err:Add the tracking number in the Tracking area. The order will move to Shipped automatically.';
+            if (!$beforeContext) {
+                $flash = 'err:Order not found.';
             } else {
-                $stmt = mysqli_prepare($conn, 'UPDATE orders SET status = ? WHERE orderID = ?');
-                if ($stmt) {
-                    mysqli_stmt_bind_param($stmt, 'si', $status, $orderID);
-                    mysqli_stmt_execute($stmt);
-                    $affected = mysqli_stmt_affected_rows($stmt);
-                    mysqli_stmt_close($stmt);
+                $beforeStatus = normalizeOrderStatusForAdmin((string)($beforeContext['status'] ?? ''));
+                $targetStatus = normalizeOrderStatusForAdmin($status);
 
-                    if ($affected >= 0) {
-                        $afterContext = fetchOrderStatusContext($conn, $orderID);
-                        if ($afterContext) {
-                            $trackingInfo = '';
-                            $reviewInfo = '';
-                            $statusLabel = $statusLabels[$status] ?? ucwords(str_replace('_', ' ', $status));
-                            if ($status === 'shipped') {
-                                $trackingCode = trim((string)($afterContext['trackingCode'] ?? ''));
-                                $trackingInfo = $trackingCode !== ''
-                                    ? ' Tracking: ' . $trackingCode . '.'
-                                    : ' Tracking number is not assigned yet.';
-                            }
-
-                            $afterStatus = strtolower(trim((string)($afterContext['status'] ?? '')));
-                            if ($beforeStatus !== $afterStatus) {
-                                sendOrderStatusEmails($conn, $afterContext, $statusLabel);
-
-                                if (in_array($afterStatus, ['delivered', 'completed'], true)) {
-                                    if (isOrderPaymentConfirmed($conn, $orderID)) {
-                                        $ctx = fetchOrderReviewInviteContext($conn, $orderID);
-                                        $recipientEmail = trim((string)($ctx['recipientEmail'] ?? ''));
-                                        if ($ctx && $recipientEmail !== '' && filter_var($recipientEmail, FILTER_VALIDATE_EMAIL)) {
-                                            ensureOrderReviewNotificationTable($conn);
-                                            if (!orderReviewNotificationAlreadySent($conn, $orderID)) {
-                                                $reviewUrl = buildReviewInviteUrl($ctx);
-                                                $mailResult = sendReviewInvitationEmail([
-                                                    'to_email' => $recipientEmail,
-                                                    'customer_name' => (string)($ctx['customerName'] ?? 'Customer'),
-                                                    'order_number' => (string)($ctx['orderNumber'] ?? ''),
-                                                    'review_url' => $reviewUrl,
-                                                ]);
-                                                if ($mailResult['sent']) {
-                                                    markOrderReviewNotificationSent($conn, $orderID, $recipientEmail);
-                                                    $reviewInfo = ' Review notification sent.';
-                                                } else {
-                                                    error_log('Review notification email failed for order #' . $orderID . ': ' . (string)$mailResult['error']);
-                                                    $reviewInfo = ' Review notification email failed.';
-                                                }
-                                            } else {
-                                                $reviewInfo = ' Review notification already sent.';
-                                            }
-                                        } else {
-                                            $reviewInfo = ' No valid customer email for review notification.';
-                                        }
-                                    } else {
-                                        $reviewInfo = ' Review notification pending payment confirmation.';
-                                    }
-                                }
-                            }
-                            $flash = 'ok:Order status updated to ' . $statusLabel . '.' . $trackingInfo . $reviewInfo;
-                        } else {
-                            $flash = 'ok:Order status updated.';
-                        }
+                if ($targetStatus === 'shipped' && $beforeStatus !== 'shipped') {
+                    $flash = 'err:Add the tracking number in the Tracking area. The order will move to Shipped automatically.';
+                } elseif (!orderStatusCanMoveTo($beforeStatus, $targetStatus)) {
+                    $currentLabel = $statusLabels[$beforeStatus] ?? ucwords(str_replace('_', ' ', $beforeStatus));
+                    $targetLabel = $statusLabels[$targetStatus] ?? ucwords(str_replace('_', ' ', $targetStatus));
+                    if (in_array($beforeStatus, ['completed', 'cancelled'], true)) {
+                        $flash = 'err:' . $currentLabel . ' orders are locked and cannot be changed.';
                     } else {
-                        $flash = 'err:Order update failed.';
+                        $flash = 'err:Cannot change an order from ' . $currentLabel . ' to ' . $targetLabel . '.';
                     }
                 } else {
-                    $flash = 'err:Could not update order.';
+                    $stmt = mysqli_prepare($conn, 'UPDATE orders SET status = ? WHERE orderID = ?');
+                    if ($stmt) {
+                        mysqli_stmt_bind_param($stmt, 'si', $targetStatus, $orderID);
+                        mysqli_stmt_execute($stmt);
+                        $affected = mysqli_stmt_affected_rows($stmt);
+                        mysqli_stmt_close($stmt);
+
+                        if ($affected >= 0) {
+                            $afterContext = fetchOrderStatusContext($conn, $orderID);
+                            if ($afterContext) {
+                                $trackingInfo = '';
+                                $reviewInfo = '';
+                                $statusLabel = $statusLabels[$targetStatus] ?? ucwords(str_replace('_', ' ', $targetStatus));
+                                if ($targetStatus === 'shipped') {
+                                    $trackingCode = trim((string)($afterContext['trackingCode'] ?? ''));
+                                    $trackingInfo = $trackingCode !== ''
+                                        ? ' Tracking: ' . $trackingCode . '.'
+                                        : ' Tracking number is not assigned yet.';
+                                }
+
+                                $afterStatus = normalizeOrderStatusForAdmin((string)($afterContext['status'] ?? ''));
+                                if ($beforeStatus !== $afterStatus) {
+                                    sendOrderStatusEmails($conn, $afterContext, $statusLabel);
+
+                                    if ($afterStatus === 'completed') {
+                                        if (isOrderPaymentConfirmed($conn, $orderID)) {
+                                            $ctx = fetchOrderReviewInviteContext($conn, $orderID);
+                                            $recipientEmail = trim((string)($ctx['recipientEmail'] ?? ''));
+                                            if ($ctx && $recipientEmail !== '' && filter_var($recipientEmail, FILTER_VALIDATE_EMAIL)) {
+                                                ensureOrderReviewNotificationTable($conn);
+                                                if (!orderReviewNotificationAlreadySent($conn, $orderID)) {
+                                                    $reviewUrl = buildReviewInviteUrl($ctx);
+                                                    $mailResult = sendReviewInvitationEmail([
+                                                        'to_email' => $recipientEmail,
+                                                        'customer_name' => (string)($ctx['customerName'] ?? 'Customer'),
+                                                        'order_number' => (string)($ctx['orderNumber'] ?? ''),
+                                                        'review_url' => $reviewUrl,
+                                                    ]);
+                                                    if ($mailResult['sent']) {
+                                                        markOrderReviewNotificationSent($conn, $orderID, $recipientEmail);
+                                                        $reviewInfo = ' Review notification sent.';
+                                                    } else {
+                                                        error_log('Review notification email failed for order #' . $orderID . ': ' . (string)$mailResult['error']);
+                                                        $reviewInfo = ' Review notification email failed.';
+                                                    }
+                                                } else {
+                                                    $reviewInfo = ' Review notification already sent.';
+                                                }
+                                            } else {
+                                                $reviewInfo = ' No valid customer email for review notification.';
+                                            }
+                                        } else {
+                                            $reviewInfo = ' Review notification pending payment confirmation.';
+                                        }
+                                    }
+                                }
+                                $flash = 'ok:Order status updated to ' . $statusLabel . '.' . $trackingInfo . $reviewInfo;
+                            } else {
+                                $flash = 'ok:Order status updated.';
+                            }
+                        } else {
+                            $flash = 'err:Order update failed.';
+                        }
+                    } else {
+                        $flash = 'err:Could not update order.';
+                    }
                 }
             }
         } else {
@@ -773,16 +834,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $trackingCode = trim((string)($_POST['trackingCode'] ?? ''));
         if ($orderID <= 0) {
             $flash = 'err:Invalid order.';
-        } elseif ($action === 'ship_with_tracking' && $trackingCode === '') {
+        } elseif ($trackingCode === '') {
             $flash = 'err:Please enter a tracking number first.';
         } else {
             $ctx = fetchOrderStatusContext($conn, $orderID);
             if (!$ctx) {
                 $flash = 'err:Order not found.';
             } else {
-                $orderStatus = strtolower(trim((string)($ctx['status'] ?? '')));
+                $orderStatus = normalizeOrderStatusForAdmin((string)($ctx['status'] ?? ''));
                 $canAssignTracking = in_array($orderStatus, ['in_production', 'shipped'], true);
-                if ($trackingCode !== '' && !$canAssignTracking) {
+                if (!$canAssignTracking) {
                     $flash = 'err:Tracking can be assigned once the order is In Production.';
                 } else {
                     $resolvedCourier = courierLabelFromCode(
@@ -800,17 +861,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             error_log('Tracking shipment email failed for order #' . $orderID . ': ' . (string)($emailResult['message'] ?? 'unknown error'));
                             $flash = 'ok:Tracking number saved and order moved to Shipped, but the customer email could not be sent.';
                         }
-                    } else {
-                        $afterContext = fetchOrderStatusContext($conn, $orderID);
-                        if ($afterContext) {
-                            sendOrderMetaUpdateEmails(
-                                $conn,
-                                $afterContext,
-                                'Tracking number cleared',
-                                'The tracking number for your order was cleared.'
-                            );
-                        }
-                        $flash = 'ok:Tracking number cleared.';
                     }
                 }
             }
@@ -1013,7 +1063,7 @@ $receiptStatuses = ['paid', 'completed', 'captured', 'succeeded'];
           $resolvedCourierLabel = courierLabelFromCode($resolvedCourierCode);
           $resolvedPriority = trim((string)($viewOrder['shippingPriority'] ?? 'standard'));
           $trackingCodeView = trim((string)($viewOrder['trackingCode'] ?? ''));
-          $trackingStatusView = strtolower(trim((string)($viewOrder['status'] ?? '')));
+          $trackingStatusView = normalizeOrderStatusForAdmin((string)($viewOrder['status'] ?? ''));
           $trackingCanBeEdited = in_array($trackingStatusView, ['in_production', 'shipped'], true);
           $shippingLabelText = trim((string)($viewOrder['shippingLabel'] ?? ''));
           if ($shippingLabelText === '') {
@@ -1071,8 +1121,9 @@ $receiptStatuses = ['paid', 'completed', 'captured', 'succeeded'];
                     type="text"
                     name="trackingCode"
                     class="form-input"
-                    placeholder="Enter courier tracking number, or leave blank to clear"
+                    placeholder="Enter courier tracking number"
                     value="<?= htmlspecialchars($trackingCodeView) ?>"
+                    required
                     style="max-width:280px;"
                   >
                   <button type="submit" class="btn-primary btn-sm"><i class="fas fa-save"></i> Save</button>
@@ -1206,8 +1257,10 @@ $receiptStatuses = ['paid', 'completed', 'captured', 'succeeded'];
                 $label = $statusLabels[$o['status']] ?? (string)$o['status'];
                 $paymentStatus = strtolower((string)$o['paymentStatus']);
                 $canGenerateReceipt = in_array($paymentStatus, $receiptStatuses, true);
-                $orderStatus = strtolower(trim((string)$o['status']));
+                $orderStatus = normalizeOrderStatusForAdmin((string)$o['status']);
                 $trackingCodeList = trim((string)($o['trackingCode'] ?? ''));
+                $statusOptionsForOrder = orderStatusSelectOptions($orderStatus, $statusUpdateOptions);
+                $statusCanBeChanged = count(allowedOrderStatusTargets($orderStatus)) > 0;
               ?>
               <tr>
                 <td class="font-600"><?= htmlspecialchars((string)$o['orderNumber']) ?></td>
@@ -1273,16 +1326,15 @@ $receiptStatuses = ['paid', 'completed', 'captured', 'succeeded'];
                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['admin_order_token']) ?>">
                     <input type="hidden" name="action" value="update_status">
                     <input type="hidden" name="orderID" value="<?= (int)$o['orderID'] ?>">
-                    <select name="status" class="form-input" style="width:140px;padding:4px 6px;font-size:12px;">
-                      <?php foreach ($statusUpdateOptions as $val => $lbl): ?>
-                        <?php $isSelected = ($o['status'] === $val) || ($o['status'] === 'accepted' && $val === 'pending'); ?>
-                        <?php $disableManualShipped = ($val === 'shipped' && $orderStatus !== 'shipped'); ?>
-                        <option value="<?= $val ?>" <?= $isSelected ? 'selected' : '' ?> <?= $disableManualShipped ? 'disabled' : '' ?>>
+                    <select name="status" class="form-input" style="width:140px;padding:4px 6px;font-size:12px;" <?= $statusCanBeChanged ? '' : 'disabled' ?>>
+                      <?php foreach ($statusOptionsForOrder as $val => $lbl): ?>
+                        <?php $isSelected = ($orderStatus === $val); ?>
+                        <option value="<?= $val ?>" <?= $isSelected ? 'selected' : '' ?>>
                           <?= htmlspecialchars($lbl) ?>
                         </option>
                       <?php endforeach; ?>
                     </select>
-                    <button type="submit" class="btn-primary btn-sm">
+                    <button type="submit" class="btn-primary btn-sm" <?= $statusCanBeChanged ? '' : 'disabled' ?>>
                       <i class="fas fa-save"></i>
                     </button>
                   </form>
