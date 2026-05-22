@@ -970,72 +970,124 @@ body.account-page .footer {
     outline-offset: 2px;
 }
 
+body.footer-info-open {
+    overflow: hidden;
+}
+
 .footer-info-popup {
-    position: absolute;
-    right: 50%;
-    bottom: calc(100% + 10px);
-    z-index: 20;
-    width: min(300px, calc(100vw - 32px));
-    padding: 16px 40px 16px 16px;
-    border: 1px solid rgba(106, 13, 173, 0.16);
-    border-radius: 8px;
-    background: linear-gradient(180deg, #ffffff 0%, #fcf8ff 100%);
-    box-shadow: 0 18px 45px rgba(34, 16, 57, 0.2);
-    color: var(--text-dark);
-    text-align: left;
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.32);
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
-    transform: translate(50%, 8px) scale(0.96);
-    transform-origin: bottom center;
-    transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
+    transition: opacity 0.22s ease, visibility 0.22s ease;
 }
 
 .footer-info.is-open .footer-info-popup {
     opacity: 1;
     visibility: visible;
     pointer-events: auto;
-    transform: translate(50%, 0) scale(1);
 }
 
-.footer-info-popup::after {
-    content: "";
-    position: absolute;
-    right: 50%;
-    bottom: -7px;
-    width: 12px;
-    height: 12px;
-    border-right: 1px solid rgba(106, 13, 173, 0.16);
-    border-bottom: 1px solid rgba(106, 13, 173, 0.16);
-    background: #fcf8ff;
-    transform: translateX(50%) rotate(45deg);
+.footer-info-dialog {
+    position: relative;
+    width: min(760px, 100%);
+    max-height: min(82vh, 760px);
+    overflow-y: auto;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 18px;
+    background: #ffffff;
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.16);
+    color: var(--text-dark);
+    text-align: left;
+    transform: translateY(18px) scale(0.96);
+    transition: transform 0.22s ease;
 }
 
-.footer-info-popup p {
+.footer-info.is-open .footer-info-dialog {
+    transform: translateY(0) scale(1);
+}
+
+.footer-info-header {
+    padding: 26px 32px 18px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    background: #ffffff;
+    color: var(--text-dark);
+}
+
+.footer-info-title {
     margin: 0;
+    font-size: clamp(24px, 2.4vw, 32px);
+    line-height: 1.2;
+    font-weight: 700;
+}
+
+.footer-info-body {
+    padding: 24px 32px 32px;
+}
+
+.footer-info-body p {
+    margin: 0 0 16px;
     color: var(--text-gray);
-    font-size: 13px;
-    line-height: 1.55;
+    font-size: 18px;
+    line-height: 1.75;
+}
+
+.footer-info-body p strong {
+    color: var(--text-dark);
+}
+
+.footer-info-students {
+    margin: 0 0 20px;
+    padding: 0;
+    list-style: none;
+}
+
+.footer-info-students li {
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(106, 13, 173, 0.1);
+    color: var(--text-dark);
+    font-size: 20px;
+    line-height: 1.5;
+    font-weight: 600;
+}
+
+.footer-info-students li:last-child {
+    border-bottom: 0;
+}
+
+.footer-info-copy {
+    margin-bottom: 0 !important;
+    padding-top: 4px;
+    font-size: 15px !important;
+    color: rgba(51, 51, 51, 0.78) !important;
 }
 
 .footer-info-close {
     position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 24px;
-    height: 24px;
+    top: 18px;
+    right: 20px;
+    width: 36px;
+    height: 36px;
     border: 0;
-    border-radius: 8px;
+    border-radius: 10px;
     background: transparent;
-    color: var(--purple-dark);
-    font-size: 18px;
+    color: var(--text-gray);
+    font-size: 28px;
     line-height: 1;
     cursor: pointer;
     transition: background-color 0.2s, color 0.2s;
 }
 
 .footer-info-close:hover {
-    background: rgba(106, 13, 173, 0.1);
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--text-dark);
 }
 
 .cookie-consent-open,
@@ -1498,21 +1550,41 @@ body.account-page .footer {
     }
 
     .footer-info-popup {
-        position: fixed;
-        right: 16px;
-        bottom: 24px;
-        left: 16px;
-        width: auto;
-        transform: translateY(8px) scale(0.98);
-        transform-origin: bottom center;
+        padding: 16px;
     }
 
-    .footer-info.is-open .footer-info-popup {
-        transform: translateY(0) scale(1);
+    .footer-info-dialog {
+        border-radius: 16px;
+        max-height: 86vh;
     }
 
-    .footer-info-popup::after {
-        display: none;
+    .footer-info-header {
+        padding: 22px 24px 14px;
+    }
+
+    .footer-info-body {
+        padding: 24px;
+    }
+
+    .footer-info-body p {
+        font-size: 16px;
+    }
+
+    .footer-info-students li {
+        font-size: 17px;
+        padding: 9px 0;
+    }
+
+    .footer-info-copy {
+        font-size: 14px !important;
+    }
+
+    .footer-info-close {
+        top: 14px;
+        right: 14px;
+        width: 34px;
+        height: 34px;
+        font-size: 24px;
     }
 
     .cookie-consent-shell {

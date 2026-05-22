@@ -153,14 +153,33 @@ unset($_SESSION['newsletter_flash']);
                     <div class="footer-info-popup"
                          id="footer-info-popup"
                          role="dialog"
-                         aria-modal="false"
-                         aria-hidden="true">
-                        <button type="button"
-                                class="footer-info-close"
-                                aria-label="Close website information">
-                            &times;
-                        </button>
-                        <p>This website was created by students of the Cyprus University of Technology (TEPAK).</p>
+                         aria-modal="true"
+                         aria-hidden="true"
+                         aria-labelledby="footer-info-title"
+                         aria-describedby="footer-info-description">
+                        <div class="footer-info-dialog">
+                            <button type="button"
+                                    class="footer-info-close"
+                                    aria-label="Close website information">
+                                &times;
+                            </button>
+                            <div class="footer-info-header">
+                                <h3 class="footer-info-title" id="footer-info-title">Σχετικά με την Ιστοσελίδα</h3>
+                            </div>
+                            <div class="footer-info-body" id="footer-info-description">
+                                <p>
+                                    Το σύστημα αναπτύχθηκε από τους
+                                    <strong>Σαββας Συμμεου, Ανδρεας Ταπακουδης, Μαριος Μεσαριτης, Ηλιας Σολομωνιδης, Χριστινα Αντωνιου, Χριστιανα Στυλιανου</strong>,
+                                    τριτοετείς φοιτητές του τμήματος Ηλεκτρολόγων Μηχανικών και Μηχανικών Ηλεκτρονικών Υπολογιστών και Πληροφορικής
+                                    του Τεχνολογικού Πανεπιστημίου Κύπρου, υπό την επίβλεψη του Καθηγητή
+                                    <strong>Ανδρέα Σ. Ανδρέου</strong> στα πλαίσια του μαθήματος
+                                    <strong>“Εργασία Τεχνολογίας Λογισμικού και Επαγγελματική Πρακτική”</strong>
+                                    του πτυχίου Μηχανικών Ηλεκτρονικών Υπολογιστών και Πληροφορικής.
+                                </p>
+                                <p><strong>Λεμεσός, Μάιος 2026</strong></p>
+                                <p class="footer-info-copy">Copyright &copy; Cyprus University of Technology</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
