@@ -169,7 +169,7 @@ unset($_SESSION['newsletter_flash']);
                             <div class="footer-info-body" id="footer-info-description">
                                 <p>
                                     Το σύστημα αναπτύχθηκε από τους
-                                    <strong>Σαββας Συμμεου, Ανδρεας Ταπακουδης, Μαριος Μεσαριτης, Ηλιας Σολομωνιδης, Χριστινα Αντωνιου, Χριστιανα Στυλιανου</strong>,
+                                    <strong>Σάββας Συμμεού, Ανδρέας Ταπακούδης, Μάριος Μεσαρίτης, Ηλίας Σολομωνίδης, Χριστίνα Αντωνίου, Χριστιάνα Στυλιανού</strong>,
                                     τριτοετείς φοιτητές του τμήματος Ηλεκτρολόγων Μηχανικών και Μηχανικών Ηλεκτρονικών Υπολογιστών και Πληροφορικής
                                     του Τεχνολογικού Πανεπιστημίου Κύπρου, υπό την επίβλεψη του Καθηγητή
                                     <strong>Ανδρέα Σ. Ανδρέου</strong> στα πλαίσια του μαθήματος
@@ -178,6 +178,11 @@ unset($_SESSION['newsletter_flash']);
                                 </p>
                                 <p><strong>Λεμεσός, Μάιος 2026</strong></p>
                                 <p class="footer-info-copy">Copyright &copy; Cyprus University of Technology</p>
+                                <div class="footer-info-logo-wrap">
+                                    <img src="<?= htmlspecialchars($footerRootPrefix, ENT_QUOTES, 'UTF-8') ?>assets/images/cut_logo%20(1).png"
+                                         alt="Cyprus University of Technology logo"
+                                         class="footer-info-logo">
+                                </div>
                             </div>
                         </div>
                     </div>
