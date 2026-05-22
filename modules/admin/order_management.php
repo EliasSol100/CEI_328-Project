@@ -56,9 +56,6 @@ function allowedOrderStatusTargets(string $currentStatus): array {
     if ($currentStatus === 'pending') {
         return ['in_production', 'cancelled'];
     }
-    if ($currentStatus === 'in_production') {
-        return ['cancelled'];
-    }
     if ($currentStatus === 'shipped') {
         return ['completed'];
     }
@@ -1399,7 +1396,13 @@ document.addEventListener('DOMContentLoaded', function () {
       });
     }
 
-    form.addEventListener('submit', function () {
+    form.addEventListener('submit', function (event) {
+      if (statusSelect && statusSelect.value === 'cancelled') {
+        if (!window.confirm('Are you sure you want to proceed with this choice?')) {
+          event.preventDefault();
+          return;
+        }
+      }
       isSubmitting = true;
       dirtyForms.delete(form);
     });
